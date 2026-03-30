@@ -441,9 +441,8 @@ router.register("products/:id", async (hash, parts) => {
 
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab(this,'tab-releases')">Releases (${releases.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'tab-pipelines')">Pipelines (${pipelines.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-apps')">Applications & Pipelines (${apps.length})</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-envs')">Environments (${envs.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'tab-apps')">Applications (${apps.length})</button>
     </div>
 
     <!-- Releases -->
@@ -468,50 +467,6 @@ router.register("products/:id", async (hash, parts) => {
               </td>
             </tr>`).join("")}
           </tbody></table></div>`
-      }
-    </div>
-
-    <!-- Pipelines -->
-    <div id="tab-pipelines" class="tab-panel">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-        <button class="btn btn-primary btn-sm" onclick="showCreatePipeline('${product.id}')">+ New Pipeline</button>
-      </div>
-      ${pipelines.length === 0
-        ? `<div class="empty-state"><div class="empty-icon">🔧</div><p>No pipelines yet.</p></div>`
-        : (() => {
-            // Group pipelines by application
-            const appMap = {};
-            apps.forEach(a => { appMap[a.id] = a.name; });
-            const grouped = {};
-            pipelines.forEach(pl => {
-              const key = pl.application_id || "__none__";
-              if (!grouped[key]) grouped[key] = [];
-              grouped[key].push(pl);
-            });
-            const pipelineTable = (pls) => `<div class="table-wrap"><table>
-              <thead><tr><th>Name</th><th>Kind</th><th>Compliance</th><th>Branch</th><th>Actions</th></tr></thead>
-              <tbody>${pls.map(pl => `
-                <tr>
-                  <td><a href="#products/${productId}/pipelines/${pl.id}">${pl.name}</a></td>
-                  <td><span class="badge badge-${pl.kind}">${pl.kind.toUpperCase()}</span></td>
-                  <td>${ratingBadge(pl.compliance_rating)}<br><small style="color:var(--gray-400)">${pl.compliance_score||0}%</small></td>
-                  <td><code style="font-size:12px">${pl.git_branch||"main"}</code></td>
-                  <td style="display:flex;gap:6px;flex-wrap:wrap">
-                    <button class="btn btn-secondary btn-sm" onclick="navigate('products/${productId}/pipelines/${pl.id}')">View</button>
-                    <button class="btn btn-secondary btn-sm" onclick="showScoreModal('${productId}','${pl.id}','${pl.name}')">Score</button>
-                    <button class="btn btn-secondary btn-sm" onclick="showEditPipeline('${productId}','${pl.id}','${pl.name.replace(/'/g,"\\'")}','${pl.kind}','${pl.git_repo||""}','${pl.git_branch||"main"}')">Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deletePipeline('${productId}','${pl.id}','${pl.name.replace(/'/g,"\\'")}')">Delete</button>
-                  </td>
-                </tr>`).join("")}
-              </tbody></table></div>`;
-            return Object.entries(grouped).map(([key, pls]) => `
-              <div style="margin-bottom:16px">
-                <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray-500);margin-bottom:6px;padding:4px 8px;background:var(--gray-50);border-radius:4px">
-                  ${key === "__none__" ? "Product-level pipelines" : (appMap[key] || "Unknown application")}
-                </div>
-                ${pipelineTable(pls)}
-              </div>`).join("");
-          })()
       }
     </div>
 
@@ -762,23 +717,32 @@ async function deleteApp(productId, appId, name) {
 
 async function showCreatePipeline(productId) {
   const apps = await api.getApplications(productId).catch(() => []);
+  if (!apps.length) {
+    return openModal("No Applications",
+      `<p>Create an application first — pipelines must belong to an application.</p>`,
+      () => { closeModal(); navigate(`products/${productId}`); document.querySelector('[onclick*="tab-apps"]')?.click(); },
+      "Go to Applications"
+    );
+  }
   openModal("New Pipeline",
-    `<div class="form-group"><label>Name *</label><input id="plf-name" class="form-control" placeholder="e.g. API CI Pipeline"></div>
-     <div class="form-group"><label>Application</label>
+    `<div class="form-group"><label>Application *</label>
        <select id="plf-app" class="form-control">
-         <option value="">— None (product-level) —</option>
+         <option value="">— Select application —</option>
          ${apps.map(a => `<option value="${a.id}">${a.name}</option>`).join("")}
        </select></div>
+     <div class="form-group"><label>Name *</label><input id="plf-name" class="form-control" placeholder="e.g. API CI Pipeline"></div>
      <div class="form-group"><label>Kind</label><select id="plf-kind" class="form-control"><option value="ci">CI</option><option value="cd">CD</option></select></div>
      <div class="form-group"><label>Git Repository</label><input id="plf-repo" class="form-control" placeholder="git@github.com:org/repo.git"></div>
      <div class="form-group"><label>Branch</label><input id="plf-branch" class="form-control" value="main"></div>`,
     async () => {
       const name = el("plf-name").value.trim();
+      const appId = el("plf-app").value;
       if (!name) return modalError("Name is required");
+      if (!appId) return modalError("Application is required");
       try {
         await api.createPipeline(productId, {
           name,
-          application_id: el("plf-app").value || null,
+          application_id: appId,
           kind: el("plf-kind").value,
           git_repo: el("plf-repo").value.trim() || null,
           git_branch: el("plf-branch").value.trim() || "main",
@@ -937,7 +901,7 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
   const stagesHtml = stages.length === 0
     ? `<div class="empty-state"><div class="empty-icon">📋</div><p>No stages yet. Add your first stage to get started.</p></div>`
     : stages.map(s => `
-      <div id="stage-block-${s.id}" class="stage-block" draggable="true"
+      <div id="stage-block-${s.id}" class="stage-block" data-stage-name="${s.name.replace(/"/g,"&quot;")}" draggable="true"
         ondragstart="stageDragStart(event,'${s.id}')"
         ondragover="stageDragOver(event)"
         ondrop="stageDrop(event,'${s.id}','${productId}','${pipelineId}')"
@@ -962,7 +926,7 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
             : `<table style="margin:0;width:100%">
               <thead><tr><th style="width:28px"></th><th>#</th><th>Name</th><th>Type</th><th>Timeout</th><th>Required</th><th>Actions</th></tr></thead>
               <tbody id="task-tbody-${s.id}">${(s.tasks||[]).map(t => `
-                <tr id="task-row-${t.id}" draggable="true"
+                <tr id="task-row-${t.id}" data-task-name="${t.name.replace(/"/g,"&quot;")}" draggable="true"
                   ondragstart="taskDragStart(event,'${t.id}','${s.id}')"
                   ondragover="taskDragOver(event)"
                   ondrop="taskDrop(event,'${t.id}','${s.id}','${productId}','${pipelineId}')">
@@ -1391,16 +1355,23 @@ function showCreateRun(pipelineId, productId) {
   openModal("Run Pipeline",
     `<div class="form-group"><label>Commit SHA</label><input id="run-sha" class="form-control" placeholder="e.g. abc123def456"></div>
      <div class="form-group"><label>Artifact ID</label><input id="run-art" class="form-control" placeholder="e.g. api:1.0.45"></div>
-     <div class="form-group"><label>Triggered By</label><input id="run-by" class="form-control" placeholder="username" value="user"></div>`,
+     <div class="form-group"><label>Triggered By</label><input id="run-by" class="form-control" placeholder="username" value="user"></div>
+     <div class="form-group">
+       <label>Pipeline Runtime Properties <small style="color:var(--gray-400)">(JSON — accessible as pipelineRuntime.* in tasks)</small></label>
+       <textarea id="run-props" class="form-control" rows="4" style="font-family:monospace;font-size:12px" placeholder='{"version":"1.0","env":"staging"}'>{}</textarea>
+     </div>`,
     async () => {
+      let props = {};
+      try { props = JSON.parse(el("run-props").value || "{}"); } catch { return modalError("Runtime Properties must be valid JSON"); }
       try {
         const run = await api.createPipelineRun(pipelineId, {
           commit_sha: el("run-sha").value.trim()||null,
           artifact_id: el("run-art").value.trim()||null,
           triggered_by: el("run-by").value.trim()||"user",
+          runtime_properties: props,
         });
         closeModal(); toast(`Run created: ${run.id}`, "success");
-        navigate(`products/${productId}/pipelines/${pipelineId}`);
+        navigate(`pipeline-runs/${run.id}`);
       } catch (e) { modalError(e.message); }
     },
     "Start Run"
@@ -3146,7 +3117,46 @@ function renderPipelineVisual(pipelineId, svgId) {
 }
 
 // ── Visual graph navigation helpers ──────────────────────────────────────────
+function _isYamlModeActive() {
+  const m = document.getElementById("pl-yaml-mode");
+  return m && m.style.display !== "none";
+}
+
+function _yamlScrollToPattern(pattern) {
+  const ta = document.getElementById("pipeline-yaml-editor");
+  if (!ta) return;
+  const lines = ta.value.split("\n");
+  let matchLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(pattern)) { matchLine = i; break; }
+  }
+  if (matchLine === -1) return;
+
+  // Compute character offset to that line
+  let offset = 0;
+  for (let i = 0; i < matchLine; i++) offset += lines[i].length + 1;
+  const end = offset + lines[matchLine].length;
+
+  // Select and scroll to the line
+  ta.focus();
+  ta.setSelectionRange(offset, end);
+
+  // Scroll the textarea so the matched line is visible
+  const lineH = parseFloat(getComputedStyle(ta).lineHeight) || 18;
+  ta.scrollTop = Math.max(0, (matchLine - 3) * lineH);
+
+  // Flash the textarea border to draw attention
+  ta.style.outline = "2px solid var(--brand)";
+  setTimeout(() => { ta.style.outline = ""; }, 1500);
+}
+
 function visualScrollToStage(stageId) {
+  if (_isYamlModeActive()) {
+    const block = document.getElementById("stage-block-" + stageId);
+    const stageName = block ? block.dataset.stageName : stageId;
+    _yamlScrollToPattern(`name: ${stageName}`);
+    return;
+  }
   const el = document.getElementById("stage-block-" + stageId);
   if (!el) return;
   // Expand if collapsed
@@ -3162,6 +3172,12 @@ function visualScrollToStage(stageId) {
 }
 
 function visualScrollToTask(taskId, stageId) {
+  if (_isYamlModeActive()) {
+    const row = document.getElementById("task-row-" + taskId);
+    const taskName = row ? row.dataset.taskName : taskId;
+    _yamlScrollToPattern(`name: ${taskName}`);
+    return;
+  }
   // Expand stage first
   visualScrollToStage(stageId);
   setTimeout(() => {
@@ -3393,22 +3409,37 @@ function _renderPipelineRun(run, productId, pipelineId) {
     ? `<svg width="${totalW}" height="${totalH}" style="display:block">${svgEls.join("")}</svg>`
     : `<p style="color:var(--gray-400);padding:16px">No stages to display.</p>`;
 
+  // ── Runtime properties panel helper ──────────────────────────────────
+  function _propsPanel(id, props) {
+    const isEmpty = !props || Object.keys(props).length === 0;
+    const json = isEmpty ? "{}" : JSON.stringify(props, null, 2);
+    return `<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px" onclick="toggleLog('rtprop-${id}')">{ } Properties</button>
+      <div id="rtprop-${id}" class="task-log-block">
+        <pre style="background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:8px;font-size:12px;margin:6px 0 0;max-height:180px;overflow:auto">${json}</pre>
+      </div>`;
+  }
+
   // ── Stage detail cards ────────────────────────────────────────────────
   const stageDetails = stageRuns.map(sr => {
+    const srProps = sr.runtime_properties || {};
     const taskRows = (sr.task_runs || []).map(tr => {
       const tc = _statusColor(tr.status);
+      let outProps = {};
+      if (tr.output_json) { try { outProps = JSON.parse(tr.output_json); } catch {} }
       return `
         <div class="task-run-row" style="border-left:3px solid ${tc}">
-          <span class="task-run-name">${tr.task_name || tr.task_id}</span>
-          ${statusBadge(tr.status)}
-          <span class="task-run-duration">${fmtDuration(tr.started_at, tr.finished_at)}</span>
-          ${tr.return_code !== null && tr.return_code !== undefined
-            ? `<code style="font-size:11px;color:var(--gray-400)">exit ${tr.return_code}</code>`
-            : ""}
-          <button class="task-log-toggle" onclick="toggleLog('log-${tr.id}')">Logs</button>
+          <div style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap">
+            <span class="task-run-name">${tr.task_name || tr.task_id}</span>
+            ${statusBadge(tr.status)}
+            <span class="task-run-duration">${fmtDuration(tr.started_at, tr.finished_at)}</span>
+            ${tr.return_code !== null && tr.return_code !== undefined
+              ? `<code style="font-size:11px;color:var(--gray-400)">exit ${tr.return_code}</code>`
+              : ""}
+            ${_propsPanel(tr.id + "-out", outProps)}
+            <button class="task-log-toggle" onclick="toggleLog('log-${tr.id}')">Logs</button>
+          </div>
           <div id="log-${tr.id}" class="task-log-block">
             <div class="log-viewer"><pre style="margin:0;white-space:pre-wrap;font-size:12px">${tr.logs ? tr.logs.replace(/</g,"&lt;").replace(/>/g,"&gt;") : "(no logs)"}</pre></div>
-            ${tr.output_json ? `<div style="margin-top:8px"><strong style="font-size:12px">Output JSON</strong><pre style="background:var(--gray-100);padding:8px;border-radius:6px;font-size:12px;margin-top:4px">${tr.output_json}</pre></div>` : ""}
           </div>
         </div>`;
     }).join("");
@@ -3422,6 +3453,7 @@ function _renderPipelineRun(run, productId, pipelineId) {
           <div style="display:flex;align-items:center;gap:10px">
             ${statusBadge(sr.status)}
             <span style="font-size:12px;color:var(--gray-400)">${fmtDuration(sr.started_at, sr.finished_at)}</span>
+            ${_propsPanel(sr.id + "-rt", srProps)}
           </div>
         </div>
         ${(sr.task_runs||[]).length === 0
@@ -3432,6 +3464,7 @@ function _renderPipelineRun(run, productId, pipelineId) {
 
   const runColor = _statusColor(run.status);
   const ctxTabs = productId && pipelineId ? pipelineContextTabs(productId, pipelineId, "runs") : "";
+  const pipelineProps = run.runtime_properties || {};
 
   return `
     <div class="page-header">
@@ -3444,6 +3477,7 @@ function _renderPipelineRun(run, productId, pipelineId) {
         ${statusBadge(run.status)}
         <span style="font-size:13px;color:var(--gray-400)">by ${run.triggered_by||"system"} · ${fmtDate(run.started_at)}</span>
         ${run.finished_at ? `<span style="font-size:13px;color:var(--gray-400)">· ${fmtDuration(run.started_at, run.finished_at)} total</span>` : ""}
+        ${_propsPanel(run.id + "-rt", pipelineProps)}
       </div>
     </div>
 

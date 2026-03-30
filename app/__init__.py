@@ -24,8 +24,9 @@ def create_app(config=None) -> Flask:
     """
     app = Flask(__name__)
 
-    if config:
-        app.config.from_object(config)
+    from app.config import Config
+
+    app.config.from_object(config or Config)
 
     db.init_app(app)
     migrate.init_app(app, db)

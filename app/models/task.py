@@ -64,6 +64,7 @@ class TaskRun(db.Model):
     return_code = db.Column(db.Integer)
     logs = db.Column(db.Text, default="")
     output_json = db.Column(db.Text)  # JSON string captured from last stdout line
+    user_input = db.Column(db.Text)  # JSON string — user-supplied input passed as taskRuntime.input
     agent_pool_id = db.Column(db.String(64), db.ForeignKey("agent_pools.id"), nullable=True)
     started_at = db.Column(db.DateTime, default=lambda: datetime.now(UTC))
     finished_at = db.Column(db.DateTime)

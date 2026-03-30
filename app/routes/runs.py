@@ -49,6 +49,7 @@ def create_pipeline_run(pipeline_id: str):
         commit_sha=data.get("commit_sha"),
         artifact_id=data.get("artifact_id"),
         triggered_by=data.get("triggered_by", "system"),
+        runtime_properties=data.get("runtime_properties"),
         app=current_app._get_current_object(),
     )
     return jsonify(run.to_dict()), 202

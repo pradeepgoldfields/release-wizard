@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import UTC, datetime
 from typing import Any
@@ -39,6 +40,7 @@ def start_pipeline_run(
     commit_sha: str | None = None,
     artifact_id: str | None = None,
     triggered_by: str = "system",
+    runtime_properties: dict | None = None,
     app: Any = None,
 ) -> PipelineRun:
     """Create a PipelineRun, seed StageRun/TaskRun records, kick off async execution."""
@@ -53,6 +55,7 @@ def start_pipeline_run(
         compliance_rating=pipeline.compliance_rating,
         compliance_score=pipeline.compliance_score,
         triggered_by=triggered_by,
+        runtime_properties=json.dumps(runtime_properties or {}),
         started_at=datetime.now(UTC),
     )
     db.session.add(run)
@@ -64,6 +67,7 @@ def start_pipeline_run(
             pipeline_run_id=run.id,
             stage_id=stage.id,
             status=RunStatus.PENDING,
+            runtime_properties="{}",
         )
         db.session.add(sr)
         db.session.flush()  # get sr.id before adding task runs
@@ -102,6 +106,35 @@ def start_pipeline_run(
     return run
 
 
+def _build_runtime_context(run: PipelineRun) -> dict:
+    """Build the full pipelineRuntime context dict for injection into task scripts."""
+    pipeline_rt = json.loads(run.runtime_properties or "{}")
+    stage_runtime: dict = {}
+
+    for sr in run.stage_runs:
+        stage_name = sr.stage.name if sr.stage else sr.stage_id
+        sr_props = json.loads(sr.runtime_properties or "{}")
+        task_runtime: dict = {}
+        for tr in sr.task_runs:
+            task_name = tr.task.name if tr.task else tr.task_id
+            task_out = {}
+            if tr.output_json:
+                try:
+                    task_out = json.loads(tr.output_json)
+                except (ValueError, TypeError):
+                    task_out = {}
+            user_inp = {}
+            if tr.user_input:
+                try:
+                    user_inp = json.loads(tr.user_input)
+                except (ValueError, TypeError):
+                    user_inp = {}
+            task_runtime[task_name] = {**task_out, "input": user_inp}
+        stage_runtime[stage_name] = {**sr_props, "taskRuntime": task_runtime}
+
+    return {**pipeline_rt, "stageRuntime": stage_runtime}
+
+
 def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
     """Background thread: execute all stages and tasks in order."""
 
@@ -116,7 +149,7 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
         stage_runs = sorted(run.stage_runs, key=lambda sr: sr.stage.order)
         pipeline_warning = False
 
-        # Build context env vars accessible as $RW_* in all task scripts
+        # Build base context env vars accessible as $RW_* in all task scripts
         pipeline = run.pipeline
         context_env: dict[str, str] = {
             "RW_PIPELINE_RUN_ID": run.id,
@@ -148,11 +181,23 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
                 tr.started_at = _now()
                 db.session.commit()
 
+                # Build full runtime context from accumulated outputs so far
+                runtime_ctx = _build_runtime_context(run)
+                user_input = {}
+                if tr.user_input:
+                    try:
+                        user_input = json.loads(tr.user_input)
+                    except (ValueError, TypeError):
+                        user_input = {}
+
                 task_env = {
                     **context_env,
                     "RW_TASK_RUN_ID": tr.id,
                     "RW_TASK_ID": task.id,
                     "RW_TASK_NAME": task.name,
+                    # Full runtime context as JSON string
+                    "RW_RUNTIME": json.dumps(runtime_ctx),
+                    "RW_USER_INPUT": json.dumps(user_input),
                 }
 
                 if _in_kubernetes():

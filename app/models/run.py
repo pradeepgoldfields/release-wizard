@@ -22,6 +22,7 @@ class StageRun(db.Model):
     finished_at = db.Column(db.DateTime)
     logs_ref = db.Column(db.String(512))
     exit_code = db.Column(db.Integer)
+    runtime_properties = db.Column(db.Text, default="{}")  # JSON — stage-level properties
 
     pipeline_run = db.relationship("PipelineRun", back_populates="stage_runs")
     stage = db.relationship("Stage", foreign_keys=[stage_id], lazy="joined")
@@ -37,6 +38,8 @@ class StageRun(db.Model):
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-safe dictionary."""
+        import json as _json
+
         return {
             "id": self.id,
             "pipeline_run_id": self.pipeline_run_id,
@@ -47,6 +50,7 @@ class StageRun(db.Model):
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "logs_ref": self.logs_ref,
             "exit_code": self.exit_code,
+            "runtime_properties": _json.loads(self.runtime_properties or "{}"),
             "task_runs": [
                 {
                     "id": tr.id,
@@ -78,6 +82,7 @@ class PipelineRun(db.Model):
     compliance_rating = db.Column(db.String(32))
     compliance_score = db.Column(db.Float)
     triggered_by = db.Column(db.String(128))
+    runtime_properties = db.Column(db.Text, default="{}")  # JSON — pipeline-level properties
     started_at = db.Column(db.DateTime, default=lambda: datetime.now(UTC))
     finished_at = db.Column(db.DateTime)
 
@@ -92,6 +97,8 @@ class PipelineRun(db.Model):
 
     def to_dict(self, include_stages: bool = False) -> dict[str, Any]:
         """Serialise to a JSON-safe dictionary."""
+        import json as _json
+
         data: dict[str, Any] = {
             "id": self.id,
             "pipeline_id": self.pipeline_id,
@@ -103,6 +110,7 @@ class PipelineRun(db.Model):
             "compliance_rating": self.compliance_rating,
             "compliance_score": self.compliance_score,
             "triggered_by": self.triggered_by,
+            "runtime_properties": _json.loads(self.runtime_properties or "{}"),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
         }
