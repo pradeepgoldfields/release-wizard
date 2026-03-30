@@ -1,0 +1,28 @@
+# Development environment overrides
+# Usage: helm upgrade --install release-wizard ./helm/release-wizard -f helm/release-wizard/values-dev.yaml
+
+image:
+  tag: "latest"
+  pullPolicy: Always
+
+replicaCount: 1
+
+config:
+  logLevel: DEBUG
+  flaskEnv: development
+
+hpa:
+  enabled: false
+
+ingress:
+  host: release-wizard.dev.example.com
+  tls:
+    enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi

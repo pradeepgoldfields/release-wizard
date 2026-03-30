@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Audit Report — {{ report.release.name }}</title>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 11pt; color: #222; margin: 2cm; }
+    h1 { color: #1a3a5c; border-bottom: 2px solid #1a3a5c; padding-bottom: 6px; }
+    h2 { color: #1a3a5c; margin-top: 24px; font-size: 13pt; }
+    h3 { color: #444; font-size: 11pt; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 10pt; }
+    th { background: #1a3a5c; color: white; padding: 6px 8px; text-align: left; }
+    td { padding: 5px 8px; border-bottom: 1px solid #ddd; }
+    tr:nth-child(even) td { background: #f4f6f9; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-weight: bold; font-size: 10pt; }
+    .Platinum { background: #e8f0fe; color: #1a3a5c; }
+    .Gold { background: #fef9e7; color: #8a6700; }
+    .Silver { background: #f0f0f0; color: #555; }
+    .Bronze { background: #fdf0e0; color: #8a4000; }
+    .Non-Compliant { background: #fdecea; color: #c0392b; }
+    .meta { color: #666; font-size: 9pt; margin-bottom: 4px; }
+    .section { margin-top: 20px; }
+    .footer { margin-top: 40px; font-size: 9pt; color: #999; border-top: 1px solid #ddd; padding-top: 8px; }
+  </style>
+</head>
+<body>
+
+  <h1>Release Audit Report</h1>
+
+  <div class="section">
+    <h2>1. Release Summary</h2>
+    <table>
+      <tr><th>Field</th><th>Value</th></tr>
+      <tr><td>Release ID</td><td>{{ report.release.id }}</td></tr>
+      <tr><td>Name</td><td>{{ report.release.name }}</td></tr>
+      <tr><td>Version</td><td>{{ report.release.version or "—" }}</td></tr>
+      <tr><td>Product</td><td>{{ report.product_id }}</td></tr>
+      <tr><td>Created By</td><td>{{ report.release.created_by or "—" }}</td></tr>
+      <tr><td>Created At</td><td>{{ report.release.created_at }}</td></tr>
+      <tr><td>Definition SHA</td><td>{{ report.release.definition_sha or "—" }}</td></tr>
+      <tr><td>Protected Segment Version</td><td>{{ report.release.protected_segment_version }}</td></tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>2. Pipelines</h2>
+    {% for pl in report.pipelines %}
+    <h3>{{ pl.name }} <span class="badge {{ pl.compliance_rating }}">{{ pl.compliance_rating }} ({{ pl.compliance_score }}%)</span></h3>
+    <table>
+      <tr><th>Field</th><th>Value</th></tr>
+      <tr><td>ID</td><td>{{ pl.id }}</td></tr>
+      <tr><td>Kind</td><td>{{ pl.kind }}</td></tr>
+      <tr><td>Definition SHA</td><td>{{ pl.definition_sha or "—" }}</td></tr>
+    </table>
+    {% if pl.stages %}
+    <table>
+      <tr><th>Stage</th><th>Order</th><th>Container</th><th>Protected</th></tr>
+      {% for s in pl.stages %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td>{{ s.order }}</td>
+        <td>{{ s.container_image or s.run_language or "—" }}</td>
+        <td>{{ "Yes" if s.is_protected else "No" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="section">
+    <h2>3. Release Runs</h2>
+    {% if report.runs %}
+    <table>
+      <tr><th>Run ID</th><th>Status</th><th>Rating</th><th>Started</th><th>Finished</th><th>Triggered By</th></tr>
+      {% for run in report.runs %}
+      <tr>
+        <td>{{ run.id }}</td>
+        <td>{{ run.status }}</td>
+        <td>{{ run.compliance_rating or "—" }}</td>
+        <td>{{ run.started_at or "—" }}</td>
+        <td>{{ run.finished_at or "—" }}</td>
+        <td>{{ run.triggered_by or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p>No runs recorded yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="section">
+    <h2>4. Audit Events</h2>
+    {% if report.audit_events %}
+    <table>
+      <tr><th>Timestamp</th><th>Event</th><th>Actor</th><th>Decision</th></tr>
+      {% for event in report.audit_events %}
+      <tr>
+        <td>{{ event.timestamp }}</td>
+        <td>{{ event.event_type }}</td>
+        <td>{{ event.actor or "—" }}</td>
+        <td>{{ event.decision }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p>No audit events recorded.</p>
+    {% endif %}
+  </div>
+
+  <div class="footer">
+    Generated at {{ report.generated_at }} &bull; Release Wizard &bull; This report is an automated compliance artifact.
+  </div>
+
+</body>
+</html>

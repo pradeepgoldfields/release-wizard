@@ -1,0 +1,7 @@
+# Ignore files that should not be packaged into the chart archive
+.git/
+.gitignore
+*.swp
+*.bak
+values-*.yaml
+!values.yaml

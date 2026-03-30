@@ -1,0 +1,39 @@
+# Production environment overrides
+# Usage: helm upgrade --install release-wizard ./helm/release-wizard \
+#          -f helm/release-wizard/values-prod.yaml \
+#          --set image.tag=1.2.3 \
+#          --set existingSecret=release-wizard-prod-secret
+
+image:
+  pullPolicy: IfNotPresent
+
+replicaCount: 3
+
+config:
+  logLevel: WARNING
+  flaskEnv: production
+
+hpa:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 65
+  targetMemoryUtilizationPercentage: 75
+
+ingress:
+  host: release-wizard.example.com
+  tls:
+    enabled: true
+    secretName: release-wizard-tls
+
+# In production, supply a pre-created Secret (Vault, Sealed Secrets, etc.)
+# and set existingSecret to its name. The 'secrets' block is then ignored.
+existingSecret: "release-wizard-prod-secret"
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi

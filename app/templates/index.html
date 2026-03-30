@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Release Wizard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+
+<div id="layout">
+
+  <!-- ── Sidebar ───────────────────────────────────────────────────────── -->
+  <aside id="sidebar">
+    <div class="logo">Release <span>Wizard</span></div>
+    <nav>
+      <a href="#dashboard" onclick="navigate('dashboard');return false;">
+        <span class="icon">⬛</span> Dashboard
+      </a>
+      <a href="#products" onclick="navigate('products');return false;">
+        <span class="icon">📦</span> Products
+      </a>
+      <a href="#environments" onclick="navigate('environments');return false;">
+        <span class="icon">🌍</span> Environments
+      </a>
+      <a href="#compliance" onclick="navigate('compliance');return false;">
+        <span class="icon">🛡</span> Compliance
+      </a>
+      <a href="#agents" onclick="navigate('agents');return false;">
+        <span class="icon">⚙️</span> Agents
+      </a>
+      <a href="#plugins" onclick="navigate('plugins');return false;">
+        <span class="icon">🔌</span> Plugins
+      </a>
+      <a href="#vault" onclick="navigate('vault');return false;">
+        <span class="icon">🔐</span> Vault
+      </a>
+      <a href="#webhooks" onclick="navigate('webhooks');return false;">
+        <span class="icon">🔗</span> Webhooks
+      </a>
+      <a href="#admin" onclick="navigate('admin');return false;">
+        <span class="icon">👥</span> Administration
+      </a>
+      <a href="#docs" onclick="navigate('docs');return false;">
+        <span class="icon">📖</span> Docs
+      </a>
+    </nav>
+    <div class="sidebar-footer">Release Wizard v0.1.0</div>
+  </aside>
+
+  <!-- ── Main ──────────────────────────────────────────────────────────── -->
+  <div id="main">
+    <header id="topbar">
+      <div class="breadcrumb" id="breadcrumb"></div>
+    </header>
+    <main id="content">
+      <div class="loading-center"><div class="spinner"></div></div>
+    </main>
+  </div>
+
+</div>
+
+<!-- ── Modal ─────────────────────────────────────────────────────────────── -->
+<div id="modal-overlay" class="modal-overlay">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-header">
+      <h3 id="modal-title">Dialog</h3>
+      <button id="modal-close-btn" class="btn-close" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer">
+      <button id="modal-cancel" class="btn btn-secondary">Cancel</button>
+      <button id="modal-confirm" class="btn btn-primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast container ───────────────────────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

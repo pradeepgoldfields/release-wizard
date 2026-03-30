@@ -1,0 +1,17 @@
+Flask==3.1.0
+flask-swagger-ui==4.11.1
+Flask-SQLAlchemy==3.1.1
+Flask-Migrate==4.0.7
+gunicorn==23.0.0
+python-ulid==3.0.0
+PyYAML==6.0.2
+marshmallow==3.23.2
+ldap3==2.9.1
+PyJWT==2.10.1
+bcrypt==4.3.0
+WeasyPrint==65.0
+Jinja2==3.1.5
+requests==2.32.3
+redis==5.2.1
+gitpython==3.1.44
+kubernetes==32.0.1

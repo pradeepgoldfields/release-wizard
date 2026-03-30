@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: release-wizard
+  labels:
+    app: release-wizard
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: release-wizard
+  template:
+    metadata:
+      labels:
+        app: release-wizard
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+      - name: release-wizard
+        image: your-registry.example.com/release-wizard:latest   # replaced by CI
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: release-wizard-config
+        env:
+        - name: LOG_LEVEL
+          value: "INFO"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true

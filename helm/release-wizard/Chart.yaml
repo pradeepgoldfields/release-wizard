@@ -1,0 +1,15 @@
+apiVersion: v2
+name: release-wizard
+description: Enterprise CI/CD orchestration platform — Products → Releases → Pipelines → Stages.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - release-management
+  - ci-cd
+  - compliance
+home: https://github.com/your-org/release-wizard
+sources:
+  - https://github.com/your-org/release-wizard
+maintainers:
+  - name: platform-team

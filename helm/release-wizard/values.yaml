@@ -1,0 +1,194 @@
+# =============================================================================
+# Release Wizard — Helm Chart Values
+# =============================================================================
+# Override any value with:
+#   helm install release-wizard ./helm/release-wizard -f my-values.yaml
+#   helm install release-wizard ./helm/release-wizard --set image.tag=1.2.3
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Image
+# -----------------------------------------------------------------------------
+image:
+  repository: registry.example.com/release-wizard
+  tag: "latest"
+  # "Always" forces a re-pull on every pod restart; use "IfNotPresent" for
+  # pinned tags in production.
+  pullPolicy: Always
+  pullSecrets: []
+  # pullSecrets:
+  #   - name: my-registry-secret
+
+# -----------------------------------------------------------------------------
+# Replica count and update strategy
+# -----------------------------------------------------------------------------
+replicaCount: 2
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# -----------------------------------------------------------------------------
+# Application configuration (non-sensitive, injected via ConfigMap)
+# -----------------------------------------------------------------------------
+config:
+  port: 8080
+  host: "0.0.0.0"
+  logLevel: INFO
+  flaskEnv: production
+
+# -----------------------------------------------------------------------------
+# Secrets
+#
+# Option A — let the chart create the Secret (for dev / non-GitOps workflows):
+#   Set existingSecret: "" and populate the 'secrets' block.
+#   WARNING: values end up in Helm release history. Prefer Option B for prod.
+#
+# Option B — supply a pre-created Secret (recommended for production):
+#   Create the Secret out-of-band (Vault, Sealed Secrets, External Secrets…)
+#   then set existingSecret to its name. The 'secrets' block is ignored.
+# -----------------------------------------------------------------------------
+existingSecret: ""   # name of a pre-existing Kubernetes Secret, or "" to create one
+
+secrets:
+  databaseUrl: "sqlite:///instance/release_wizard.db"   # override for PostgreSQL
+  secretKey: "change-me-in-production"
+  jwtSecretKey: "change-me-in-production"
+
+# -----------------------------------------------------------------------------
+# Service
+# -----------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  annotations: {}
+
+# -----------------------------------------------------------------------------
+# Ingress
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  host: release-wizard.example.com
+  path: /
+  pathType: Prefix
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  tls:
+    enabled: true
+    secretName: release-wizard-tls
+
+# -----------------------------------------------------------------------------
+# HorizontalPodAutoscaler
+# -----------------------------------------------------------------------------
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# -----------------------------------------------------------------------------
+# Resource requests and limits
+# -----------------------------------------------------------------------------
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# -----------------------------------------------------------------------------
+# Pod security
+# -----------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -----------------------------------------------------------------------------
+# Probes
+# -----------------------------------------------------------------------------
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 15
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
+# -----------------------------------------------------------------------------
+# ServiceAccount
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""          # auto-generated from release name when empty
+  annotations: {}
+  automountToken: false
+
+# -----------------------------------------------------------------------------
+# Pod scheduling
+# -----------------------------------------------------------------------------
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  # Spread pods across nodes to survive a single-node failure
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels: {}   # filled in by _helpers.tpl at render time
+          topologyKey: kubernetes.io/hostname
+
+# -----------------------------------------------------------------------------
+# Extra pod annotations and labels (merged with chart-managed ones)
+# -----------------------------------------------------------------------------
+podAnnotations: {}
+podLabels: {}
+
+# -----------------------------------------------------------------------------
+# Extra environment variables injected directly into the container
+# Useful for feature flags or third-party integrations.
+# -----------------------------------------------------------------------------
+extraEnv: []
+# extraEnv:
+#   - name: SOME_FLAG
+#     value: "true"
+#   - name: SECRET_FROM_VAULT
+#     valueFrom:
+#       secretKeyRef:
+#         name: vault-secret
+#         key: token
+
+# -----------------------------------------------------------------------------
+# Extra volumes and mounts (e.g. for mounting a CA bundle or TLS cert)
+# -----------------------------------------------------------------------------
+extraVolumes: []
+extraVolumeMounts: []
+
+# -----------------------------------------------------------------------------
+# Namespace override — leave empty to use the Helm release namespace
+# -----------------------------------------------------------------------------
+namespaceOverride: ""

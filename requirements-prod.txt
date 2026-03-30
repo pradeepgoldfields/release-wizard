@@ -1,0 +1,3 @@
+# Runtime deps for the UBI container (PostgreSQL driver built inside Linux)
+-r requirements.txt
+psycopg2-binary==2.9.10
