@@ -107,6 +107,11 @@ const api = {
   detachPipeline: (pid, rid, plid) => request("DELETE", `/products/${pid}/releases/${rid}/pipelines/${plid}`),
   getAuditReport: (pid, rid) => request("GET", `/products/${pid}/releases/${rid}/audit`),
 
+  // Release application groups
+  getReleaseAppGroups: (pid, rid) => request("GET", `/products/${pid}/releases/${rid}/application-groups`),
+  addReleaseAppGroup: (pid, rid, data) => request("POST", `/products/${pid}/releases/${rid}/application-groups`, data),
+  removeReleaseAppGroup: (pid, rid, gid) => request("DELETE", `/products/${pid}/releases/${rid}/application-groups/${gid}`),
+
   // Release runs
   getReleaseRuns: (rid) => request("GET", `/releases/${rid}/runs`),
   createReleaseRun: (rid, data) => request("POST", `/releases/${rid}/runs`, data),

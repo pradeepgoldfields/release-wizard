@@ -112,6 +112,7 @@ def create_release_run(release_id: str):
     run = start_release_run(
         release_id=release_id,
         triggered_by=data.get("triggered_by", "system"),
+        app=current_app._get_current_object(),
     )
     return jsonify(run.to_dict()), 201
 

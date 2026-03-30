@@ -274,13 +274,14 @@ def update_run_status(run: PipelineRun | ReleaseRun, new_status: str) -> Pipelin
 def start_release_run(
     release_id: str,
     triggered_by: str = "system",
+    app: Any = None,
 ) -> ReleaseRun:
-    """Create and persist a new ReleaseRun for the given release."""
-    db.get_or_404(Release, release_id)
+    """Create a ReleaseRun and execute its application group pipelines."""
+    release = db.get_or_404(Release, release_id)
     run = ReleaseRun(
         id=release_run_id(),
         release_id=release_id,
-        status=RunStatus.PENDING,
+        status=RunStatus.RUNNING,
         triggered_by=triggered_by,
     )
     db.session.add(run)
@@ -293,4 +294,83 @@ def start_release_run(
         "create",
         detail={"release_id": release_id},
     )
+
+    groups = sorted(release.application_groups, key=lambda g: g.order)
+    if app and groups:
+        thread = threading.Thread(
+            target=_execute_release_async,
+            args=(app, run.id, triggered_by),
+            daemon=True,
+        )
+        thread.start()
+    elif not groups:
+        run.status = RunStatus.SUCCEEDED
+        run.finished_at = datetime.now(UTC)
+        db.session.commit()
+
     return run
+
+
+def _execute_release_async(app: Any, rrun_id: str, triggered_by: str) -> None:
+    """Execute release application groups sequentially; pipelines within each group
+    run in parallel or sequentially based on the group's execution_mode."""
+    with app.app_context():
+        from app.models.release import ReleaseRun as _RR
+
+        rrun = db.session.get(_RR, rrun_id)
+        if not rrun:
+            return
+
+        release = rrun.release
+        groups = sorted(release.application_groups, key=lambda g: g.order)
+
+        for group in groups:
+            pipeline_ids = json.loads(group.pipeline_ids or "[]")
+            if not pipeline_ids:
+                continue
+
+            if group.execution_mode == "parallel":
+                # Start all pipelines in the group simultaneously
+                pipeline_runs = []
+                for pid in pipeline_ids:
+                    pr = start_pipeline_run(
+                        pipeline_id=pid,
+                        triggered_by=triggered_by,
+                        app=app,
+                    )
+                    pr.release_run_id = rrun.id
+                    db.session.commit()
+                    pipeline_runs.append(pr)
+                # Poll until all complete
+                _wait_for_pipeline_runs(app, [pr.id for pr in pipeline_runs])
+            else:
+                # Sequential: run each pipeline one at a time
+                for pid in pipeline_ids:
+                    pr = start_pipeline_run(
+                        pipeline_id=pid,
+                        triggered_by=triggered_by,
+                        app=app,
+                    )
+                    pr.release_run_id = rrun.id
+                    db.session.commit()
+                    _wait_for_pipeline_runs(app, [pr.id])
+
+        rrun.status = RunStatus.SUCCEEDED
+        rrun.finished_at = datetime.now(UTC)
+        db.session.commit()
+
+
+def _wait_for_pipeline_runs(app: Any, run_ids: list[str], poll_interval: float = 2.0) -> None:
+    """Block until all given pipeline runs reach a terminal status."""
+    import time
+
+    with app.app_context():
+        while True:
+            pending = []
+            for rid in run_ids:
+                pr = db.session.get(PipelineRun, rid)
+                if pr and pr.status not in TERMINAL_STATUSES:
+                    pending.append(rid)
+            if not pending:
+                break
+            time.sleep(poll_interval)

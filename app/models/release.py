@@ -17,6 +17,38 @@ release_pipelines = db.Table(
 )
 
 
+class ReleaseApplicationGroup(db.Model):
+    """An application group within a release — tracks which pipelines are selected
+    and whether they run in parallel or sequentially within this group."""
+
+    __tablename__ = "release_application_groups"
+
+    id = db.Column(db.String(64), primary_key=True)
+    release_id = db.Column(db.String(64), db.ForeignKey("releases.id"), nullable=False)
+    application_id = db.Column(
+        db.String(64), db.ForeignKey("application_artifacts.id"), nullable=False
+    )
+    execution_mode = db.Column(db.String(16), default="sequential")  # sequential | parallel
+    pipeline_ids = db.Column(db.Text, default="[]")  # JSON list of pipeline IDs
+    order = db.Column(db.Integer, default=0)
+
+    release = db.relationship("Release", back_populates="application_groups")
+    application = db.relationship("ApplicationArtifact")
+
+    def to_dict(self) -> dict:
+        import json as _json
+
+        return {
+            "id": self.id,
+            "release_id": self.release_id,
+            "application_id": self.application_id,
+            "application_name": self.application.name if self.application else None,
+            "execution_mode": self.execution_mode,
+            "pipeline_ids": _json.loads(self.pipeline_ids or "[]"),
+            "order": self.order,
+        }
+
+
 class Release(db.Model):
     """A named, versioned release grouping pipelines for coordinated deployment."""
 
@@ -40,6 +72,12 @@ class Release(db.Model):
     product = db.relationship("Product", back_populates="releases")
     pipelines = db.relationship("Pipeline", secondary=release_pipelines, backref="releases")
     runs = db.relationship("ReleaseRun", back_populates="release", cascade="all, delete-orphan")
+    application_groups = db.relationship(
+        "ReleaseApplicationGroup",
+        back_populates="release",
+        cascade="all, delete-orphan",
+        order_by="ReleaseApplicationGroup.order",
+    )
 
     def __repr__(self) -> str:
         return f"<Release id={self.id!r} name={self.name!r} version={self.version!r}>"
@@ -59,4 +97,5 @@ class Release(db.Model):
         }
         if include_pipelines:
             data["pipelines"] = [p.to_dict() for p in self.pipelines]
+        data["application_groups"] = [g.to_dict() for g in self.application_groups]
         return data

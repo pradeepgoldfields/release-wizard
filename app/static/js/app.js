@@ -1568,10 +1568,11 @@ async function deleteWebhookPl(webhookId, name, productId, pipelineId) {
 router.register("products/:pid/releases/:id", async (hash, parts) => {
   const [,productId,,releaseId] = parts;
   setContent(loading());
-  const [product, release, runs, allPipelines] = await Promise.all([
+  const [product, release, runs, apps, allPipelines] = await Promise.all([
     api.getProduct(productId),
     api.getRelease(productId, releaseId),
     api.getReleaseRuns(releaseId).catch(() => []),
+    api.getApplications(productId).catch(() => []),
     api.getPipelines(productId).catch(() => []),
   ]);
   setBreadcrumb(
@@ -1579,8 +1580,44 @@ router.register("products/:pid/releases/:id", async (hash, parts) => {
     { label: product.name, hash: `products/${productId}` },
     { label: release.name }
   );
-  const attachedIds = new Set((release.pipelines||[]).map(p => p.id));
-  const available = allPipelines.filter(p => !attachedIds.has(p.id));
+
+  const groups = release.application_groups || [];
+  const groupedAppIds = new Set(groups.map(g => g.application_id));
+
+  // Build pipeline map by application
+  const pipelinesByApp = {};
+  allPipelines.forEach(pl => {
+    if (!pl.application_id) return;
+    if (!pipelinesByApp[pl.application_id]) pipelinesByApp[pl.application_id] = [];
+    pipelinesByApp[pl.application_id].push(pl);
+  });
+
+  const groupCards = groups.map(g => {
+    const appPipelines = pipelinesByApp[g.application_id] || [];
+    const selectedIds = new Set(g.pipeline_ids || []);
+    return `
+      <div class="card" style="margin-bottom:12px;border-left:3px solid var(--brand)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div>
+            <strong style="font-size:14px">${g.application_name || g.application_id}</strong>
+            <span class="badge ${g.execution_mode==="parallel"?"badge-blue":"badge-silver"}" style="margin-left:8px">${g.execution_mode}</span>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-secondary btn-sm" onclick="showEditAppGroup('${productId}','${releaseId}','${g.id}','${g.application_id}','${g.application_name||""}','${g.execution_mode}',${JSON.stringify(g.pipeline_ids||[]).replace(/"/g,"'")})">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="removeAppGroup('${productId}','${releaseId}','${g.id}','${g.application_name||g.application_id}')">Remove</button>
+          </div>
+        </div>
+        ${g.pipeline_ids.length === 0
+          ? `<div style="font-size:12px;color:var(--gray-400)">No pipelines selected.</div>`
+          : `<div style="display:flex;flex-wrap:wrap;gap:6px">${(g.pipeline_ids||[]).map(pid => {
+              const pl = allPipelines.find(p => p.id === pid);
+              return pl ? `<span class="badge badge-blue" style="font-size:12px">${pl.name}</span>` : "";
+            }).join("")}</div>`
+        }
+      </div>`;
+  }).join("");
+
+  const availableApps = apps.filter(a => !groupedAppIds.has(a.id));
 
   setContent(`
     <div class="page-header">
@@ -1596,54 +1633,39 @@ router.register("products/:pid/releases/:id", async (hash, parts) => {
     </div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab(this,'tab-rel-pipelines')">Pipelines (${(release.pipelines||[]).length})</button>
+      <button class="tab-btn active" onclick="switchTab(this,'tab-rel-apps')">Applications & Pipelines (${groups.length})</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-rel-runs')">Runs (${runs.length})</button>
     </div>
 
-    <div id="tab-rel-pipelines" class="tab-panel active">
-      ${available.length > 0 ? `
-        <div class="card" style="margin-bottom:16px;background:var(--brand-faint);border-color:var(--brand)">
-          <div style="display:flex;align-items:center;gap:12px">
-            <span style="font-size:13px;font-weight:500;color:var(--brand)">Attach a pipeline:</span>
-            <select id="attach-pl-sel" class="form-control" style="max-width:320px">
-              ${available.map(p => `<option value="${p.id}">${p.name} (${p.compliance_rating})</option>`).join("")}
+    <div id="tab-rel-apps" class="tab-panel active">
+      ${availableApps.length > 0 ? `
+        <div class="card" style="margin-bottom:14px;background:var(--brand-faint);border-color:var(--brand)">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:13px;font-weight:500;color:var(--brand)">Add application:</span>
+            <select id="add-app-sel" class="form-control" style="max-width:220px">
+              ${availableApps.map(a => `<option value="${a.id}" data-name="${a.name.replace(/"/g,"&quot;")}">${a.name}</option>`).join("")}
             </select>
-            <button class="btn btn-primary btn-sm" onclick="attachPipeline('${productId}','${releaseId}')">Attach</button>
+            <button class="btn btn-primary btn-sm" onclick="showAddAppGroup('${productId}','${releaseId}')">Configure & Add</button>
           </div>
         </div>` : ""}
-      ${(release.pipelines||[]).length === 0
-        ? `<div class="empty-state"><div class="empty-icon">🔧</div><p>No pipelines attached.</p></div>`
-        : `<div class="table-wrap"><table>
-          <thead><tr><th>Pipeline</th><th>Kind</th><th>Compliance</th><th>Score</th><th>Actions</th></tr></thead>
-          <tbody>${(release.pipelines||[]).map(p => `
-            <tr>
-              <td><a href="#products/${productId}/pipelines/${p.id}">${p.name}</a></td>
-              <td><span class="badge badge-${p.kind}">${p.kind.toUpperCase()}</span></td>
-              <td>${ratingBadge(p.compliance_rating)}</td>
-              <td>${scoreBar(p.compliance_score, p.compliance_rating)}</td>
-              <td><button class="btn btn-danger btn-sm" onclick="detachPipeline('${productId}','${releaseId}','${p.id}')">Detach</button></td>
-            </tr>`).join("")}
-          </tbody></table></div>`
+      ${groups.length === 0
+        ? `<div class="empty-state"><div class="empty-icon">📦</div><p>No applications added yet. Add an application to configure which pipelines run in this release.</p></div>`
+        : groupCards
       }
+      <div style="margin-top:12px;font-size:12px;color:var(--gray-400)">Application groups execute <strong>sequentially</strong> (top to bottom). Pipelines within each group execute in the group's configured mode.</div>
     </div>
 
     <div id="tab-rel-runs" class="tab-panel">
       ${runs.length === 0
         ? `<div class="empty-state"><div class="empty-icon">▶</div><p>No release runs yet.</p></div>`
         : `<div class="table-wrap"><table>
-          <thead><tr><th>Run ID</th><th>Status</th><th>Rating</th><th>Started</th><th>Finished</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Run ID</th><th>Status</th><th>Started</th><th>Finished</th></tr></thead>
           <tbody>${runs.map(r => `
             <tr>
               <td><code style="font-size:11.5px">${r.id}</code></td>
               <td>${statusBadge(r.status)}</td>
-              <td>${ratingBadge(r.compliance_rating)}</td>
               <td style="color:var(--gray-400)">${fmtDate(r.started_at)}</td>
               <td style="color:var(--gray-400)">${fmtDate(r.finished_at)}</td>
-              <td>
-                ${r.status==="Pending"||r.status==="InProgress"
-                  ? `<button class="btn btn-secondary btn-sm" onclick="completeReleaseRun('${r.id}','${productId}','${releaseId}')">Update</button>`
-                  : ""}
-              </td>
             </tr>`).join("")}
           </tbody></table></div>`
       }
@@ -1651,23 +1673,96 @@ router.register("products/:pid/releases/:id", async (hash, parts) => {
   `);
 });
 
-async function attachPipeline(productId, releaseId) {
-  const pipelineId = el("attach-pl-sel")?.value;
-  if (!pipelineId) return;
-  try {
-    await api.attachPipeline(productId, releaseId, { pipeline_id: pipelineId, requested_by: "user" });
-    toast("Pipeline attached", "success");
-    navigate(`products/${productId}/releases/${releaseId}`);
-  } catch (e) {
-    const detail = e.data?.violations ? "\n• " + e.data.violations.join("\n• ") : "";
-    toast(e.message + detail, "error");
-  }
+async function showAddAppGroup(productId, releaseId) {
+  const sel = el("add-app-sel");
+  if (!sel) return;
+  const appId = sel.value;
+  const appName = sel.options[sel.selectedIndex]?.dataset.name || appId;
+  const allPipelines = await api.getPipelines(productId).catch(() => []);
+  const appPipelines = allPipelines.filter(pl => pl.application_id === appId);
+
+  openModal(`Add Application: ${appName}`,
+    `<div class="form-group">
+       <label>Execution Mode</label>
+       <select id="ag-mode" class="form-control">
+         <option value="sequential">Sequential — pipelines run one after another</option>
+         <option value="parallel">Parallel — pipelines run simultaneously</option>
+       </select>
+     </div>
+     <div class="form-group">
+       <label>Select Pipelines</label>
+       ${appPipelines.length === 0
+         ? `<div style="color:var(--gray-400);font-size:13px">No pipelines under this application.</div>`
+         : appPipelines.map(pl => `
+           <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer">
+             <input type="checkbox" class="ag-pl-check" value="${pl.id}" checked>
+             <span>${pl.name} <span class="badge badge-${pl.kind}">${pl.kind.toUpperCase()}</span></span>
+           </label>`).join("")
+       }
+     </div>`,
+    async () => {
+      const mode = el("ag-mode").value;
+      const selectedPls = [...document.querySelectorAll(".ag-pl-check:checked")].map(c => c.value);
+      try {
+        await api.addReleaseAppGroup(productId, releaseId, {
+          application_id: appId,
+          execution_mode: mode,
+          pipeline_ids: selectedPls,
+        });
+        closeModal(); toast("Application group added", "success");
+        navigate(`products/${productId}/releases/${releaseId}`);
+      } catch (e) { modalError(e.message); }
+    }, "Add"
+  );
 }
 
-async function detachPipeline(productId, releaseId, pipelineId) {
+async function showEditAppGroup(productId, releaseId, groupId, appId, appName, currentMode, currentPipelineIds) {
+  const allPipelines = await api.getPipelines(productId).catch(() => []);
+  const appPipelines = allPipelines.filter(pl => pl.application_id === appId);
+  const selectedSet = new Set(Array.isArray(currentPipelineIds) ? currentPipelineIds : []);
+
+  openModal(`Edit: ${appName}`,
+    `<div class="form-group">
+       <label>Execution Mode</label>
+       <select id="ag-mode" class="form-control">
+         <option value="sequential" ${currentMode==="sequential"?"selected":""}>Sequential</option>
+         <option value="parallel" ${currentMode==="parallel"?"selected":""}>Parallel</option>
+       </select>
+     </div>
+     <div class="form-group">
+       <label>Select Pipelines</label>
+       ${appPipelines.length === 0
+         ? `<div style="color:var(--gray-400);font-size:13px">No pipelines under this application.</div>`
+         : appPipelines.map(pl => `
+           <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer">
+             <input type="checkbox" class="ag-pl-check" value="${pl.id}" ${selectedSet.has(pl.id)?"checked":""}>
+             <span>${pl.name} <span class="badge badge-${pl.kind}">${pl.kind.toUpperCase()}</span></span>
+           </label>`).join("")
+       }
+     </div>`,
+    async () => {
+      const mode = el("ag-mode").value;
+      const selectedPls = [...document.querySelectorAll(".ag-pl-check:checked")].map(c => c.value);
+      try {
+        // Replace by deleting and re-adding
+        await api.removeReleaseAppGroup(productId, releaseId, groupId);
+        await api.addReleaseAppGroup(productId, releaseId, {
+          application_id: appId,
+          execution_mode: mode,
+          pipeline_ids: selectedPls,
+        });
+        closeModal(); toast("Application group updated", "success");
+        navigate(`products/${productId}/releases/${releaseId}`);
+      } catch (e) { modalError(e.message); }
+    }, "Save"
+  );
+}
+
+async function removeAppGroup(productId, releaseId, groupId, appName) {
+  if (!confirm(`Remove application "${appName}" from this release?`)) return;
   try {
-    await api.detachPipeline(productId, releaseId, pipelineId);
-    toast("Pipeline detached", "success");
+    await api.removeReleaseAppGroup(productId, releaseId, groupId);
+    toast("Application group removed", "success");
     navigate(`products/${productId}/releases/${releaseId}`);
   } catch (e) { toast(e.message, "error"); }
 }

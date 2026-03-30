@@ -5,7 +5,7 @@ from app.models.environment import Environment, product_environments
 from app.models.pipeline import Pipeline, Stage
 from app.models.plugin import Plugin, PluginConfig
 from app.models.product import Product
-from app.models.release import Release, release_pipelines
+from app.models.release import Release, ReleaseApplicationGroup, release_pipelines
 from app.models.run import PipelineRun, ReleaseRun, StageRun
 from app.models.task import AgentPool, Task, TaskRun
 from app.models.vault import VaultSecret
@@ -21,6 +21,7 @@ __all__ = [
     "TaskRun",
     "AgentPool",
     "Release",
+    "ReleaseApplicationGroup",
     "release_pipelines",
     "ApplicationArtifact",
     "PipelineRun",

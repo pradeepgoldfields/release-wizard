@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import io
+import json
 
 from flask import Blueprint, jsonify, request, send_file
 
 from app.extensions import db
+from app.models.application import ApplicationArtifact
 from app.models.pipeline import Pipeline
 from app.models.product import Product
-from app.models.release import Release
+from app.models.release import Release, ReleaseApplicationGroup
 from app.services.audit_service import build_release_audit_report
+from app.services.id_service import resource_id
 from app.services.pdf_service import export_audit_report_pdf
 from app.services.release_service import attach_pipeline_to_release, create_release
 
@@ -127,6 +130,65 @@ def detach_pipeline(product_id: str, release_id: str, pipeline_id: str):
     if pipeline in release.pipelines:
         release.pipelines.remove(pipeline)
         db.session.commit()
+    return "", 204
+
+
+# ── Application groups ────────────────────────────────────────────────────────
+
+
+@releases_bp.get("/<release_id>/application-groups")
+def list_application_groups(product_id: str, release_id: str):
+    """Return all application groups attached to a release."""
+    release = Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
+    return jsonify([g.to_dict() for g in release.application_groups])
+
+
+@releases_bp.post("/<release_id>/application-groups")
+def add_application_group(product_id: str, release_id: str):
+    """Attach an application group to a release with selected pipelines.
+
+    Required body: ``application_id``, ``pipeline_ids`` (list)
+    Optional: ``execution_mode`` (sequential|parallel), ``order``
+    """
+    release = Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
+    data = request.get_json(silent=True) or {}
+    application_id = (data.get("application_id") or "").strip()
+    pipeline_ids = data.get("pipeline_ids") or []
+    if not application_id:
+        return jsonify({"error": "application_id is required"}), 400
+    if not isinstance(pipeline_ids, list):
+        return jsonify({"error": "pipeline_ids must be a list"}), 400
+    # Validate application belongs to this product
+    app = ApplicationArtifact.query.filter_by(
+        id=application_id, product_id=product_id
+    ).first_or_404()
+    # Remove existing group for this app in this release (replace)
+    existing = ReleaseApplicationGroup.query.filter_by(
+        release_id=release_id, application_id=application_id
+    ).first()
+    if existing:
+        db.session.delete(existing)
+    group = ReleaseApplicationGroup(
+        id=resource_id("rag"),
+        release_id=release.id,
+        application_id=app.id,
+        execution_mode=data.get("execution_mode", "sequential"),
+        pipeline_ids=json.dumps(pipeline_ids),
+        order=data.get("order", len(release.application_groups)),
+    )
+    db.session.add(group)
+    db.session.commit()
+    return jsonify(group.to_dict()), 201
+
+
+@releases_bp.delete("/<release_id>/application-groups/<group_id>")
+def remove_application_group(_product_id: str, release_id: str, group_id: str):
+    """Remove an application group from a release."""
+    group = ReleaseApplicationGroup.query.filter_by(
+        id=group_id, release_id=release_id
+    ).first_or_404()
+    db.session.delete(group)
+    db.session.commit()
     return "", 204
 
 
