@@ -1,4 +1,4 @@
-# CLAUDE.md — release-wizard
+# CLAUDE.md — conduit
 
 ## Project Overview
 
@@ -7,7 +7,7 @@ A Python web application (Flask + Gunicorn) developed on Windows and deployed as
 ## Project Structure
 
 ```
-release-wizard/
+conduit/
 ├── app/
 │   ├── __init__.py          # Flask app factory (create_app)
 │   ├── config.py            # Config class — reads env vars
@@ -128,10 +128,10 @@ powershell -Command "Get-NetTCPConnection -LocalPort 8080 -EA SilentlyContinue |
 
 ```bash
 # Build
-docker build -t release-wizard:local .
+docker build -t conduit:local .
 
 # Run locally (mirrors K8s environment)
-docker run --rm -p 8080:8080 release-wizard:local
+docker run --rm -p 8080:8080 conduit:local
 
 # Exec into container for debugging
 docker exec -it <container-id> /bin/bash
@@ -157,8 +157,8 @@ Stages in order:
 | Integration Tests | `pytest tests/integration` |
 | Build Image | `podman build` inside privileged Podman pod |
 | Push Image | Pushes to registry on `main` / `release/*` branches only |
-| Deploy to Dev | `kubectl apply -f k8s/` → `release-wizard-dev` namespace (auto, on `main`) |
-| Deploy to Prod | Manual approval gate → `release-wizard-prod` namespace (on `release/*`) |
+| Deploy to Dev | `kubectl apply -f k8s/` → `conduit-dev` namespace (auto, on `main`) |
+| Deploy to Prod | Manual approval gate → `conduit-prod` namespace (on `release/*`) |
 
 **Before first use**, update in `Jenkinsfile`:
 - `IMAGE_REPO` — your container registry URL
@@ -229,7 +229,7 @@ Shell scripts and Dockerfiles must use LF line endings or they will fail inside 
 
 ## Helm Chart (Kubernetes Deployment)
 
-The primary deployment method is the Helm chart at [helm/release-wizard/](helm/release-wizard/).
+The primary deployment method is the Helm chart at [helm/conduit/](helm/conduit/).
 
 ### Chart structure
 
@@ -252,16 +252,16 @@ The primary deployment method is the Helm chart at [helm/release-wizard/](helm/r
 
 ```bash
 # Dev
-helm upgrade --install release-wizard ./helm/release-wizard \
-  -f helm/release-wizard/values-dev.yaml \
+helm upgrade --install conduit ./helm/conduit \
+  -f helm/conduit/values-dev.yaml \
   --set image.tag=latest \
-  --set secrets.databaseUrl="sqlite:///instance/release_wizard.db"
+  --set secrets.databaseUrl="sqlite:///instance/conduit.db"
 
 # Prod (uses pre-created Secret — never pass secrets on CLI in production)
-helm upgrade --install release-wizard ./helm/release-wizard \
-  -f helm/release-wizard/values-prod.yaml \
+helm upgrade --install conduit ./helm/conduit \
+  -f helm/conduit/values-prod.yaml \
   --set image.tag=1.2.3 \
-  -n release-wizard --create-namespace
+  -n conduit --create-namespace
 ```
 
 ### Secrets strategy
@@ -274,9 +274,9 @@ helm upgrade --install release-wizard ./helm/release-wizard \
 ### Lint and dry-run
 
 ```bash
-helm lint ./helm/release-wizard
-helm template release-wizard ./helm/release-wizard -f helm/release-wizard/values-dev.yaml | less
-helm upgrade --install release-wizard ./helm/release-wizard --dry-run --debug
+helm lint ./helm/conduit
+helm template conduit ./helm/conduit -f helm/conduit/values-dev.yaml | less
+helm upgrade --install conduit ./helm/conduit --dry-run --debug
 ```
 
 ## Terraform (Kubernetes Deployment)
@@ -326,6 +326,17 @@ export TF_VAR_jwt_secret_key="$(openssl rand -hex 32)"
 ```
 
 `terraform.tfvars` is already listed in `.gitignore`.
+
+## Development Secrets (local only — never commit to git)
+
+| Key | Value |
+|-----|-------|
+| GROQ_API_KEY | (set via environment variable — never commit the actual key) |
+
+After seeding or refreshing test data, always set this key in the platform:
+```bash
+python scripts/seed_groq_key.py
+```
 
 ## What to Avoid
 

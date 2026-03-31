@@ -27,7 +27,7 @@ def client(app):
 def test_ui_root_serves_html(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert b"Release Wizard" in r.data
+    assert b"Conduit" in r.data
     assert b"<html" in r.data
 
 

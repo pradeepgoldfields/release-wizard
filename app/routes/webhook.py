@@ -34,7 +34,7 @@ def _current_username() -> str:
 
 def _require_admin():
     user = getattr(g, "current_user", None)
-    if not user or not getattr(user, "is_admin", False):
+    if not user or getattr(user, "persona", None) != "PlatformAdmin":
         return jsonify({"error": "Admin required"}), 403
     return None
 
@@ -124,6 +124,16 @@ def list_deliveries(webhook_id: str):
     return jsonify([d.to_dict() for d in deliveries])
 
 
+@webhook_bp.get("/<webhook_id>/token")
+def reveal_token(webhook_id: str):
+    """Return the webhook token — admin only."""
+    err = _require_admin()
+    if err:
+        return err
+    w = db.get_or_404(Webhook, webhook_id)
+    return jsonify({"token": w.token})
+
+
 @webhook_bp.post("/<webhook_id>/trigger")
 def trigger_webhook(webhook_id: str):
     """Public endpoint — authenticated by X-Webhook-Token header."""
@@ -155,6 +165,7 @@ def trigger_webhook(webhook_id: str):
             commit_sha=commit_sha,
             artifact_id=artifact_id,
             triggered_by=triggered_by or "webhook",
+            runtime_properties={"webhook": {"payload": payload}},
             app=current_app._get_current_object(),
         )
         pipeline_run_id = run.id

@@ -1,11 +1,11 @@
 variable "namespace" {
   description = "Kubernetes namespace to deploy into."
   type        = string
-  default     = "release-wizard"
+  default     = "conduit"
 }
 
 variable "image_repo" {
-  description = "Container image repository (e.g. registry.example.com/release-wizard)."
+  description = "Container image repository (e.g. registry.example.com/conduit)."
   type        = string
 }
 
@@ -104,9 +104,9 @@ variable "jwt_secret_key" {
 
 # ---- ingress ------------------------------------------------------------
 variable "ingress_host" {
-  description = "Hostname for the Ingress rule (e.g. release-wizard.example.com)."
+  description = "Hostname for the Ingress rule (e.g. conduit.example.com)."
   type        = string
-  default     = "release-wizard.example.com"
+  default     = "conduit.example.com"
 }
 
 variable "ingress_class_name" {
@@ -118,7 +118,7 @@ variable "ingress_class_name" {
 variable "ingress_tls_secret" {
   description = "Name of the TLS Secret for the Ingress. Leave empty to disable TLS."
   type        = string
-  default     = "release-wizard-tls"
+  default     = "conduit-tls"
 }
 
 # ---- kubeconfig (for provider auth) ------------------------------------

@@ -98,7 +98,8 @@ def create_application_endpoint(product_id: str):
     """Register an application artifact under a product.
 
     Required body: ``name``
-    Optional: ``artifact_type``, ``repository_url``
+    Optional: ``artifact_type``, ``repository_url``, ``build_version``,
+              ``compliance_rating``, ``description``
     """
     db.get_or_404(Product, product_id)
     data = request.get_json(silent=True) or {}
@@ -110,22 +111,33 @@ def create_application_endpoint(product_id: str):
         name=name,
         artifact_type=data.get("artifact_type", "container"),
         repository_url=data.get("repository_url"),
+        build_version=data.get("build_version"),
+        compliance_rating=data.get("compliance_rating"),
+        description=data.get("description"),
     )
     return jsonify(artifact.to_dict()), 201
 
 
 @products_bp.put("/<product_id>/applications/<app_id>")
 def update_application(product_id: str, app_id: str):
-    """Update an application artifact's name, type, or repository URL."""
+    """Update an application artifact's mutable fields."""
     db.get_or_404(Product, product_id)
     artifact = db.get_or_404(ApplicationArtifact, app_id)
     data = request.get_json(silent=True) or {}
-    if "name" in data:
-        artifact.name = (data["name"] or "").strip() or artifact.name
-    if "artifact_type" in data:
-        artifact.artifact_type = data["artifact_type"]
-    if "repository_url" in data:
-        artifact.repository_url = data["repository_url"] or None
+    for field in (
+        "name",
+        "artifact_type",
+        "repository_url",
+        "build_version",
+        "compliance_rating",
+        "description",
+    ):
+        if field in data:
+            setattr(
+                artifact,
+                field,
+                data[field] or None if field != "name" else (data[field] or artifact.name),
+            )
     db.session.commit()
     return jsonify(artifact.to_dict())
 

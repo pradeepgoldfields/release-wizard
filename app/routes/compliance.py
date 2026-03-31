@@ -60,6 +60,14 @@ def disable_rule(rule_id: str):
     return "", 204
 
 
+@compliance_bp.get("/iso27001")
+def get_iso27001():
+    """Evaluate the platform against ISO/IEC 27001:2022 Annex A controls."""
+    from app.services.iso27001_service import evaluate_iso27001
+
+    return jsonify(evaluate_iso27001())
+
+
 @compliance_bp.get("/audit-events")
 def list_audit_events():
     """Return recent audit events, optionally filtered by resource.

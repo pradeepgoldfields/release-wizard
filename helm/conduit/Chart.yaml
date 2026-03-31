@@ -1,5 +1,5 @@
 apiVersion: v2
-name: release-wizard
+name: conduit
 description: Enterprise CI/CD orchestration platform — Products → Releases → Pipelines → Stages.
 type: application
 version: 0.1.0
@@ -8,8 +8,8 @@ keywords:
   - release-management
   - ci-cd
   - compliance
-home: https://github.com/your-org/release-wizard
+home: https://github.com/your-org/conduit
 sources:
-  - https://github.com/your-org/release-wizard
+  - https://github.com/your-org/conduit
 maintainers:
   - name: platform-team

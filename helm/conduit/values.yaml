@@ -1,16 +1,16 @@
 # =============================================================================
-# Release Wizard — Helm Chart Values
+# Conduit — Helm Chart Values
 # =============================================================================
 # Override any value with:
-#   helm install release-wizard ./helm/release-wizard -f my-values.yaml
-#   helm install release-wizard ./helm/release-wizard --set image.tag=1.2.3
+#   helm install conduit ./helm/conduit -f my-values.yaml
+#   helm install conduit ./helm/conduit --set image.tag=1.2.3
 # =============================================================================
 
 # -----------------------------------------------------------------------------
 # Image
 # -----------------------------------------------------------------------------
 image:
-  repository: registry.example.com/release-wizard
+  repository: registry.example.com/conduit
   tag: "latest"
   # "Always" forces a re-pull on every pod restart; use "IfNotPresent" for
   # pinned tags in production.
@@ -53,7 +53,7 @@ config:
 existingSecret: ""   # name of a pre-existing Kubernetes Secret, or "" to create one
 
 secrets:
-  databaseUrl: "sqlite:///instance/release_wizard.db"   # override for PostgreSQL
+  databaseUrl: "sqlite:///instance/conduit.db"   # override for PostgreSQL
   secretKey: "change-me-in-production"
   jwtSecretKey: "change-me-in-production"
 
@@ -72,14 +72,14 @@ service:
 ingress:
   enabled: true
   className: nginx
-  host: release-wizard.example.com
+  host: conduit.example.com
   path: /
   pathType: Prefix
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
   tls:
     enabled: true
-    secretName: release-wizard-tls
+    secretName: conduit-tls
 
 # -----------------------------------------------------------------------------
 # HorizontalPodAutoscaler

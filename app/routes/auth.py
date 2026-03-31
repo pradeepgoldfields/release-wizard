@@ -190,7 +190,7 @@ def _current_user() -> User | None:
     if auth_header.startswith("Bearer "):
         return verify_token(auth_header[7:])
     # Also check cookie for browser-side convenience
-    token = request.cookies.get("rw_token")
+    token = request.cookies.get("cdt_token")
     if token:
         return verify_token(token)
     return None
@@ -321,7 +321,7 @@ def ensure_admin_user(app) -> None:
         user = User(
             id=resource_id("usr"),
             username="admin",
-            email="admin@release-wizard.local",
+            email="admin@conduit.local",
             display_name="Administrator",
             password_hash=hashed,
             persona="PlatformAdmin",

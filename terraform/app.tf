@@ -1,12 +1,12 @@
 locals {
-  app_name = "release-wizard"
+  app_name = "conduit"
 
   common_labels = {
     "app.kubernetes.io/name"       = local.app_name
     "app.kubernetes.io/instance"   = "${local.app_name}-${var.namespace}"
     "app.kubernetes.io/version"    = var.image_tag
     "app.kubernetes.io/managed-by" = "terraform"
-    "app.kubernetes.io/part-of"    = "release-wizard"
+    "app.kubernetes.io/part-of"    = "conduit"
   }
 
   selector_labels = {
@@ -18,10 +18,10 @@ locals {
 # ---------------------------------------------------------------------------
 # Deployment
 # ---------------------------------------------------------------------------
-resource "kubernetes_deployment_v1" "release_wizard" {
+resource "kubernetes_deployment_v1" "conduit" {
   metadata {
     name      = local.app_name
-    namespace = kubernetes_namespace_v1.release_wizard.metadata[0].name
+    namespace = kubernetes_namespace_v1.conduit.metadata[0].name
     labels    = local.common_labels
   }
 
@@ -45,8 +45,8 @@ resource "kubernetes_deployment_v1" "release_wizard" {
         labels = local.common_labels
         annotations = {
           # Force pod restart when ConfigMap or Secret changes
-          "checksum/config" = sha256(jsonencode(kubernetes_config_map_v1.release_wizard.data))
-          "checksum/secret" = sha256(jsonencode(kubernetes_secret_v1.release_wizard.data))
+          "checksum/config" = sha256(jsonencode(kubernetes_config_map_v1.conduit.data))
+          "checksum/secret" = sha256(jsonencode(kubernetes_secret_v1.conduit.data))
         }
       }
 
@@ -74,7 +74,7 @@ resource "kubernetes_deployment_v1" "release_wizard" {
           # Non-sensitive config from ConfigMap
           env_from {
             config_map_ref {
-              name = kubernetes_config_map_v1.release_wizard.metadata[0].name
+              name = kubernetes_config_map_v1.conduit.metadata[0].name
             }
           }
 
@@ -83,7 +83,7 @@ resource "kubernetes_deployment_v1" "release_wizard" {
             name = "DATABASE_URL"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret_v1.release_wizard.metadata[0].name
+                name = kubernetes_secret_v1.conduit.metadata[0].name
                 key  = "DATABASE_URL"
               }
             }
@@ -92,7 +92,7 @@ resource "kubernetes_deployment_v1" "release_wizard" {
             name = "SECRET_KEY"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret_v1.release_wizard.metadata[0].name
+                name = kubernetes_secret_v1.conduit.metadata[0].name
                 key  = "SECRET_KEY"
               }
             }
@@ -101,7 +101,7 @@ resource "kubernetes_deployment_v1" "release_wizard" {
             name = "JWT_SECRET_KEY"
             value_from {
               secret_key_ref {
-                name = kubernetes_secret_v1.release_wizard.metadata[0].name
+                name = kubernetes_secret_v1.conduit.metadata[0].name
                 key  = "JWT_SECRET_KEY"
               }
             }
@@ -170,10 +170,10 @@ resource "kubernetes_deployment_v1" "release_wizard" {
 # ---------------------------------------------------------------------------
 # Service — ClusterIP
 # ---------------------------------------------------------------------------
-resource "kubernetes_service_v1" "release_wizard" {
+resource "kubernetes_service_v1" "conduit" {
   metadata {
     name      = local.app_name
-    namespace = kubernetes_namespace_v1.release_wizard.metadata[0].name
+    namespace = kubernetes_namespace_v1.conduit.metadata[0].name
     labels    = local.common_labels
   }
 
@@ -193,10 +193,10 @@ resource "kubernetes_service_v1" "release_wizard" {
 # ---------------------------------------------------------------------------
 # HorizontalPodAutoscaler
 # ---------------------------------------------------------------------------
-resource "kubernetes_horizontal_pod_autoscaler_v2" "release_wizard" {
+resource "kubernetes_horizontal_pod_autoscaler_v2" "conduit" {
   metadata {
     name      = local.app_name
-    namespace = kubernetes_namespace_v1.release_wizard.metadata[0].name
+    namespace = kubernetes_namespace_v1.conduit.metadata[0].name
     labels    = local.common_labels
   }
 
@@ -207,7 +207,7 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "release_wizard" {
     scale_target_ref {
       api_version = "apps/v1"
       kind        = "Deployment"
-      name        = kubernetes_deployment_v1.release_wizard.metadata[0].name
+      name        = kubernetes_deployment_v1.conduit.metadata[0].name
     }
 
     metric {

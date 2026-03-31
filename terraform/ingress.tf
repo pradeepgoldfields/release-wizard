@@ -1,10 +1,10 @@
 # ---------------------------------------------------------------------------
 # Ingress
 # ---------------------------------------------------------------------------
-resource "kubernetes_ingress_v1" "release_wizard" {
+resource "kubernetes_ingress_v1" "conduit" {
   metadata {
     name      = local.app_name
-    namespace = kubernetes_namespace_v1.release_wizard.metadata[0].name
+    namespace = kubernetes_namespace_v1.conduit.metadata[0].name
     labels    = local.common_labels
     annotations = {
       "kubernetes.io/ingress.class"                = var.ingress_class_name
@@ -31,7 +31,7 @@ resource "kubernetes_ingress_v1" "release_wizard" {
           path_type = "Prefix"
           backend {
             service {
-              name = kubernetes_service_v1.release_wizard.metadata[0].name
+              name = kubernetes_service_v1.conduit.metadata[0].name
               port {
                 name = "http"
               }

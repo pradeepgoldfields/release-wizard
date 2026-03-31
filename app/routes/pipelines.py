@@ -79,6 +79,60 @@ def delete_pipeline(product_id: str, pipeline_id: str):
     return "", 204
 
 
+@pipelines_bp.post("/<pipeline_id>/copy")
+def copy_pipeline(product_id: str, pipeline_id: str):
+    """Duplicate a pipeline (with all its stages and tasks) into the same or another product."""
+    from app.models.task import Task
+    from sqlalchemy.orm import joinedload
+
+    src = (
+        Pipeline.query
+        .options(joinedload(Pipeline.stages).joinedload(Stage.tasks))
+        .filter_by(id=pipeline_id, product_id=product_id)
+        .first_or_404()
+    )
+    data = request.get_json(silent=True) or {}
+    new_name = (data.get("name") or f"{src.name} (Copy)").strip()
+    dest_product_id = data.get("product_id") or product_id
+
+    stages_def = []
+    for s in sorted(src.stages, key=lambda x: x.order):
+        stages_def.append({
+            "name": s.name,
+            "order": s.order,
+            "container_image": s.container_image,
+            "run_language": s.run_language,
+            "run_code": s.run_code,
+            "run_file": s.run_file,
+            "tasks": [
+                {
+                    "name": tk.name,
+                    "description": tk.description,
+                    "order": tk.order,
+                    "run_language": tk.run_language,
+                    "run_code": tk.run_code,
+                    "execution_mode": tk.execution_mode,
+                    "on_error": tk.on_error,
+                    "timeout": tk.timeout,
+                    "is_required": tk.is_required,
+                    "task_type": tk.task_type or "",
+                }
+                for tk in sorted(s.tasks, key=lambda x: x.order)
+            ],
+        })
+
+    new_pipeline = create_pipeline(
+        product_id=dest_product_id,
+        name=new_name,
+        kind=src.kind or "ci",
+        git_repo=data.get("git_repo") or src.git_repo,
+        git_branch=data.get("git_branch") or src.git_branch or "main",
+        application_id=data.get("application_id") or src.application_id,
+        stages=stages_def,
+    )
+    return jsonify(new_pipeline.to_dict(include_stages=True)), 201
+
+
 @pipelines_bp.post("/<pipeline_id>/compliance")
 def update_pipeline_compliance(product_id: str, pipeline_id: str):
     """Recalculate and persist the weighted compliance score for a pipeline.
@@ -126,6 +180,7 @@ def create_stage(product_id: str, pipeline_id: str):
         run_language=data.get("run_language", "bash"),
         container_image=data.get("container_image"),
         is_protected=bool(data.get("is_protected", False)),
+        accent_color=data.get("accent_color") or None,
     )
     db.session.add(stage)
     db.session.commit()
@@ -138,9 +193,9 @@ def update_stage(product_id: str, pipeline_id: str, stage_id: str):
     Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     stage = Stage.query.filter_by(id=stage_id, pipeline_id=pipeline_id).first_or_404()
     data = request.get_json(silent=True) or {}
-    for field in ("name", "run_language", "container_image"):
+    for field in ("name", "run_language", "container_image", "accent_color"):
         if field in data:
-            setattr(stage, field, data[field])
+            setattr(stage, field, data[field] or None)
     if "order" in data:
         stage.order = int(data["order"])
     if "is_protected" in data:
@@ -194,6 +249,7 @@ def create_task(product_id: str, pipeline_id: str, stage_id: str):
         on_error=data.get("on_error", "fail"),
         timeout=int(data.get("timeout", 300)),
         is_required=bool(data.get("is_required", True)),
+        task_type=data.get("task_type") or None,
     )
     db.session.add(task)
     db.session.commit()
@@ -223,6 +279,8 @@ def update_task(product_id: str, pipeline_id: str, stage_id: str, task_id: str):
         task.timeout = int(data["timeout"])
     if "is_required" in data:
         task.is_required = bool(data["is_required"])
+    if "task_type" in data:
+        task.task_type = data["task_type"] or None
     db.session.commit()
     return jsonify(task.to_dict())
 

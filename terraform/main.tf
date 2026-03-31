@@ -11,7 +11,7 @@ terraform {
   # Uncomment and configure a remote backend for team use:
   # backend "s3" {
   #   bucket = "my-tf-state"
-  #   key    = "release-wizard/terraform.tfstate"
+  #   key    = "conduit/terraform.tfstate"
   #   region = "us-east-1"
   # }
 }
@@ -30,12 +30,12 @@ provider "kubernetes" {
 # ---------------------------------------------------------------------------
 # Namespace
 # ---------------------------------------------------------------------------
-resource "kubernetes_namespace_v1" "release_wizard" {
+resource "kubernetes_namespace_v1" "conduit" {
   metadata {
     name = var.namespace
     labels = {
       "app.kubernetes.io/managed-by" = "terraform"
-      "app.kubernetes.io/part-of"    = "release-wizard"
+      "app.kubernetes.io/part-of"    = "conduit"
     }
   }
 }

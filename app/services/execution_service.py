@@ -48,7 +48,7 @@ def _k8s_namespace() -> str:
     try:
         return _K8S_NAMESPACE_FILE.read_text().strip()
     except OSError:
-        return os.getenv("POD_NAMESPACE", "release-wizard")
+        return os.getenv("POD_NAMESPACE", "conduit")
 
 
 def _run_script_k8s(language: str, code: str, timeout: int, task_run_id: str) -> tuple[int, str]:
@@ -87,7 +87,7 @@ def _run_script_k8s(language: str, code: str, timeout: int, task_run_id: str) ->
         metadata=client.V1ObjectMeta(
             name=job_name,
             namespace=namespace,
-            labels={"app": "release-wizard", "task-run-id": task_run_id},
+            labels={"app": "conduit", "task-run-id": task_run_id},
         ),
         spec=client.V1JobSpec(
             ttl_seconds_after_finished=300,
@@ -162,6 +162,97 @@ def _run_script_k8s(language: str, code: str, timeout: int, task_run_id: str) ->
     return return_code, logs
 
 
+def _detect_container_runtime() -> str | None:
+    """Return 'docker' or 'podman' if available on PATH, else None."""
+    import shutil
+    for rt in ("docker", "podman"):
+        if shutil.which(rt):
+            return rt
+    return None
+
+
+def _run_script_container(
+    language: str,
+    code: str,
+    timeout: int,
+    task_run_id: str,
+    context_env: dict | None = None,
+    runtime: str | None = None,
+    image: str | None = None,
+) -> tuple[int, str]:
+    """Run the script inside a Docker/Podman container sandbox.
+
+    Returns (return_code, logs).
+    The container is automatically removed after execution (``--rm``).
+    Resource limits: 512 MB RAM, 1 CPU.
+    """
+    rt = runtime or _detect_container_runtime()
+    if not rt:
+        return 1, "[error] No container runtime found (docker/podman not on PATH). Falling back unavailable.\n"
+
+    img = image or os.getenv("TASK_RUNNER_IMAGE", "python:3.12-slim")
+    suffix = ".sh" if language == "bash" else ".py"
+    interpreter = "bash" if language == "bash" else "python3"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False, encoding="utf-8") as f:
+        if language == "bash" and not code.startswith("#!"):
+            f.write("#!/bin/bash\n")
+        f.write(code)
+        script_path = Path(f.name)
+
+    # Normalise path for Docker on Windows (C:\... → /c/...)
+    host_path = str(script_path)
+    if sys.platform == "win32":
+        import re
+        host_path = re.sub(r"^([A-Za-z]):\\", lambda m: f"/{m.group(1).lower()}/", host_path).replace("\\", "/")
+
+    container_script = f"/tmp/task{suffix}"
+
+    cmd = [
+        rt, "run", "--rm",
+        "--name", f"conduit-task-{task_run_id}",
+        "--memory", "512m",
+        "--cpus", "1",
+        "-v", f"{host_path}:{container_script}:ro",
+    ]
+
+    # Inject env vars
+    if context_env:
+        for k, v in context_env.items():
+            cmd += ["-e", f"{k}={v}"]
+
+    # Ensure bash is available on slim images
+    if language == "bash":
+        cmd += ["--entrypoint", "bash", img, container_script]
+    else:
+        cmd += [img, interpreter, container_script]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout + 10,  # extra buffer for image pull
+        )
+        logs = result.stdout or ""
+        if result.stderr:
+            logs += "\n[stderr]\n" + result.stderr
+        return result.returncode, logs
+    except subprocess.TimeoutExpired:
+        # Kill the container
+        subprocess.run([rt, "kill", f"conduit-task-{task_run_id}"],
+                       capture_output=True, timeout=10)
+        return 124, f"[error] Container timed out after {timeout}s\n"
+    except FileNotFoundError:
+        return 127, f"[error] Container runtime '{rt}' not found on PATH\n"
+    except Exception as exc:
+        return 1, f"[error] Container execution failed: {exc}\n"
+    finally:
+        script_path.unlink(missing_ok=True)
+
+
 def _parse_output_json(stdout: str) -> str | None:
     """Extract JSON from the last non-empty line of stdout, if valid."""
     lines = [ln for ln in stdout.splitlines() if ln.strip()]
@@ -202,9 +293,11 @@ def _run_script_subprocess(
         else:
             cmd = [sys.executable, str(script_path)]
 
+        # Inherit the host PATH so interpreters (bash, python3) are locatable
+        # both on Windows/Git Bash and inside Linux/K8s containers.
         base_env = {
-            "PATH": "/usr/local/bin:/usr/bin:/bin",
-            "HOME": "/tmp",
+            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),
             "TERM": "xterm",
         }
         if context_env:
@@ -214,10 +307,12 @@ def _run_script_subprocess(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             env=base_env,
         )
-        logs = result.stdout
+        logs = result.stdout or ""
         if result.stderr:
             logs += "\n[stderr]\n" + result.stderr
         return result.returncode, logs
@@ -245,9 +340,22 @@ def run_task_async(  # noqa: PLR0913
             task_run.status = "Running"
             db.session.commit()
 
+            # Resolve runner preference from platform settings
+            from app.models.setting import PlatformSetting  # noqa: PLC0415
+            runner_setting = PlatformSetting.query.get("TASK_RUNNER")
+            runner_type = (runner_setting.value if runner_setting else None) or "subprocess"
+            image_setting = PlatformSetting.query.get("TASK_RUNNER_IMAGE")
+            runner_image = image_setting.value if image_setting else None
+
             if _in_kubernetes():
                 log.info("Executing task %s via K8s Job", task_run_id)
                 return_code, logs = _run_script_k8s(language, code, timeout, task_run_id)
+            elif runner_type in ("docker", "podman"):
+                log.info("Executing task %s via %s container", task_run_id, runner_type)
+                return_code, logs = _run_script_container(
+                    language, code, timeout, task_run_id,
+                    runtime=runner_type, image=runner_image,
+                )
             else:
                 return_code, logs = _run_script_subprocess(language, code, timeout)
             output_json = _parse_output_json(logs)

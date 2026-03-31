@@ -1,10 +1,10 @@
 # ---------------------------------------------------------------------------
 # ConfigMap — non-sensitive runtime configuration
 # ---------------------------------------------------------------------------
-resource "kubernetes_config_map_v1" "release_wizard" {
+resource "kubernetes_config_map_v1" "conduit" {
   metadata {
-    name      = "release-wizard-config"
-    namespace = kubernetes_namespace_v1.release_wizard.metadata[0].name
+    name      = "conduit-config"
+    namespace = kubernetes_namespace_v1.conduit.metadata[0].name
     labels    = local.common_labels
   }
 
@@ -19,10 +19,10 @@ resource "kubernetes_config_map_v1" "release_wizard" {
 # ---------------------------------------------------------------------------
 # Secret — sensitive runtime configuration
 # ---------------------------------------------------------------------------
-resource "kubernetes_secret_v1" "release_wizard" {
+resource "kubernetes_secret_v1" "conduit" {
   metadata {
-    name      = "release-wizard-secret"
-    namespace = kubernetes_namespace_v1.release_wizard.metadata[0].name
+    name      = "conduit-secret"
+    namespace = kubernetes_namespace_v1.conduit.metadata[0].name
     labels    = local.common_labels
   }
 

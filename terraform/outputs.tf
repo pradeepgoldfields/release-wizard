@@ -1,21 +1,21 @@
 output "namespace" {
   description = "Kubernetes namespace the app is deployed into."
-  value       = kubernetes_namespace_v1.release_wizard.metadata[0].name
+  value       = kubernetes_namespace_v1.conduit.metadata[0].name
 }
 
 output "deployment_name" {
   description = "Name of the Kubernetes Deployment."
-  value       = kubernetes_deployment_v1.release_wizard.metadata[0].name
+  value       = kubernetes_deployment_v1.conduit.metadata[0].name
 }
 
 output "service_name" {
   description = "Name of the Kubernetes Service."
-  value       = kubernetes_service_v1.release_wizard.metadata[0].name
+  value       = kubernetes_service_v1.conduit.metadata[0].name
 }
 
 output "service_cluster_ip" {
   description = "ClusterIP assigned to the Service."
-  value       = kubernetes_service_v1.release_wizard.spec[0].cluster_ip
+  value       = kubernetes_service_v1.conduit.spec[0].cluster_ip
 }
 
 output "ingress_host" {

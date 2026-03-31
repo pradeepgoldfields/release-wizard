@@ -1,8 +1,8 @@
 # Production environment overrides
-# Usage: helm upgrade --install release-wizard ./helm/release-wizard \
-#          -f helm/release-wizard/values-prod.yaml \
+# Usage: helm upgrade --install conduit ./helm/conduit \
+#          -f helm/conduit/values-prod.yaml \
 #          --set image.tag=1.2.3 \
-#          --set existingSecret=release-wizard-prod-secret
+#          --set existingSecret=conduit-prod-secret
 
 image:
   pullPolicy: IfNotPresent
@@ -21,14 +21,14 @@ hpa:
   targetMemoryUtilizationPercentage: 75
 
 ingress:
-  host: release-wizard.example.com
+  host: conduit.example.com
   tls:
     enabled: true
-    secretName: release-wizard-tls
+    secretName: conduit-tls
 
 # In production, supply a pre-created Secret (Vault, Sealed Secrets, etc.)
 # and set existingSecret to its name. The 'secrets' block is then ignored.
-existingSecret: "release-wizard-prod-secret"
+existingSecret: "conduit-prod-secret"
 
 resources:
   requests:

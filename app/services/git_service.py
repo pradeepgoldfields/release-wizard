@@ -1,7 +1,7 @@
 """Git synchronisation service.
 
 Pulls a pipeline definition from a remote Git repository (reads the YAML file
-at ``release-wizard/<pipeline-name>.yaml``) and imports it into the database,
+at ``conduit/<pipeline-name>.yaml``) and imports it into the database,
 or pushes the current database state back to Git as a YAML file.
 
 Requires ``gitpython`` (``pip install gitpython``).
@@ -16,7 +16,7 @@ import tempfile
 
 log = logging.getLogger(__name__)
 
-_DEFINITION_PATH = "release-wizard/{name}.yaml"  # path inside the repo
+_DEFINITION_PATH = "conduit/{name}.yaml"  # path inside the repo
 
 
 def _git_available() -> bool:
@@ -77,8 +77,8 @@ def sync_pipeline_from_git(pipeline) -> dict:
 def push_pipeline_to_git(
     pipeline,
     yaml_text: str,
-    author_name: str = "Release Wizard",
-    author_email: str = "rw@release-wizard.local",
+    author_name: str = "Conduit",
+    author_email: str = "rw@conduit.local",
 ) -> str:
     """Serialise the pipeline definition as YAML and push it to Git.
 
@@ -125,7 +125,7 @@ def push_pipeline_to_git(
 
         repo.index.add([def_path])
         commit = repo.index.commit(
-            f"chore: update {pipeline.name} pipeline definition [release-wizard]",
+            f"chore: update {pipeline.name} pipeline definition [conduit]",
             author=git.Actor(author_name, author_email),
             committer=git.Actor(author_name, author_email),
         )

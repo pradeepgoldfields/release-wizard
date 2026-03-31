@@ -2,12 +2,12 @@
 # NEVER commit terraform.tfvars — it contains secrets.
 
 # ---- cluster target ----
-namespace          = "release-wizard"
+namespace          = "conduit"
 kubeconfig_path    = "~/.kube/config"
 kubeconfig_context = "my-cluster-context"   # leave empty for current-context
 
 # ---- image ----
-image_repo = "registry.example.com/release-wizard"
+image_repo = "registry.example.com/conduit"
 image_tag  = "1.0.0"
 
 # ---- scaling ----
@@ -27,11 +27,11 @@ log_level = "INFO"
 flask_env = "production"
 
 # ---- ingress ----
-ingress_host       = "release-wizard.example.com"
+ingress_host       = "conduit.example.com"
 ingress_class_name = "nginx"
-ingress_tls_secret = "release-wizard-tls"
+ingress_tls_secret = "conduit-tls"
 
 # ---- secrets (sensitive — keep out of version control) ----
-database_url   = "postgresql+psycopg2://rw_user:changeme@postgres-svc:5432/release_wizard"
+database_url   = "postgresql+psycopg2://conduit_user:changeme@postgres-svc:5432/conduit"
 secret_key     = "change-me-random-64-char-string"
 jwt_secret_key = "change-me-another-random-64-char-string"

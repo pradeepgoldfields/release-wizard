@@ -1,17 +1,17 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "release-wizard.fullname" . }}
-  namespace: {{ include "release-wizard.namespace" . }}
+  name: {{ include "conduit.fullname" . }}
+  namespace: {{ include "conduit.namespace" . }}
   labels:
-    {{- include "release-wizard.labels" . | nindent 4 }}
+    {{- include "conduit.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.hpa.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   selector:
     matchLabels:
-      {{- include "release-wizard.selectorLabels" . | nindent 6 }}
+      {{- include "conduit.selectorLabels" . | nindent 6 }}
   strategy:
     type: {{ .Values.strategy.type }}
     {{- if eq .Values.strategy.type "RollingUpdate" }}
@@ -22,7 +22,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "release-wizard.labels" . | nindent 8 }}
+        {{- include "conduit.labels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -38,7 +38,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "release-wizard.serviceAccountName" . }}
+      serviceAccountName: {{ include "conduit.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -52,23 +52,23 @@ spec:
           # Non-sensitive config
           envFrom:
             - configMapRef:
-                name: {{ include "release-wizard.fullname" . }}
+                name: {{ include "conduit.fullname" . }}
           # Sensitive config
           env:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "release-wizard.secretName" . }}
+                  name: {{ include "conduit.secretName" . }}
                   key: DATABASE_URL
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "release-wizard.secretName" . }}
+                  name: {{ include "conduit.secretName" . }}
                   key: SECRET_KEY
             - name: JWT_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "release-wizard.secretName" . }}
+                  name: {{ include "conduit.secretName" . }}
                   key: JWT_SECRET_KEY
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}

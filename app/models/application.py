@@ -10,7 +10,13 @@ from app.extensions import db
 
 
 class ApplicationArtifact(db.Model):
-    """A deployable application artifact (container image, library, or package)."""
+    """A deployable application artifact (container image, library, or package).
+
+    An artifact represents a named application component within a product.
+    Multiple build versions of the same artifact are tracked via the
+    ``build_version`` field, making each (name, build_version) pair a unique
+    entry in the application dictionary.
+    """
 
     __tablename__ = "application_artifacts"
 
@@ -19,6 +25,10 @@ class ApplicationArtifact(db.Model):
     name = db.Column(db.String(256), nullable=False)
     artifact_type = db.Column(db.String(64), default=ArtifactType.CONTAINER)
     repository_url = db.Column(db.String(512))
+    # Application dictionary fields
+    build_version = db.Column(db.String(128))  # e.g. "1.4.2", "main-abc123"
+    compliance_rating = db.Column(db.String(32))  # Non-Compliant, Bronze, Silver, Gold, Platinum
+    description = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(UTC))
 
     product = db.relationship("Product", back_populates="applications")
@@ -37,4 +47,8 @@ class ApplicationArtifact(db.Model):
             "name": self.name,
             "artifact_type": self.artifact_type,
             "repository_url": self.repository_url,
+            "build_version": self.build_version,
+            "compliance_rating": self.compliance_rating or "Non-Compliant",
+            "description": self.description,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }

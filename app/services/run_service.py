@@ -106,8 +106,16 @@ def start_pipeline_run(
     return run
 
 
-def _build_runtime_context(run: PipelineRun) -> dict:
-    """Build the full pipelineRuntime context dict for injection into task scripts."""
+def _build_runtime_context(run: PipelineRun, stage_run=None, task_run=None, task=None) -> dict:
+    """Build the full pipelineRuntime context dict for injection into task scripts.
+
+    Includes the legacy flat runtime_properties blobs AND the new hierarchical
+    resolved properties under the ``properties`` key.  The resolved dict is
+    built from the full chain: task → stage → pipeline → product, with
+    runtime ParameterValue overrides taking precedence.
+    """
+    from app.services.property_service import resolve_all
+
     pipeline_rt = json.loads(run.runtime_properties or "{}")
     stage_runtime: dict = {}
 
@@ -132,7 +140,21 @@ def _build_runtime_context(run: PipelineRun) -> dict:
             task_runtime[task_name] = {**task_out, "input": user_inp}
         stage_runtime[stage_name] = {**sr_props, "taskRuntime": task_runtime}
 
-    return {**pipeline_rt, "stageRuntime": stage_runtime}
+    # Hierarchical resolved properties for the current execution context
+    pipeline = run.pipeline
+    stage = stage_run.stage if stage_run else None
+    product = pipeline.product if pipeline else None
+    resolved_props = resolve_all(
+        pipeline_run=run,
+        stage_run=stage_run,
+        task_run=task_run,
+        task=task,
+        stage=stage,
+        pipeline=pipeline,
+        product=product,
+    )
+
+    return {**pipeline_rt, "stageRuntime": stage_runtime, "properties": resolved_props}
 
 
 def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
@@ -149,17 +171,17 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
         stage_runs = sorted(run.stage_runs, key=lambda sr: sr.stage.order)
         pipeline_warning = False
 
-        # Build base context env vars accessible as $RW_* in all task scripts
+        # Build base context env vars accessible as $CDT_* in all task scripts
         pipeline = run.pipeline
         context_env: dict[str, str] = {
-            "RW_PIPELINE_RUN_ID": run.id,
-            "RW_PIPELINE_ID": run.pipeline_id,
-            "RW_PIPELINE_NAME": pipeline.name if pipeline else "",
-            "RW_COMMIT_SHA": run.commit_sha or "",
-            "RW_ARTIFACT_ID": run.artifact_id or "",
-            "RW_TRIGGERED_BY": run.triggered_by or "",
-            "RW_GIT_REPO": (pipeline.git_repo or "") if pipeline else "",
-            "RW_GIT_BRANCH": (pipeline.git_branch or "main") if pipeline else "main",
+            "CDT_PIPELINE_RUN_ID": run.id,
+            "CDT_PIPELINE_ID": run.pipeline_id,
+            "CDT_PIPELINE_NAME": pipeline.name if pipeline else "",
+            "CDT_COMMIT_SHA": run.commit_sha or "",
+            "CDT_ARTIFACT_ID": run.artifact_id or "",
+            "CDT_TRIGGERED_BY": run.triggered_by or "",
+            "CDT_GIT_REPO": (pipeline.git_repo or "") if pipeline else "",
+            "CDT_GIT_BRANCH": (pipeline.git_branch or "main") if pipeline else "main",
         }
 
         for sr in stage_runs:
@@ -167,9 +189,9 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
             sr.started_at = _now()
             db.session.commit()
 
-            context_env["RW_STAGE_RUN_ID"] = sr.id
-            context_env["RW_STAGE_ID"] = sr.stage_id
-            context_env["RW_STAGE_NAME"] = sr.stage.name if sr.stage else ""
+            context_env["CDT_STAGE_RUN_ID"] = sr.id
+            context_env["CDT_STAGE_ID"] = sr.stage_id
+            context_env["CDT_STAGE_NAME"] = sr.stage.name if sr.stage else ""
 
             task_runs = sorted(sr.task_runs, key=lambda tr: tr.task.order)
             stage_failed = False
@@ -182,7 +204,7 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
                 db.session.commit()
 
                 # Build full runtime context from accumulated outputs so far
-                runtime_ctx = _build_runtime_context(run)
+                runtime_ctx = _build_runtime_context(run, stage_run=sr, task_run=tr, task=task)
                 user_input = {}
                 if tr.user_input:
                     try:
@@ -190,15 +212,25 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
                     except (ValueError, TypeError):
                         user_input = {}
 
+                # Expose webhook payload as a dedicated env var if present
+                webhook_payload = runtime_ctx.get("webhook", {}).get("payload", {})
+
                 task_env = {
                     **context_env,
-                    "RW_TASK_RUN_ID": tr.id,
-                    "RW_TASK_ID": task.id,
-                    "RW_TASK_NAME": task.name,
+                    "CDT_TASK_RUN_ID": tr.id,
+                    "CDT_TASK_ID": task.id,
+                    "CDT_TASK_NAME": task.name,
                     # Full runtime context as JSON string
-                    "RW_RUNTIME": json.dumps(runtime_ctx),
-                    "RW_USER_INPUT": json.dumps(user_input),
+                    "CDT_RUNTIME": json.dumps(runtime_ctx),
+                    "CDT_USER_INPUT": json.dumps(user_input),
+                    # Webhook payload shortcut — empty dict if not triggered by webhook
+                    "CDT_WEBHOOK_PAYLOAD": json.dumps(webhook_payload),
+                    # Resolved properties flat dict — accessible as $CDT_PROPS in scripts
+                    "CDT_PROPS": json.dumps(runtime_ctx.get("properties", {})),
                 }
+
+                # Persist the full CDT_* context so users can inspect it later
+                tr.context_env = json.dumps(task_env)
 
                 if _in_kubernetes():
                     rc, logs = _run_script_k8s(
@@ -260,6 +292,107 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
         run.finished_at = _now()
         db.session.commit()
         pipeline_run_finished(run)
+
+
+def restart_from_stage(
+    pipeline_run_id: str,
+    stage_run_id: str,
+    triggered_by: str = "system",
+    app: Any = None,
+) -> PipelineRun:
+    """Create a new PipelineRun that re-executes from the given stage onwards.
+
+    Copies commit_sha/artifact_id from the original run and seeds StageRun/TaskRun
+    records only for stages at or after the target stage (earlier stages are seeded
+    as Succeeded so they appear in the flow graph).
+    """
+    original = db.get_or_404(PipelineRun, pipeline_run_id)
+    original_sr = db.get_or_404(StageRun, stage_run_id)
+
+    # Determine the order of the restart point
+    restart_order = original_sr.stage.order if original_sr.stage else 0
+
+    pipeline = db.get_or_404(Pipeline, original.pipeline_id)
+
+    new_run = PipelineRun(
+        id=pipeline_run_id(),
+        pipeline_id=original.pipeline_id,
+        status=RunStatus.RUNNING,
+        commit_sha=original.commit_sha,
+        artifact_id=original.artifact_id,
+        compliance_rating=pipeline.compliance_rating,
+        compliance_score=pipeline.compliance_score,
+        triggered_by=triggered_by,
+        runtime_properties=original.runtime_properties or "{}",
+        started_at=datetime.now(UTC),
+    )
+    db.session.add(new_run)
+
+    for stage in sorted(pipeline.stages, key=lambda s: s.order):
+        if stage.order < restart_order:
+            # Keep earlier stages as already-succeeded placeholders
+            sr = StageRun(
+                id=resource_id("srun"),
+                pipeline_run_id=new_run.id,
+                stage_id=stage.id,
+                status=RunStatus.SUCCEEDED,
+                runtime_properties="{}",
+                started_at=datetime.now(UTC),
+                finished_at=datetime.now(UTC),
+            )
+            db.session.add(sr)
+            db.session.flush()
+            for task in sorted(stage.tasks, key=lambda t: t.order):
+                tr = TaskRun(
+                    id=resource_id("trun"),
+                    task_id=task.id,
+                    stage_run_id=sr.id,
+                    status=RunStatus.SUCCEEDED,
+                    logs="(skipped — restarted from later stage)",
+                    started_at=datetime.now(UTC),
+                    finished_at=datetime.now(UTC),
+                )
+                db.session.add(tr)
+        else:
+            sr = StageRun(
+                id=resource_id("srun"),
+                pipeline_run_id=new_run.id,
+                stage_id=stage.id,
+                status=RunStatus.PENDING,
+                runtime_properties="{}",
+            )
+            db.session.add(sr)
+            db.session.flush()
+            for task in sorted(stage.tasks, key=lambda t: t.order):
+                tr = TaskRun(
+                    id=resource_id("trun"),
+                    task_id=task.id,
+                    stage_run_id=sr.id,
+                    status="Pending",
+                    logs="",
+                )
+                db.session.add(tr)
+
+    db.session.commit()
+
+    record_event(
+        "pipeline.run.restarted",
+        triggered_by,
+        "pipeline_run",
+        new_run.id,
+        "create",
+        detail={"original_run_id": pipeline_run_id, "restart_from_stage": stage_run_id},
+    )
+
+    if app and pipeline.stages:
+        thread = threading.Thread(
+            target=_execute_pipeline_async,
+            args=(app, new_run.id),
+            daemon=True,
+        )
+        thread.start()
+
+    return new_run
 
 
 def update_run_status(run: PipelineRun | ReleaseRun, new_status: str) -> PipelineRun | ReleaseRun:

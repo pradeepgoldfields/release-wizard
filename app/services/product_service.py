@@ -33,6 +33,9 @@ def create_application(
     name: str,
     artifact_type: str = "container",
     repository_url: str | None = None,
+    build_version: str | None = None,
+    compliance_rating: str | None = None,
+    description: str | None = None,
 ) -> ApplicationArtifact:
     """Create an ApplicationArtifact under a Product."""
     artifact = ApplicationArtifact(
@@ -41,6 +44,9 @@ def create_application(
         name=name,
         artifact_type=artifact_type,
         repository_url=repository_url,
+        build_version=build_version,
+        compliance_rating=compliance_rating,
+        description=description,
     )
     db.session.add(artifact)
     db.session.commit()

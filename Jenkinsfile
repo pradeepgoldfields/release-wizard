@@ -22,7 +22,7 @@ spec:
     }
 
     environment {
-        APP_NAME     = 'release-wizard'
+        APP_NAME     = 'conduit'
         IMAGE_REPO   = "your-registry.example.com/${APP_NAME}"
         IMAGE_TAG    = "${env.GIT_COMMIT?.take(8) ?: 'latest'}"
         FULL_IMAGE   = "${IMAGE_REPO}:${IMAGE_TAG}"
@@ -111,8 +111,8 @@ spec:
                 // Replace image tag in the deployment manifest and apply
                 sh """
                     sed -i 's|image: .*|image: ${FULL_IMAGE}|g' k8s/deployment.yaml
-                    kubectl apply -f k8s/ --namespace=release-wizard-dev
-                    kubectl rollout status deployment/${APP_NAME} --namespace=release-wizard-dev --timeout=120s
+                    kubectl apply -f k8s/ --namespace=conduit-dev
+                    kubectl rollout status deployment/${APP_NAME} --namespace=conduit-dev --timeout=120s
                 """
             }
         }
@@ -126,8 +126,8 @@ spec:
             steps {
                 sh """
                     sed -i 's|image: .*|image: ${FULL_IMAGE}|g' k8s/deployment.yaml
-                    kubectl apply -f k8s/ --namespace=release-wizard-prod
-                    kubectl rollout status deployment/${APP_NAME} --namespace=release-wizard-prod --timeout=180s
+                    kubectl apply -f k8s/ --namespace=conduit-prod
+                    kubectl rollout status deployment/${APP_NAME} --namespace=conduit-prod --timeout=180s
                 """
             }
         }

@@ -11,10 +11,10 @@ RUN pip install --no-cache-dir --upgrade pip \
 FROM registry.access.redhat.com/ubi9/python-312
 
 # Labels for OpenShift / container catalog
-LABEL name="release-wizard" \
+LABEL name="conduit" \
       version="0.1.0" \
       maintainer="your-team@example.com" \
-      description="Release Wizard web application"
+      description="Conduit web application"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

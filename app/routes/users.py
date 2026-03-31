@@ -6,6 +6,10 @@ All routes are under ``/api/v1/users`` and ``/api/v1/groups``.
 
 from __future__ import annotations
 
+import csv
+import io
+import json
+
 import bcrypt
 from flask import Blueprint, jsonify, request
 
@@ -113,6 +117,88 @@ def delete_user(user_id: str):
     db.session.delete(user)
     db.session.commit()
     return "", 204
+
+
+@users_bp.post("/api/v1/users/import")
+def bulk_import_users():
+    """Bulk-import users from JSON or CSV.
+
+    Accepts either:
+      - ``application/json``: list of user objects
+      - ``text/csv``:  CSV with header row (username, email, display_name, persona, password)
+
+    Returns a summary: ``{"created": N, "skipped": N, "errors": [...]}``
+    """
+    content_type = request.content_type or ""
+    records: list[dict] = []
+
+    if "application/json" in content_type:
+        body = request.get_json(silent=True)
+        if not isinstance(body, list):
+            return jsonify({"error": "Expected a JSON array of user objects"}), 400
+        records = body
+    elif "text/csv" in content_type or "text/plain" in content_type:
+        text = request.get_data(as_text=True)
+        reader = csv.DictReader(io.StringIO(text))
+        records = [row for row in reader]
+    else:
+        # Try JSON first, then CSV
+        body = request.get_json(silent=True)
+        if isinstance(body, list):
+            records = body
+        else:
+            text = request.get_data(as_text=True)
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    records = parsed
+            except (ValueError, TypeError):
+                pass
+            if not records:
+                try:
+                    reader = csv.DictReader(io.StringIO(text))
+                    records = [row for row in reader]
+                except Exception:
+                    pass
+
+    if not records:
+        return jsonify(
+            {"error": "No records parsed — send a JSON array or CSV with header row"}
+        ), 400
+
+    created = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for i, row in enumerate(records):
+        username = (row.get("username") or "").strip()
+        if not username:
+            errors.append(f"Row {i + 1}: missing username")
+            continue
+
+        existing = User.query.filter_by(username=username).first()
+        if existing:
+            skipped += 1
+            continue
+
+        try:
+            user = create_user(
+                username=username,
+                email=(row.get("email") or "").strip() or None,
+                display_name=(row.get("display_name") or row.get("displayName") or "").strip()
+                or None,
+                persona=(row.get("persona") or "ReadOnly").strip(),
+                ldap_dn=(row.get("ldap_dn") or row.get("ldapDn") or "").strip() or None,
+            )
+            password = (row.get("password") or "").strip()
+            if password:
+                user.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+                db.session.commit()
+            created += 1
+        except Exception as exc:
+            errors.append(f"Row {i + 1} ({username}): {exc}")
+
+    return jsonify({"created": created, "skipped": skipped, "errors": errors})
 
 
 # ── User role bindings ────────────────────────────────────────────────────────

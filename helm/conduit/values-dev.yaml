@@ -1,5 +1,5 @@
 # Development environment overrides
-# Usage: helm upgrade --install release-wizard ./helm/release-wizard -f helm/release-wizard/values-dev.yaml
+# Usage: helm upgrade --install conduit ./helm/conduit -f helm/conduit/values-dev.yaml
 
 image:
   tag: "latest"
@@ -15,7 +15,7 @@ hpa:
   enabled: false
 
 ingress:
-  host: release-wizard.dev.example.com
+  host: conduit.dev.example.com
   tls:
     enabled: false
 

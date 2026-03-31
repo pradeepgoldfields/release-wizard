@@ -6,7 +6,7 @@ runs change state. Degrades gracefully when neither broker is configured.
 Configuration (environment variables):
   KAFKA_BOOTSTRAP_SERVERS  e.g. ``kafka:9092``           → uses kafka-python
   NATS_URL                 e.g. ``nats://nats:4222``     → uses nats-py
-  EVENT_TOPIC              Kafka topic / NATS subject prefix (default: ``release-wizard``)
+  EVENT_TOPIC              Kafka topic / NATS subject prefix (default: ``conduit``)
 
 If both are set, Kafka takes precedence. If neither is set, publish() is a no-op.
 
@@ -14,7 +14,7 @@ Event envelope (JSON):
   {
     "event":      "pipeline.run.started" | "pipeline.run.finished" | ...,
     "timestamp":  "2026-03-30T12:00:00Z",
-    "source":     "release-wizard",
+    "source":     "conduit",
     "data":       { ...resource-specific fields... }
   }
 """
@@ -29,7 +29,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-_TOPIC = os.getenv("EVENT_TOPIC", "release-wizard")
+_TOPIC = os.getenv("EVENT_TOPIC", "conduit")
 
 # ── Lazy broker clients ───────────────────────────────────────────────────────
 
@@ -115,7 +115,7 @@ def _build_envelope(event_type: str, data: dict) -> dict:
     return {
         "event": event_type,
         "timestamp": datetime.now(UTC).isoformat(),
-        "source": "release-wizard",
+        "source": "conduit",
         "data": data,
     }
 

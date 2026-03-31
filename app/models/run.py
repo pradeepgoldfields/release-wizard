@@ -60,6 +60,7 @@ class StageRun(db.Model):
                     "return_code": tr.return_code,
                     "logs": tr.logs,
                     "output_json": tr.output_json,
+                    "context_env": tr.context_env,
                     "started_at": tr.started_at.isoformat() if tr.started_at else None,
                     "finished_at": tr.finished_at.isoformat() if tr.finished_at else None,
                 }
@@ -95,6 +96,81 @@ class PipelineRun(db.Model):
     def __repr__(self) -> str:
         return f"<PipelineRun id={self.id!r} status={self.status!r}>"
 
+    def completion_percentage(self) -> int:
+        """Compute 0–100 execution progress for this pipeline run.
+
+        Algorithm — script-size-weighted task progress:
+
+        Each task's weight is proportional to the length of its run_code
+        (longer scripts = more work). Minimum weight of 1 per task ensures
+        tasks with empty scripts still contribute.
+
+        Status mapping (progress stops at point of failure):
+          Succeeded / Warning  → 100% of task weight  (done)
+          Running              →  50% of task weight  (in-flight)
+          Failed               →  50% of task weight  (stopped here, partial)
+          Cancelled            →   0%                 (never ran — not counted)
+          Pending              →   0%                 (not started)
+
+        Terminal run outcomes:
+          Succeeded / Warning → 100  (all work done)
+          Failed              → actual weighted progress (shows where it stopped)
+          Cancelled           → actual weighted progress
+        """
+        if self.status in {"Succeeded", "Warning"}:
+            return 100
+
+        stage_runs = self.stage_runs or []
+        if not stage_runs:
+            return 0
+
+        sorted_stages = sorted(
+            stage_runs, key=lambda sr: getattr(sr.stage, "order", 0) if sr.stage else 0
+        )
+
+        total_weight = 0.0
+        weighted_done = 0.0
+
+        for sr in sorted_stages:
+            task_runs = sr.task_runs or []
+            if not task_runs:
+                # Stage with no tasks: weight=1, count if terminal (not cancelled)
+                w = 1.0
+                total_weight += w
+                if sr.status in {"Succeeded", "Warning"}:
+                    weighted_done += w
+                elif sr.status == "Running":
+                    weighted_done += w * 0.5
+                # Failed → 0.5 * w so the bar stops here
+                elif sr.status == "Failed":
+                    weighted_done += w * 0.5
+                # Pending / Cancelled → 0
+                continue
+
+            for tr in task_runs:
+                # Weight = length of script code (min 1)
+                code_len = len(tr.task.run_code or "") if tr.task else 0
+                w = max(code_len, 1)
+                total_weight += w
+
+                if tr.status in {"Succeeded", "Warning"}:
+                    weighted_done += w
+                elif tr.status == "Running":
+                    weighted_done += w * 0.5
+                elif tr.status == "Failed":
+                    # Failed task: counts as 50% (we reached it but stopped)
+                    weighted_done += w * 0.5
+                # Cancelled / Pending → 0 (didn't run)
+
+        if total_weight == 0:
+            return 0
+
+        pct = (weighted_done / total_weight) * 100
+        # Running pipelines are capped at 99 so 100 only appears on true completion
+        if self.status == "Running":
+            return min(round(pct), 99)
+        return min(round(pct), 100)
+
     def to_dict(self, include_stages: bool = False) -> dict[str, Any]:
         """Serialise to a JSON-safe dictionary."""
         import json as _json
@@ -113,6 +189,7 @@ class PipelineRun(db.Model):
             "runtime_properties": _json.loads(self.runtime_properties or "{}"),
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "completion_percentage": self.completion_percentage(),
         }
         if include_stages:
             data["stage_runs"] = [sr.to_dict() for sr in self.stage_runs]

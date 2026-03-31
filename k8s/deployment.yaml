@@ -1,30 +1,30 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: release-wizard
+  name: conduit
   labels:
-    app: release-wizard
+    app: conduit
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: release-wizard
+      app: conduit
   template:
     metadata:
       labels:
-        app: release-wizard
+        app: conduit
     spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
       containers:
-      - name: release-wizard
-        image: your-registry.example.com/release-wizard:latest   # replaced by CI
+      - name: conduit
+        image: your-registry.example.com/conduit:latest   # replaced by CI
         ports:
         - containerPort: 8080
         envFrom:
         - configMapRef:
-            name: release-wizard-config
+            name: conduit-config
         env:
         - name: LOG_LEVEL
           value: "INFO"

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urljoin
 
+import requests as _requests
 from flask import Blueprint, jsonify, request
 
 from app.extensions import db
@@ -28,7 +30,7 @@ BUILTIN_PLUGINS = [
         "version": "1.0.0",
         "category": "ci",
         "icon": "🦊",
-        "author": "Release Wizard",
+        "author": "Conduit",
         "config_schema": json.dumps(
             {
                 "fields": [
@@ -65,7 +67,7 @@ BUILTIN_PLUGINS = [
         "version": "1.0.0",
         "category": "ci",
         "icon": "🤖",
-        "author": "Release Wizard",
+        "author": "Conduit",
         "config_schema": json.dumps(
             {
                 "fields": [
@@ -103,7 +105,7 @@ BUILTIN_PLUGINS = [
         "version": "1.0.0",
         "category": "ci",
         "icon": "🪣",
-        "author": "Release Wizard",
+        "author": "Conduit",
         "config_schema": json.dumps(
             {
                 "fields": [
@@ -140,7 +142,7 @@ BUILTIN_PLUGINS = [
         "version": "1.0.0",
         "category": "ci",
         "icon": "☁️",
-        "author": "Release Wizard",
+        "author": "Conduit",
         "config_schema": json.dumps(
             {
                 "fields": [
@@ -327,3 +329,69 @@ def delete_config(plugin_id: str, config_id: str):
     db.session.delete(cfg)
     db.session.commit()
     return "", 204
+
+
+@plugins_bp.post("/<plugin_id>/configs/<config_id>/test")
+def test_config(plugin_id: str, config_id: str):
+    """Test connectivity for a plugin configuration.
+
+    Performs a basic authenticated HTTP request to the tool URL and returns
+    ``{"ok": true/false, "message": "..."}`` — never raises an error status
+    so the UI can always display the result.
+    """
+    plugin = db.get_or_404(Plugin, plugin_id)
+    cfg = PluginConfig.query.filter_by(id=config_id, plugin_id=plugin_id).first_or_404()
+
+    tool_url = (cfg.tool_url or "").strip()
+    if not tool_url:
+        return jsonify({"ok": False, "message": "No tool URL configured"})
+
+    creds: dict = {}
+    if cfg.credentials:
+        try:
+            creds = json.loads(cfg.credentials)
+        except (ValueError, TypeError):
+            creds = {}
+
+    # Build auth depending on plugin type
+    auth = None
+    headers: dict[str, str] = {"User-Agent": "ReleaseWizard/1.0"}
+    plugin_name = plugin.name or ""
+
+    if plugin_name in ("gitlab-ci",):
+        token = creds.get("private_token", "")
+        if token:
+            headers["PRIVATE-TOKEN"] = token
+        probe_url = urljoin(tool_url.rstrip("/") + "/", "api/v4/version")
+    elif plugin_name in ("jenkins", "cloudbees-ci"):
+        username = creds.get("username", "")
+        api_token = creds.get("api_token", "")
+        if username and api_token:
+            auth = (username, api_token)
+        probe_url = tool_url.rstrip("/") + "/api/json?tree=mode"
+    elif plugin_name == "bitbucket-pipelines":
+        username = creds.get("username", "")
+        app_password = creds.get("app_password", "")
+        if username and app_password:
+            auth = (username, app_password)
+        workspace = creds.get("workspace", "")
+        probe_url = (
+            f"https://api.bitbucket.org/2.0/workspaces/{workspace}"
+            if workspace
+            else "https://api.bitbucket.org/2.0/user"
+        )
+    else:
+        # Generic: just probe the tool URL
+        probe_url = tool_url
+
+    try:
+        resp = _requests.get(probe_url, auth=auth, headers=headers, timeout=8, verify=False)  # noqa: S501
+        if resp.status_code < 400:
+            return jsonify({"ok": True, "message": f"Connected — HTTP {resp.status_code}"})
+        return jsonify({"ok": False, "message": f"Server returned HTTP {resp.status_code}"})
+    except _requests.exceptions.ConnectionError as exc:
+        return jsonify({"ok": False, "message": f"Connection refused: {exc}"})
+    except _requests.exceptions.Timeout:
+        return jsonify({"ok": False, "message": "Connection timed out after 8 seconds"})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "message": str(exc)})

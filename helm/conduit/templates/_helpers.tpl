@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "release-wizard.name" -}}
+{{- define "conduit.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -9,7 +9,7 @@ Expand the name of the chart.
 Create a default fully qualified app name.
 Truncate at 63 chars because DNS names may not be longer.
 */}}
-{{- define "release-wizard.fullname" -}}
+{{- define "conduit.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -25,38 +25,38 @@ Truncate at 63 chars because DNS names may not be longer.
 {{/*
 Chart label — name + version.
 */}}
-{{- define "release-wizard.chart" -}}
+{{- define "conduit.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels applied to every resource.
 */}}
-{{- define "release-wizard.labels" -}}
-helm.sh/chart: {{ include "release-wizard.chart" . }}
-{{ include "release-wizard.selectorLabels" . }}
+{{- define "conduit.labels" -}}
+helm.sh/chart: {{ include "conduit.chart" . }}
+{{ include "conduit.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
-app.kubernetes.io/part-of: release-wizard
+app.kubernetes.io/part-of: conduit
 {{- end }}
 
 {{/*
 Selector labels — used by Deployment.spec.selector and Service.spec.selector.
 These must remain stable across upgrades (never change them after first install).
 */}}
-{{- define "release-wizard.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "release-wizard.name" . }}
+{{- define "conduit.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "conduit.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 ServiceAccount name.
 */}}
-{{- define "release-wizard.serviceAccountName" -}}
+{{- define "conduit.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "release-wizard.fullname" .) .Values.serviceAccount.name }}
+{{- default (include "conduit.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
@@ -65,7 +65,7 @@ ServiceAccount name.
 {{/*
 Namespace — respects namespaceOverride.
 */}}
-{{- define "release-wizard.namespace" -}}
+{{- define "conduit.namespace" -}}
 {{- default .Release.Namespace .Values.namespaceOverride }}
 {{- end }}
 
@@ -73,10 +73,10 @@ Namespace — respects namespaceOverride.
 Name of the Secret that holds sensitive env vars.
 When existingSecret is set the chart-managed secret is skipped.
 */}}
-{{- define "release-wizard.secretName" -}}
+{{- define "conduit.secretName" -}}
 {{- if .Values.existingSecret }}
 {{- .Values.existingSecret }}
 {{- else }}
-{{- include "release-wizard.fullname" . }}
+{{- include "conduit.fullname" . }}
 {{- end }}
 {{- end }}

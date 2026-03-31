@@ -4,10 +4,10 @@ const BASE = "/api/v1";
 
 // ── JWT token storage ────────────────────────────────────────────────────────
 const auth = {
-  getToken: () => localStorage.getItem("rw_token"),
-  setToken: (t) => localStorage.setItem("rw_token", t),
-  clearToken: () => localStorage.removeItem("rw_token"),
-  isLoggedIn: () => !!localStorage.getItem("rw_token"),
+  getToken: () => localStorage.getItem("cdt_token"),
+  setToken: (t) => localStorage.setItem("cdt_token", t),
+  clearToken: () => localStorage.removeItem("cdt_token"),
+  isLoggedIn: () => !!localStorage.getItem("cdt_token"),
 };
 
 async function request(method, path, body) {
@@ -95,6 +95,7 @@ const api = {
   getPipelineRuns: (plid) => request("GET", `/pipelines/${plid}/runs`),
   createPipelineRun: (plid, data) => request("POST", `/pipelines/${plid}/runs`, data),
   getPipelineRun: (id) => request("GET", `/pipeline-runs/${id}`),
+  getPipelineRunContext: (id) => request("GET", `/pipeline-runs/${id}/context`),
   updatePipelineRun: (id, data) => request("PATCH", `/pipeline-runs/${id}`, data),
 
   // Releases
@@ -111,6 +112,10 @@ const api = {
   getReleaseAppGroups: (pid, rid) => request("GET", `/products/${pid}/releases/${rid}/application-groups`),
   addReleaseAppGroup: (pid, rid, data) => request("POST", `/products/${pid}/releases/${rid}/application-groups`, data),
   removeReleaseAppGroup: (pid, rid, gid) => request("DELETE", `/products/${pid}/releases/${rid}/application-groups/${gid}`),
+
+  // Pipeline run restart
+  rerunPipeline: (runId) => request("POST", `/pipeline-runs/${runId}/rerun`),
+  rerunFromStage: (runId, stageRunId) => request("POST", `/pipeline-runs/${runId}/stages/${stageRunId}/rerun`),
 
   // Release runs
   getReleaseRuns: (rid) => request("GET", `/releases/${rid}/runs`),
@@ -155,6 +160,7 @@ const api = {
   createPluginConfig: (id, data) => request("POST", `/plugins/${id}/configs`, data),
   updatePluginConfig: (id, cfgId, data) => request("PUT", `/plugins/${id}/configs/${cfgId}`, data),
   deletePluginConfig: (id, cfgId) => request("DELETE", `/plugins/${id}/configs/${cfgId}`),
+  testPluginConfig: (id, cfgId) => request("POST", `/plugins/${id}/configs/${cfgId}/test`),
 
   // YAML import
   importPipelineYaml: (pid, plid, yamlText) => {
@@ -183,6 +189,7 @@ const api = {
   getComplianceRules: () => request("GET", "/compliance/rules"),
   createComplianceRule: (data) => request("POST", "/compliance/rules", data),
   deleteComplianceRule: (id) => request("DELETE", `/compliance/rules/${id}`),
+  getIso27001Report: () => request("GET", "/compliance/iso27001"),
   getAuditEvents: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request("GET", `/compliance/audit-events${qs ? "?" + qs : ""}`);
@@ -194,6 +201,43 @@ const api = {
   updateWebhook: (id, data) => request("PUT", `/webhooks/${id}`, data),
   deleteWebhook: (id) => request("DELETE", `/webhooks/${id}`),
   getWebhookDeliveries: (id) => request("GET", `/webhooks/${id}/deliveries`),
+  getWebhookToken: (id) => request("GET", `/webhooks/${id}/token`),
+
+  // AI Chat
+  chat: (messages) => request("POST", "/chat", { messages }),
+
+  // Platform Settings
+  getSettings: () => request("GET", "/settings"),
+  setSetting: (key, value) => request("PUT", `/settings/${key}`, { value }),
+  clearSetting: (key) => request("DELETE", `/settings/${key}`),
+  testRunner: (data) => request("POST", "/settings/runner/test", data),
+
+  // Maturity
+  getPipelineMaturity: (pipelineId) => request("GET", `/maturity/pipeline/${pipelineId}`),
+  getApplicationMaturity: (applicationId) => request("GET", `/maturity/application/${applicationId}`),
+  getProductMaturity: (productId) => request("GET", `/maturity/product/${productId}`),
+  getMaturityOverview: () => request("GET", "/maturity/overview"),
+
+  // App Dictionary
+  getAppDictionary: (productId) => request("GET", `/products/${productId}/applications`),
+  createAppDictionaryEntry: (productId, data) => request("POST", `/products/${productId}/applications`, data),
+  updateAppDictionaryEntry: (productId, appId, data) => request("PUT", `/products/${productId}/applications/${appId}`, data),
+  deleteAppDictionaryEntry: (productId, appId) => request("DELETE", `/products/${productId}/applications/${appId}`),
+
+  // Properties (design-time)
+  listProperties: (ownerType, ownerId) => request("GET", `/properties/${ownerType}/${ownerId}`),
+  createProperty: (ownerType, ownerId, data) => request("POST", `/properties/${ownerType}/${ownerId}`, data),
+  updateProperty: (ownerType, ownerId, name, data) => request("PUT", `/properties/${ownerType}/${ownerId}/${encodeURIComponent(name)}`, data),
+  deleteProperty: (ownerType, ownerId, name) => request("DELETE", `/properties/${ownerType}/${ownerId}/${encodeURIComponent(name)}`),
+
+  // Parameter values (runtime overrides)
+  listParamValues: (runType, runId) => request("GET", `/parameter-values/${runType}/${runId}`),
+  setParamValue: (runType, runId, data) => request("POST", `/parameter-values/${runType}/${runId}`, data),
+  deleteParamValue: (runType, runId, name) => request("DELETE", `/parameter-values/${runType}/${runId}/${encodeURIComponent(name)}`),
+
+  // Resolved properties view
+  resolveForPipelineRun: (runId) => request("GET", `/properties/resolve/pipeline-run/${runId}`),
+  resolveForStageRun: (runId, stageRunId) => request("GET", `/properties/resolve/pipeline-run/${runId}/stage-run/${stageRunId}`),
 
   // Vault
   listSecrets: () => request("GET", "/vault"),

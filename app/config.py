@@ -15,7 +15,7 @@ class Config:
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
 
     # Database — defaults to local SQLite; override with DATABASE_URL=postgresql://... in K8s
-    SQLALCHEMY_DATABASE_URI: str = os.getenv("DATABASE_URL", "sqlite:///release_wizard.db")
+    SQLALCHEMY_DATABASE_URI: str = os.getenv("DATABASE_URL", "sqlite:///conduit.db")
     SQLALCHEMY_TRACK_MODIFICATIONS: bool = False
 
     # JWT authentication
@@ -35,6 +35,9 @@ class Config:
 
     # Audit PDF storage path inside the container
     AUDIT_STORAGE_PATH: str = os.getenv("AUDIT_STORAGE_PATH", "/tmp/audit-reports")
+
+    # Groq API — required for the AI chat agent (free tier, Llama 3.3 70B)
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 
 
 class TestConfig(Config):

@@ -31,7 +31,7 @@ def export_product(product_id: str):
     pipelines = Pipeline.query.filter_by(product_id=product_id).all()
 
     data = {
-        "apiVersion": "release-wizard/v1",
+        "apiVersion": "conduit/v1",
         "kind": "Product",
         "metadata": {"name": product.name},
         "spec": {
@@ -85,7 +85,7 @@ def export_product(product_id: str):
 def export_environment(env_id: str):
     env = db.get_or_404(Environment, env_id)
     data = {
-        "apiVersion": "release-wizard/v1",
+        "apiVersion": "conduit/v1",
         "kind": "Environment",
         "metadata": {"name": env.name},
         "spec": {
@@ -101,7 +101,7 @@ def export_environment(env_id: str):
 def export_all_environments():
     envs = Environment.query.order_by(Environment.order).all()
     data = {
-        "apiVersion": "release-wizard/v1",
+        "apiVersion": "conduit/v1",
         "kind": "EnvironmentList",
         "items": [
             {"name": e.name, "env_type": e.env_type, "order": e.order, "description": e.description}
@@ -118,7 +118,7 @@ def export_all_environments():
 def export_pipeline(product_id: str, pipeline_id: str):
     pipeline = Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     data = {
-        "apiVersion": "release-wizard/v1",
+        "apiVersion": "conduit/v1",
         "kind": "Pipeline",
         "metadata": {"name": pipeline.name},
         "spec": {
@@ -155,7 +155,7 @@ def export_pipeline(product_id: str, pipeline_id: str):
 def export_release(product_id: str, release_id: str):
     release = Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
     data = {
-        "apiVersion": "release-wizard/v1",
+        "apiVersion": "conduit/v1",
         "kind": "Release",
         "metadata": {"name": release.name},
         "spec": {
@@ -174,7 +174,7 @@ def export_release(product_id: str, release_id: str):
 def export_agent_pools():
     pools = AgentPool.query.filter_by(pool_type="custom").all()
     data = {
-        "apiVersion": "release-wizard/v1",
+        "apiVersion": "conduit/v1",
         "kind": "AgentPoolList",
         "items": [
             {
@@ -327,7 +327,7 @@ def import_agent_pools():
 def git_pull_pipeline(product_id: str, pipeline_id: str):
     """Pull the pipeline definition from its configured git_repo and apply it.
 
-    Clones the repo (shallow), reads ``release-wizard/<name>.yaml``,
+    Clones the repo (shallow), reads ``conduit/<name>.yaml``,
     and upserts stages/tasks exactly like the import endpoint.
     Returns the updated pipeline dict and the commit SHA.
     """
@@ -428,7 +428,7 @@ def git_push_pipeline(product_id: str, pipeline_id: str):
         for s in pipeline.stages
     ]
     definition = {
-        "apiVersion": "release-wizard/v1",
+        "apiVersion": "conduit/v1",
         "kind": "Pipeline",
         "metadata": {"name": pipeline.name},
         "spec": {
@@ -444,8 +444,8 @@ def git_push_pipeline(product_id: str, pipeline_id: str):
         sha = push_pipeline_to_git(
             pipeline,
             yaml_text,
-            author_name=data.get("author_name", "Release Wizard"),
-            author_email=data.get("author_email", "rw@release-wizard.local"),
+            author_name=data.get("author_name", "Conduit"),
+            author_email=data.get("author_email", "rw@conduit.local"),
         )
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400

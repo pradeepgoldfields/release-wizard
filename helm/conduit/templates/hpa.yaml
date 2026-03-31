@@ -2,15 +2,15 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "release-wizard.fullname" . }}
-  namespace: {{ include "release-wizard.namespace" . }}
+  name: {{ include "conduit.fullname" . }}
+  namespace: {{ include "conduit.namespace" . }}
   labels:
-    {{- include "release-wizard.labels" . | nindent 4 }}
+    {{- include "conduit.labels" . | nindent 4 }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "release-wizard.fullname" . }}
+    name: {{ include "conduit.fullname" . }}
   minReplicas: {{ .Values.hpa.minReplicas }}
   maxReplicas: {{ .Values.hpa.maxReplicas }}
   metrics:

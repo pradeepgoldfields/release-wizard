@@ -203,7 +203,7 @@ def get_audit_report(product_id: str, release_id: str):
     return jsonify(report)
 
 
-@releases_bp.post("/<release_id>/audit/export")
+@releases_bp.get("/<release_id>/audit/export")
 def export_audit_pdf(product_id: str, release_id: str):
     """Generate and stream the audit report as a PDF file.
 

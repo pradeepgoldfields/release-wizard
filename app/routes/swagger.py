@@ -15,24 +15,29 @@ _SWAGGER_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Release Wizard API</title>
+  <title>Conduit API</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
   <style>body{margin:0}.topbar{display:none}</style>
 </head>
 <body>
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
   <script>
     const ui = SwaggerUIBundle({
       url: "/api/v1/docs/openapi.json",
       dom_id: "#swagger-ui",
-      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      presets: [
+        SwaggerUIBundle.presets.apis,
+        SwaggerUIStandalonePreset
+      ],
+      plugins: [SwaggerUIBundle.plugins.DownloadUrl],
       layout: "StandaloneLayout",
       deepLinking: true,
       persistAuthorization: true,
       onComplete: function() {
         // Auto-authorize from the app's localStorage token
-        var token = localStorage.getItem("rw_token");
+        var token = localStorage.getItem("cdt_token");
         if (token) {
           ui.preauthorizeApiKey("BearerAuth", token);
           console.log("[Swagger] Pre-authorized with session token.");
@@ -59,10 +64,10 @@ def openapi_spec():
     spec = {
         "openapi": "3.0.3",
         "info": {
-            "title": "Release Wizard API",
+            "title": "Conduit API",
             "version": "1.0.0",
             "description": (
-                "REST API for Release Wizard — manage products, pipelines, "
+                "REST API for Conduit — manage products, pipelines, "
                 "stages, tasks, releases, agent pools, secrets vault, webhooks, "
                 "users, groups, roles, and compliance rules.\n\n"
                 "**Authentication**: All endpoints (except `/auth/login` and webhook triggers) "
@@ -86,6 +91,12 @@ def openapi_spec():
             {"name": "Vault", "description": "Encrypted secrets storage"},
             {"name": "Webhooks", "description": "Inbound trigger endpoints for pipeline runs"},
             {"name": "YAML", "description": "Export / import resources as YAML"},
+            {"name": "Plugins", "description": "Built-in and custom plugin management"},
+            {"name": "Settings", "description": "Platform-wide configuration key-value store"},
+            {
+                "name": "AI Chat",
+                "description": "Conversational AI assistant powered by Groq / Llama",
+            },
         ],
         "paths": {
             # ── Auth ──────────────────────────────────────────────────────
@@ -456,6 +467,29 @@ def openapi_spec():
                     path_ids=["product_id", "release_id"],
                 ),
             },
+            "/products/{product_id}/releases/{release_id}/application-groups": {
+                "get": _op(
+                    "Releases",
+                    "List application groups for a release",
+                    "AppGroupList",
+                    path_ids=["product_id", "release_id"],
+                ),
+                "post": _op(
+                    "Releases",
+                    "Add an application group to a release",
+                    "AppGroup",
+                    path_ids=["product_id", "release_id"],
+                    body="AppGroupInput",
+                    status=201,
+                ),
+            },
+            "/products/{product_id}/releases/{release_id}/application-groups/{group_id}": {
+                "delete": _del(
+                    "Releases",
+                    path_ids=["product_id", "release_id", "group_id"],
+                    summary="Remove application group from release",
+                ),
+            },
             "/products/{product_id}/releases/{release_id}/export": {
                 "get": _op(
                     "YAML",
@@ -491,6 +525,24 @@ def openapi_spec():
                     "PipelineRun",
                     path_id="run_id",
                     body="StatusInput",
+                ),
+            },
+            "/pipeline-runs/{run_id}/rerun": {
+                "post": _op(
+                    "Runs",
+                    "Clone and re-run a pipeline run from the beginning",
+                    "PipelineRun",
+                    path_id="run_id",
+                    status=202,
+                ),
+            },
+            "/pipeline-runs/{run_id}/stages/{stage_run_id}/rerun": {
+                "post": _op(
+                    "Runs",
+                    "Restart a pipeline run from a specific stage onwards",
+                    "PipelineRun",
+                    path_ids=["run_id", "stage_run_id"],
+                    status=202,
                 ),
             },
             "/releases/{release_id}/runs": {
@@ -549,6 +601,34 @@ def openapi_spec():
                 ),
                 "delete": _del("Users", path_id="user_id"),
             },
+            "/users/import": {
+                "post": {
+                    "tags": ["Users"],
+                    "summary": "Bulk-import users from JSON array or CSV",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {"$ref": "#/components/schemas/UserInput"},
+                                }
+                            },
+                            "text/csv": {
+                                "schema": {
+                                    "type": "string",
+                                    "description": "CSV with header: username,email,display_name,persona,password",
+                                }
+                            },
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "Import summary with created/skipped/errors counts"},
+                        "400": {"description": "Bad request"},
+                        "401": {"description": "Unauthenticated"},
+                    },
+                },
+            },
             "/users/{user_id}/bindings": {
                 "get": _op(
                     "Users", "List role bindings for a user", "RoleBindingList", path_id="user_id"
@@ -594,6 +674,133 @@ def openapi_spec():
                 "get": _op("Users", "Get a role", "Role", path_id="role_id"),
                 "patch": _op("Users", "Update a role", "Role", path_id="role_id", body="RoleInput"),
                 "delete": _del("Users", path_id="role_id"),
+            },
+            # ── Git Sync ──────────────────────────────────────────────────
+            "/products/{product_id}/pipelines/{pipeline_id}/git/pull": {
+                "post": _op(
+                    "YAML",
+                    "Pull pipeline definition from remote Git repository",
+                    "ImportResult",
+                    path_ids=["product_id", "pipeline_id"],
+                ),
+            },
+            "/products/{product_id}/pipelines/{pipeline_id}/git/push": {
+                "post": _op(
+                    "YAML",
+                    "Push pipeline definition to remote Git repository",
+                    "ImportResult",
+                    path_ids=["product_id", "pipeline_id"],
+                    body="GitPushInput",
+                ),
+            },
+            # ── Plugins ───────────────────────────────────────────────────
+            "/plugins": {
+                "get": _op("Plugins", "List all plugins (built-in + custom)", "PluginList"),
+                "post": _op(
+                    "Plugins", "Register a custom plugin", "Plugin", body="PluginInput", status=201
+                ),
+            },
+            "/plugins/{plugin_id}": {
+                "get": _op("Plugins", "Get plugin details", "Plugin", path_id="plugin_id"),
+                "delete": _del("Plugins", path_id="plugin_id"),
+            },
+            "/plugins/{plugin_id}/toggle": {
+                "patch": _op(
+                    "Plugins", "Enable or disable a plugin", "Plugin", path_id="plugin_id"
+                ),
+            },
+            "/plugins/{plugin_id}/configs": {
+                "get": _op(
+                    "Plugins", "List configs for a plugin", "PluginConfigList", path_id="plugin_id"
+                ),
+                "post": _op(
+                    "Plugins",
+                    "Create a plugin config",
+                    "PluginConfig",
+                    path_id="plugin_id",
+                    body="PluginConfigInput",
+                    status=201,
+                ),
+            },
+            "/plugins/{plugin_id}/configs/{config_id}": {
+                "put": _op(
+                    "Plugins",
+                    "Update a plugin config",
+                    "PluginConfig",
+                    path_ids=["plugin_id", "config_id"],
+                    body="PluginConfigInput",
+                ),
+                "delete": _del("Plugins", path_ids=["plugin_id", "config_id"]),
+            },
+            "/plugins/{plugin_id}/configs/{config_id}/test": {
+                "post": _op(
+                    "Plugins",
+                    "Test connectivity for a plugin configuration",
+                    "PluginTestResult",
+                    path_ids=["plugin_id", "config_id"],
+                ),
+            },
+            # ── Platform Settings ─────────────────────────────────────────
+            "/settings": {
+                "get": _op("Settings", "List all platform settings", "SettingList"),
+            },
+            "/settings/{key}": {
+                "put": _op(
+                    "Settings",
+                    "Set a platform setting value",
+                    "Setting",
+                    path_id="key",
+                    body="SettingInput",
+                ),
+                "delete": _del("Settings", path_id="key", summary="Clear a platform setting"),
+            },
+            # ── AI Chat ───────────────────────────────────────────────────
+            "/chat": {
+                "post": {
+                    "tags": ["AI Chat"],
+                    "summary": "Send a message to the AI assistant (Llama 3.3 70B via Groq)",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["messages"],
+                                    "properties": {
+                                        "messages": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "role": {
+                                                        "type": "string",
+                                                        "enum": ["user", "assistant"],
+                                                    },
+                                                    "content": {"type": "string"},
+                                                },
+                                            },
+                                        }
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "AI response message"},
+                        "503": {"description": "AI service unavailable"},
+                    },
+                },
+            },
+            # ── LDAP ──────────────────────────────────────────────────────
+            "/auth/ldap/config": {
+                "get": _op("Auth", "Get LDAP configuration", "LdapConfig"),
+            },
+            "/auth/ldap/test": {
+                "post": _op("Auth", "Test LDAP connection", "LdapTestResult", body="LdapTestInput"),
+            },
+            # ── ISO 27001 ─────────────────────────────────────────────────
+            "/compliance/iso27001": {
+                "get": _op("Compliance", "Get ISO 27001 compliance report", "ISO27001Report"),
             },
             # ── YAML ──────────────────────────────────────────────────────
             "/products/{product_id}/export": {
@@ -860,6 +1067,75 @@ def openapi_spec():
                 "Webhook": {"type": "object"},
                 "WebhookList": {"type": "array"},
                 "WebhookDeliveryList": {"type": "array"},
+                "AppGroup": {"type": "object"},
+                "AppGroupList": {"type": "array"},
+                "AppGroupInput": {
+                    "type": "object",
+                    "required": ["application_id"],
+                    "properties": {
+                        "application_id": {"type": "string"},
+                        "execution_mode": {"type": "string", "enum": ["sequential", "parallel"]},
+                        "pipeline_ids": {"type": "array", "items": {"type": "string"}},
+                        "order": {"type": "integer"},
+                    },
+                },
+                "Plugin": {"type": "object"},
+                "PluginList": {"type": "array"},
+                "PluginInput": {
+                    "type": "object",
+                    "required": ["name"],
+                    "properties": {
+                        "name": {"type": "string"},
+                        "display_name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "category": {"type": "string"},
+                        "version": {"type": "string"},
+                        "icon": {"type": "string"},
+                        "config_schema": {"type": "object"},
+                    },
+                },
+                "PluginConfig": {"type": "object"},
+                "PluginConfigList": {"type": "array"},
+                "PluginConfigInput": {
+                    "type": "object",
+                    "required": ["name"],
+                    "properties": {
+                        "name": {"type": "string"},
+                        "config_data": {"type": "object"},
+                        "is_default": {"type": "boolean"},
+                    },
+                },
+                "Setting": {"type": "object"},
+                "SettingList": {"type": "array"},
+                "SettingInput": {
+                    "type": "object",
+                    "required": ["value"],
+                    "properties": {"value": {"type": "string"}},
+                },
+                "PluginTestResult": {
+                    "type": "object",
+                    "properties": {
+                        "ok": {"type": "boolean"},
+                        "message": {"type": "string"},
+                    },
+                },
+                "LdapConfig": {"type": "object"},
+                "LdapTestInput": {
+                    "type": "object",
+                    "properties": {
+                        "username": {"type": "string"},
+                        "password": {"type": "string"},
+                    },
+                },
+                "LdapTestResult": {"type": "object"},
+                "ISO27001Report": {"type": "object"},
+                "GitPushInput": {
+                    "type": "object",
+                    "properties": {
+                        "commit_message": {"type": "string"},
+                        "branch": {"type": "string"},
+                    },
+                },
             },
         },
     }

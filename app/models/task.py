@@ -26,6 +26,9 @@ class Task(db.Model):
     on_error = db.Column(db.String(32), default="fail")  # fail | warn | continue
     timeout = db.Column(db.Integer, default=300)
     is_required = db.Column(db.Boolean, default=True)
+    # Explicit task type tags used for maturity scoring, comma-separated
+    # e.g. "sast", "sca,custom-secret-scan", "build"
+    task_type = db.Column(db.String(256))
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(UTC))
 
     stage = db.relationship("Stage", back_populates="tasks")
@@ -48,6 +51,7 @@ class Task(db.Model):
             "on_error": self.on_error,
             "timeout": self.timeout,
             "is_required": self.is_required,
+            "task_type": self.task_type or "",
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -65,6 +69,7 @@ class TaskRun(db.Model):
     logs = db.Column(db.Text, default="")
     output_json = db.Column(db.Text)  # JSON string captured from last stdout line
     user_input = db.Column(db.Text)  # JSON string — user-supplied input passed as taskRuntime.input
+    context_env = db.Column(db.Text)  # JSON — CDT_* env vars injected at execution time
     agent_pool_id = db.Column(db.String(64), db.ForeignKey("agent_pools.id"), nullable=True)
     started_at = db.Column(db.DateTime, default=lambda: datetime.now(UTC))
     finished_at = db.Column(db.DateTime)
@@ -77,6 +82,8 @@ class TaskRun(db.Model):
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-safe dictionary."""
+        import json as _json
+
         return {
             "id": self.id,
             "task_id": self.task_id,
@@ -85,6 +92,7 @@ class TaskRun(db.Model):
             "return_code": self.return_code,
             "logs": self.logs,
             "output_json": self.output_json,
+            "context_env": _json.loads(self.context_env or "{}"),
             "agent_pool_id": self.agent_pool_id,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,

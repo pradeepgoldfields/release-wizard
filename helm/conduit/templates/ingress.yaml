@@ -2,10 +2,10 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "release-wizard.fullname" . }}
-  namespace: {{ include "release-wizard.namespace" . }}
+  name: {{ include "conduit.fullname" . }}
+  namespace: {{ include "conduit.namespace" . }}
   labels:
-    {{- include "release-wizard.labels" . | nindent 4 }}
+    {{- include "conduit.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -26,7 +26,7 @@ spec:
             pathType: {{ .Values.ingress.pathType }}
             backend:
               service:
-                name: {{ include "release-wizard.fullname" . }}
+                name: {{ include "conduit.fullname" . }}
                 port:
                   name: http
 {{- end }}

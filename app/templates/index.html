@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Release Wizard</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <title>Conduit</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}?v={{ v }}">
 </head>
 <body>
 
@@ -12,7 +12,7 @@
 
   <!-- ── Sidebar ───────────────────────────────────────────────────────── -->
   <aside id="sidebar">
-    <div class="logo">Release <span>Wizard</span></div>
+    <div class="logo">Con<span>duit</span></div>
     <nav>
       <a href="#dashboard" onclick="navigate('dashboard');return false;">
         <span class="icon">⬛</span> Dashboard
@@ -26,26 +26,47 @@
       <a href="#compliance" onclick="navigate('compliance');return false;">
         <span class="icon">🛡</span> Compliance
       </a>
-      <a href="#agents" onclick="navigate('agents');return false;">
-        <span class="icon">⚙️</span> Agents
+      <a href="#maturity" onclick="navigate('maturity');return false;">
+        <span class="icon">📊</span> Maturity
       </a>
-      <a href="#plugins" onclick="navigate('plugins');return false;">
-        <span class="icon">🔌</span> Plugins
+      <a href="#app-dictionary" onclick="navigate('app-dictionary');return false;">
+        <span class="icon">📚</span> App Dictionary
       </a>
-      <a href="#vault" onclick="navigate('vault');return false;">
-        <span class="icon">🔐</span> Vault
+      <a href="#templates" onclick="navigate('templates');return false;">
+        <span class="icon">🗂️</span> Templates
       </a>
-      <a href="#webhooks" onclick="navigate('webhooks');return false;">
-        <span class="icon">🔗</span> Webhooks
-      </a>
-      <a href="#admin" onclick="navigate('admin');return false;">
-        <span class="icon">👥</span> Administration
+      <div class="nav-section-header" onclick="toggleNavSection('admin-section')">
+        <span class="icon">⚙️</span> Administration
+        <svg class="nav-chevron" id="admin-section-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div id="admin-section" class="nav-sub-group">
+        <a href="#admin/users" onclick="navigate('admin/users');return false;">
+          <span class="icon">👥</span> User Management
+        </a>
+        <a href="#admin/keys" onclick="navigate('admin/keys');return false;">
+          <span class="icon">🔑</span> Key Management
+        </a>
+        <a href="#admin/variables" onclick="navigate('admin/variables');return false;">
+          <span class="icon">🌐</span> Global Variables
+        </a>
+        <a href="#admin/system" onclick="navigate('admin/system');return false;">
+          <span class="icon">🔧</span> System
+        </a>
+        <a href="#admin/frameworks" onclick="navigate('admin/frameworks');return false;">
+          <span class="icon">📋</span> Framework Controls
+        </a>
+      </div>
+      <a href="#monitoring" onclick="navigate('monitoring');return false;">
+        <span class="icon">📡</span> Monitoring
       </a>
       <a href="#docs" onclick="navigate('docs');return false;">
         <span class="icon">📖</span> Docs
       </a>
+      <a href="#tutorial" onclick="navigate('tutorial');return false;">
+        <span class="icon">🎓</span> Tutorial
+      </a>
     </nav>
-    <div class="sidebar-footer">Release Wizard v0.1.0</div>
+    <div class="sidebar-footer">Conduit v0.1.0</div>
   </aside>
 
   <!-- ── Main ──────────────────────────────────────────────────────────── -->
@@ -78,7 +99,41 @@
 <!-- ── Toast container ───────────────────────────────────────────────────── -->
 <div id="toast-container"></div>
 
-<script src="{{ url_for('static', filename='js/api.js') }}"></script>
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<!-- ── AI Chat Widget ─────────────────────────────────────────────────────── -->
+<div id="chat-fab" onclick="toggleChat()" title="AI Assistant">
+  <span id="chat-fab-icon">✨</span>
+</div>
+
+<div id="chat-panel">
+  <div id="chat-header">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:18px">✨</span>
+      <div>
+        <div style="font-weight:600;font-size:13px">Conduit AI</div>
+        <div id="chat-status" style="font-size:11px;color:rgba(255,255,255,.6)">Ask me anything</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button id="chat-clear-btn" onclick="clearChat()" title="Clear chat" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:14px;padding:4px">🗑</button>
+      <button onclick="toggleChat()" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:20px;line-height:1;padding:4px">×</button>
+    </div>
+  </div>
+  <div id="chat-messages"></div>
+  <div id="chat-input-area">
+    <div id="chat-input-row">
+      <textarea id="chat-input" placeholder="Ask about pipelines, releases, compliance…" rows="1"></textarea>
+      <button id="chat-mic-btn" onclick="toggleVoice()" title="Voice input">🎤</button>
+      <button id="chat-send-btn" onclick="sendChatMessage()">Send</button>
+    </div>
+    <div id="chat-voice-indicator" style="display:none">
+      <span class="voice-dot"></span> Listening… click mic to stop
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/api.js') }}?v={{ v }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}?v={{ v }}"></script>
+<script src="{{ url_for('static', filename='js/search.js') }}?v={{ v }}"></script>
+<script src="{{ url_for('static', filename='js/chat.js') }}?v={{ v }}"></script>
 </body>
 </html>
