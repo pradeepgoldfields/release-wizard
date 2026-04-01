@@ -43,15 +43,28 @@ const router = {
       const h = (a.getAttribute("href") || "").replace("#", "");
       a.classList.toggle("active", hash === h || hash.startsWith(h + "/"));
     });
-    // Auto-expand admin section when navigating to an admin route
-    if (hash.startsWith("admin")) {
-      const section = document.getElementById("admin-section");
-      const header = section && section.previousElementSibling;
-      if (section && !section.classList.contains("open")) {
-        section.classList.add("open");
-        if (header) header.classList.add("open");
+    // Auto-expand collapsible sections when navigating to a child route
+    const autoExpand = [
+      { prefix: "admin", id: "admin-section" },
+      { prefix: "monitoring", id: "admin-section" },
+      { prefix: "compliance", id: "governance-section" },
+      { prefix: "admission-rules", id: "governance-section" },
+      { prefix: "maturity", id: "governance-section" },
+      { prefix: "app-dictionary", id: "governance-section" },
+      { prefix: "docs", id: "docs-section" },
+      { prefix: "tutorial", id: "docs-section" },
+      { prefix: "docs/admin-guide", id: "docs-section" },
+    ];
+    autoExpand.forEach(({ prefix, id }) => {
+      if (hash.startsWith(prefix)) {
+        const section = document.getElementById(id);
+        const header = section && section.previousElementSibling;
+        if (section && !section.classList.contains("open")) {
+          section.classList.add("open");
+          if (header) header.classList.add("open");
+        }
       }
-    }
+    });
   },
 
   init() {
@@ -94,7 +107,27 @@ function showLoginPage(errorMsg) {
   loginEl.innerHTML = `
     <div class="login-wrap">
       <div class="login-card">
-        <div class="login-logo">Con<span style="color:var(--brand)">duit</span></div>
+        <div class="login-logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" width="64" height="64" aria-hidden="true">
+            <defs>
+              <linearGradient id="lg-merge" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style="stop-color:#10b981"/>
+                <stop offset="100%" style="stop-color:#0284c7"/>
+              </linearGradient>
+            </defs>
+            <path d="M3,12  C12,12 16,28 26,28" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round"/>
+            <path d="M3,28  C10,28 18,28 26,28" fill="none" stroke="#0284c7" stroke-width="3" stroke-linecap="round"/>
+            <path d="M3,44  C12,44 16,28 26,28" fill="none" stroke="#f59e0b" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="26" cy="28" r="6" fill="white" stroke="url(#lg-merge)" stroke-width="2.5"/>
+            <circle cx="26" cy="28" r="2.8" fill="url(#lg-merge)"/>
+            <path d="M32,28 C40,28 46,28 52,28" fill="none" stroke="url(#lg-merge)" stroke-width="4" stroke-linecap="round"/>
+            <path d="M48,23 L53,28 L48,33" fill="none" stroke="url(#lg-merge)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="4"  cy="12" r="3" fill="#10b981"/>
+            <circle cx="4"  cy="28" r="3" fill="#0284c7"/>
+            <circle cx="4"  cy="44" r="3" fill="#f59e0b"/>
+          </svg>
+          <div class="login-logo-name">Con<span>duit</span></div>
+        </div>
         <div class="login-sub">CI/CD Orchestration Platform</div>
         ${errorMsg ? `<div class="alert alert-danger" style="margin-bottom:12px">${errorMsg}</div>` : ""}
         <div class="form-group">
@@ -133,6 +166,7 @@ async function doLogin() {
     _currentUser = data.user;
     hideLoginPage();
     updateTopbarUser();
+    fetchPermissionCatalog();  // non-blocking; replaces default catalog arrays
     navigate("dashboard");
   } catch (e) {
     showLoginPage("Login failed — server unreachable");
@@ -194,7 +228,7 @@ function updateTopbarUser() {
         <div class="user-dropdown-header">
           <div style="font-weight:600;font-size:13px">${_currentUser.display_name || _currentUser.username}</div>
           <div style="font-size:11.5px;color:var(--gray-400);margin-top:2px">${_currentUser.email || _currentUser.username}</div>
-          <span class="badge badge-blue" style="font-size:10.5px;margin-top:6px;display:inline-block">${_currentUser.persona}</span>
+          <span class="badge badge-blue" style="font-size:10.5px;margin-top:6px;display:inline-block">${_currentUser.email || ""}</span>
         </div>
         <div class="user-dropdown-divider"></div>
         <button class="user-dropdown-item" onclick="closeUserMenu();showChangePassword()">
@@ -475,11 +509,16 @@ function loading() {
 }
 
 // ── Modal helpers ──────────────────────────────────────────────────────────
-function openModal(title, bodyHtml, onConfirm, confirmLabel = "Save") {
+function openModal(title, bodyHtml, onConfirm, confirmLabel = "Save", size = "") {
   el("modal-title").textContent = title;
   el("modal-body").innerHTML = bodyHtml;
   el("modal-confirm").textContent = confirmLabel;
   el("modal-confirm").onclick = onConfirm;
+  const modal = el("modal-overlay").querySelector(".modal");
+  if (modal) {
+    modal.classList.toggle("modal-lg", size === "lg");
+    modal.classList.toggle("modal-xl", size === "xl");
+  }
   el("modal-overlay").classList.add("open");
 }
 
@@ -655,7 +694,7 @@ router.register("products/:id", async (hash, parts) => {
       <button class="tab-btn active" onclick="switchTab(this,'tab-releases')">Releases (${releases.length})</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-apps')">Applications & Pipelines (${apps.length})</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-envs')">Environments (${envs.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'tab-rbac');loadRbacMatrix('product:${product.id}')">RBAC</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-rbac');loadProductPermMatrix('${product.id}')">Permissions</button>
     </div>
 
     <!-- Releases -->
@@ -768,10 +807,10 @@ router.register("products/:id", async (hash, parts) => {
       }
     </div>
 
-    <!-- RBAC -->
+    <!-- Permissions -->
     <div id="tab-rbac" class="tab-panel">
-      <div id="rbac-matrix-${product.id}" style="min-height:60px">
-        <div class="empty-state"><div class="empty-icon">🔐</div><p>Click the RBAC tab to load the permission matrix.</p></div>
+      <div id="prod-perm-matrix-${product.id}" style="min-height:60px">
+        <div class="empty-state"><div class="empty-icon">🔐</div><p>Click the Permissions tab to load the matrix.</p></div>
       </div>
     </div>
   `);
@@ -821,8 +860,282 @@ async function loadRbacMatrix(scope) {
   }
 }
 
+// Product-scoped permission groups — child objects of a product only.
+// Populated from the backend catalog at boot; product_scoped:true entries only.
+let _PRODUCT_PERM_CATALOG = [
+  { group: "Applications", perms: ["applications:view","applications:create","applications:edit","applications:delete"] },
+  { group: "Pipelines",    perms: ["pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:execute","pipelines:run"] },
+  { group: "Releases",     perms: ["releases:view","releases:create","releases:edit","releases:delete","releases:execute","releases:approve"] },
+  { group: "Tasks",        perms: ["tasks:view","tasks:create","tasks:edit","tasks:delete","tasks:execute"] },
+  { group: "Stages",       perms: ["stages:view","stages:create","stages:edit","stages:delete","stages:execute"] },
+  { group: "Environments", perms: ["environments:view","environments:create","environments:edit","environments:delete"] },
+  { group: "Templates",    perms: ["templates:view","templates:create","templates:edit","templates:delete"] },
+  { group: "Webhooks",     perms: ["webhooks:view","webhooks:create","webhooks:edit","webhooks:delete"] },
+  { group: "Compliance",   perms: ["compliance:view","compliance:edit","compliance:approve"] },
+];
+
+async function loadProductPermMatrix(productId) {
+  const container = document.getElementById(`prod-perm-matrix-${productId}`);
+  if (!container) return;
+  container.innerHTML = `<div style="color:var(--gray-400);padding:12px">Loading…</div>`;
+  try {
+    const [roles, bindings, users, groups] = await Promise.all([
+      api.getRoles(),
+      api.getScopeBindings(`product:${productId}`).catch(() => []),
+      api.getUsers().catch(() => []),
+      api.getGroups().catch(() => []),
+    ]);
+    container.innerHTML =
+      `<h3 style="margin:0 0 12px;font-size:15px;font-weight:700">Role Permissions</h3>` +
+      _renderProductPermMatrix(productId, roles) +
+      `<h3 style="margin:24px 0 12px;font-size:15px;font-weight:700">Role Assignments</h3>` +
+      `<div style="font-size:13px;color:var(--gray-600);margin-bottom:12px">Assign roles to users and groups for this product scope (<code>product:${productId}</code>).</div>` +
+      _renderProductBindingMatrix(productId, bindings, roles, users, groups);
+  } catch (e) {
+    container.innerHTML = `<div style="color:var(--red-500);padding:12px">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function _renderProductPermMatrix(productId, roles) {
+  // Exclude system-administrator — it has all perms and is managed globally
+  roles = roles.filter(r => r.name !== "system-administrator");
+  if (!roles.length) return `<div style="padding:12px;color:var(--gray-400)">No roles defined. <a href="#admin/roles" onclick="navigate('admin/roles');return false;">Create roles</a> first.</div>`;
+
+  const colGroups = _PRODUCT_PERM_CATALOG;
+  const totalPerms = colGroups.reduce((n, g) => n + g.perms.length, 0);
+
+  const headerGroups = colGroups.map(g =>
+    `<th colspan="${g.perms.length}" style="text-align:center;background:var(--gray-50);border-bottom:2px solid var(--gray-200);padding:6px 4px;font-size:11px;font-weight:700;color:var(--gray-600);letter-spacing:.3px;border-right:2px solid var(--gray-200);white-space:nowrap">${g.group}</th>`
+  ).join("");
+
+  const headerPerms = colGroups.map(g =>
+    g.perms.map((p, i) => {
+      const action = p.split(":")[1];
+      const isLast = i === g.perms.length - 1;
+      return `<th title="${p}" style="text-align:center;padding:5px 2px;font-size:10px;color:var(--gray-500);font-weight:500;min-width:52px;vertical-align:bottom;${isLast ? "border-right:2px solid var(--gray-200)" : ""}">${action}</th>`;
+    }).join("")
+  ).join("");
+
+  const rows = roles.map(role => {
+    const currentPerms = new Set(role.permissions || []);
+    const cells = colGroups.map(g =>
+      g.perms.map((p, i) => {
+        const checked = currentPerms.has(p) ? "checked" : "";
+        const isLast = i === g.perms.length - 1;
+        const disabled = role.is_builtin ? "disabled" : "";
+        return `<td style="text-align:center;padding:5px 2px;${isLast ? "border-right:2px solid var(--gray-200)" : ""}">
+          <input type="checkbox" data-perm="${p}" data-role="${role.id}" ${checked} ${disabled}
+            style="width:15px;height:15px;accent-color:var(--primary);cursor:${role.is_builtin ? "not-allowed" : "pointer"}"
+            onchange="_prodPermMatrixToggle(this)">
+        </td>`;
+      }).join("")
+    ).join("");
+
+    return `<tr style="background:white;border-bottom:1px solid var(--gray-100)" data-prod-role-row="${role.id}">
+      <td style="padding:9px 12px;font-weight:600;font-size:13px;border-right:1px solid var(--gray-100);white-space:nowrap;min-width:160px">
+        <a href="#admin/roles/${role.id}" onclick="navigate('admin/roles/${role.id}');return false;" style="color:inherit;text-decoration:none">${role.name}</a>
+        ${role.is_builtin ? '<span class="badge badge-blue" style="margin-left:4px;font-size:10px">built-in</span>' : ""}
+        <div style="font-size:11px;font-weight:400;color:var(--gray-400);margin-top:2px" id="prod-perm-count-${role.id}">${[...currentPerms].filter(p => colGroups.flatMap(g => g.perms).includes(p)).length}/${totalPerms}</div>
+      </td>
+      ${cells}
+    </tr>`;
+  }).join("");
+
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:13px;color:var(--gray-600)">Role permissions for product-scoped resources. Each checkbox grants that permission on the role globally.</div>
+      <button class="btn btn-primary btn-sm" onclick="showCreateRole()">+ New Role</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="border-collapse:collapse;width:100%;min-width:700px">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:8px 12px;min-width:160px;background:var(--gray-50);border-bottom:2px solid var(--gray-200);border-right:1px solid var(--gray-200)">Role</th>
+            ${headerGroups}
+          </tr>
+          <tr>
+            <th style="background:var(--gray-50);border-bottom:1px solid var(--gray-200);border-right:1px solid var(--gray-200)"></th>
+            ${headerPerms}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="padding:8px 0 0;font-size:12px;color:var(--gray-400)">
+      Click a checkbox to immediately grant or revoke that permission on the role. Built-in roles are read-only.
+    </div>`;
+}
+
+window._prodPermMatrixToggle = async function(checkbox) {
+  const roleId = checkbox.dataset.role;
+  const perm = checkbox.dataset.perm;
+  checkbox.disabled = true;
+  try {
+    const role = await api.getRole(roleId);
+    const current = new Set(role.permissions || []);
+    if (checkbox.checked) current.add(perm); else current.delete(perm);
+    await api.updateRole(roleId, { permissions: Array.from(current) });
+    // Update per-role counter
+    const allProductPerms = _PRODUCT_PERM_CATALOG.flatMap(g => g.perms);
+    const totalPerms = allProductPerms.length;
+    const countEl = document.getElementById(`prod-perm-count-${roleId}`);
+    if (countEl) countEl.textContent = `${[...current].filter(p => allProductPerms.includes(p)).length}/${totalPerms}`;
+    toast(checkbox.checked ? `Granted: ${perm}` : `Revoked: ${perm}`, "success");
+  } catch (e) {
+    checkbox.checked = !checkbox.checked;
+    toast(e.message, "error");
+  } finally {
+    checkbox.disabled = false;
+  }
+};
+
+// ── Product binding matrix (role assignments for a product scope) ────────────
+
+function _renderProductBindingMatrix(productId, bindings, roles, users, groups) {
+  const scope = `product:${productId}`;
+
+  // Exclude system-administrator and filter to product-relevant roles only
+  const productPerms = _PRODUCT_PERM_CATALOG.flatMap(g => g.perms);
+  const relevantRoles = roles
+    .filter(r => r.name !== "system-administrator")
+    .filter(r => (r.permissions || []).some(p => productPerms.includes(p)));
+
+  if (!relevantRoles.length) return `<div style="padding:12px;color:var(--gray-400)">No roles with product permissions found.</div>`;
+
+  // Build lookup: "user:uid:roleId" or "group:gid:roleId" → bindingId
+  const bindingMap = {};
+  for (const b of bindings) {
+    const key = b.user_id ? `user:${b.user_id}:${b.role_id}` : `group:${b.group_id}:${b.role_id}`;
+    bindingMap[key] = b.id;
+  }
+
+  const principals = [
+    ...groups.map(g => ({ type: "group", id: g.id, label: g.name, sub: `${g.member_count || 0} members` })),
+    ...users.map(u => ({ type: "user", id: u.id, label: u.display_name || u.username, sub: u.username })),
+  ];
+
+  if (!principals.length) return `<div style="padding:12px;color:var(--gray-400)">No users or groups in the system.</div>`;
+
+  const tableId = `prod-assign-matrix-${productId}`;
+
+  const roleCols = relevantRoles.map(r =>
+    `<th style="text-align:center;min-width:100px;vertical-align:bottom;padding:6px 4px;font-size:11.5px;font-weight:600;color:var(--gray-700)">
+      ${r.name}
+      ${r.is_builtin ? '<span class="badge badge-blue" style="margin-left:3px;font-size:9px">built-in</span>' : ""}
+    </th>`
+  ).join("");
+
+  const rows = principals.map(p => {
+    const icon = p.type === "group"
+      ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--primary-light);color:var(--primary);font-size:11px;font-weight:700;margin-right:6px">G</span>`
+      : `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;margin-right:6px">U</span>`;
+    const cells = relevantRoles.map(r => {
+      const key = `${p.type}:${p.id}:${r.id}`;
+      const bindingId = bindingMap[key] || null;
+      const cbId = `pbc-${p.type}-${p.id}-${r.id}`.replace(/[^a-zA-Z0-9-]/g, "-");
+      return `<td style="text-align:center;padding:8px 4px">
+        <input type="checkbox" id="${cbId}" ${bindingId ? "checked" : ""}
+          style="width:17px;height:17px;cursor:pointer;accent-color:var(--primary)"
+          onchange="toggleProductBinding(this,'${scope}','${p.type}','${p.id}','${r.id}','${bindingId || ""}')">
+      </td>`;
+    }).join("");
+    return `<tr style="border-bottom:1px solid var(--gray-100)">
+      <td style="padding:8px 12px;min-width:180px;border-right:1px solid var(--gray-100)" data-label="${(p.label + " " + p.sub).toLowerCase()}">
+        <div style="display:flex;align-items:center">${icon}
+          <div>
+            <div style="font-weight:600;font-size:13px">${p.label}</div>
+            <div style="font-size:11px;color:var(--gray-400)">${p.sub}</div>
+          </div>
+        </div>
+      </td>
+      ${cells}
+    </tr>`;
+  }).join("");
+
+  return `
+    <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <input type="text" id="${tableId}-search" placeholder="Search users or groups…"
+        style="flex:1;min-width:220px;max-width:360px;padding:7px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;outline:none"
+        oninput="filterAssignmentMatrix('${tableId}')" />
+    </div>
+    <div style="overflow-x:auto">
+      <table id="${tableId}" style="border-collapse:collapse;width:100%">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:8px 12px;background:var(--gray-50);border-bottom:2px solid var(--gray-200);border-right:1px solid var(--gray-200)">Principal</th>
+            ${roleCols}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="padding:10px 0 0;font-size:12px;color:var(--gray-400)">
+      Checkboxes assign or remove a role binding for that user/group at scope <code>${scope}</code>.
+    </div>`;
+}
+
+window.toggleProductBinding = async function(checkbox, scope, pType, pId, roleId, existingId) {
+  checkbox.disabled = true;
+  try {
+    if (checkbox.checked) {
+      const body = pType === "user" ? { role_id: roleId, scope, user_id: pId } : { role_id: roleId, scope, group_id: pId };
+      const b = await api.createScopeBinding(body);
+      checkbox.onchange = function() { toggleProductBinding(this, scope, pType, pId, roleId, b.id); };
+      toast("Role assigned", "success");
+    } else {
+      await api.deleteScopeBinding(existingId);
+      checkbox.onchange = function() { toggleProductBinding(this, scope, pType, pId, roleId, ""); };
+      toast("Role removed", "success");
+    }
+  } catch (e) {
+    checkbox.checked = !checkbox.checked;
+    toast(e.message, "error");
+  } finally {
+    checkbox.disabled = false;
+  }
+};
+
+// Permissions relevant to each scope prefix — used to filter role columns in the matrix
+const _SCOPE_PERMISSIONS = {
+  "organization":           null, // null = show all
+  "product":                ["products:view","products:create","products:edit","products:delete"],
+  "application":            ["applications:view","applications:create","applications:edit","applications:delete"],
+  "pipeline":               ["pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:run"],
+  "release":                ["releases:view","releases:create","releases:edit","releases:delete","releases:approve"],
+  "environment":            ["environments:view","environments:create","environments:edit","environments:delete"],
+  "template":               ["templates:view","templates:create","templates:edit","templates:delete"],
+  "webhook":                ["webhooks:view","webhooks:create","webhooks:edit","webhooks:delete"],
+  "plugin":                 ["plugins:view","plugins:install","plugins:configure","plugins:delete"],
+  "agent-pool":             ["agent-pools:view","agent-pools:create","agent-pools:edit","agent-pools:delete"],
+  "vault":                  ["vault:view","vault:create","vault:reveal","vault:delete"],
+  "compliance":             ["compliance:view","compliance:edit","compliance:approve"],
+  "feature:app-dictionary": ["app-dictionary:view","app-dictionary:edit"],
+  "feature:monitoring":     ["monitoring:view","monitoring:configure"],
+  "feature:user-mgmt":      ["users:view","users:create","users:edit","users:delete","groups:view","groups:create","groups:edit","groups:delete","roles:view","roles:create","roles:edit","roles:delete"],
+  "feature:permissions":    ["permissions:view","permissions:grant","permissions:revoke"],
+  "feature:global-vars":    ["global-vars:view","global-vars:edit"],
+};
+
+function _scopePerms(scope) {
+  const prefix = scope.split(":").slice(0, scope.startsWith("feature:") ? 2 : 1).join(":");
+  return _SCOPE_PERMISSIONS[prefix] ?? null;
+}
+
 function _renderRbacMatrix(scope, bindings, roles, users, groups) {
   if (!roles.length) return `<div style="padding:12px;color:var(--gray-400)">No roles defined. <a href="#admin/roles">Create roles</a> first.</div>`;
+
+  // Filter roles to only those that have at least one permission relevant to this scope
+  const relevantPerms = _scopePerms(scope);
+  const filteredRoles = relevantPerms
+    ? roles.map(r => ({
+        ...r,
+        permissions: r.permissions.filter(p => relevantPerms.includes(p)),
+      })).filter(r => r.permissions.length > 0)
+    : roles;
+
+  if (!filteredRoles.length) {
+    return `<div style="padding:12px;color:var(--gray-400)">No roles have permissions defined for this scope.</div>`;
+  }
 
   // Build lookup: "user:uid:roleId" or "group:gid:roleId" → bindingId
   const bindingMap = {};
@@ -839,11 +1152,13 @@ function _renderRbacMatrix(scope, bindings, roles, users, groups) {
 
   if (!principals.length) return `<div style="padding:12px;color:var(--gray-400)">No users or groups in the system.</div>`;
 
-  // Column headers — role name + tooltip of permissions
-  const roleCols = roles.map(r =>
-    `<th style="text-align:center;min-width:100px;vertical-align:bottom;padding:6px 4px">
+  // Column headers — role name + only permissions relevant to this scope
+  const roleCols = filteredRoles.map(r =>
+    `<th style="text-align:center;min-width:110px;vertical-align:bottom;padding:6px 4px">
       <div style="font-size:11.5px;font-weight:600;color:var(--gray-700)">${r.name}</div>
-      <div style="font-size:10px;color:var(--gray-400);margin-top:2px">${r.permissions.join(" · ")}</div>
+      <div style="font-size:10px;color:var(--gray-400);margin-top:2px;line-height:1.5">${r.permissions.map(p =>
+        `<span style="display:inline-block;background:var(--gray-100);border-radius:3px;padding:1px 4px;margin:1px">${p}</span>`
+      ).join("")}</div>
     </th>`
   ).join("");
 
@@ -853,7 +1168,7 @@ function _renderRbacMatrix(scope, bindings, roles, users, groups) {
       ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--primary-light);color:var(--primary);font-size:11px;font-weight:700;margin-right:8px">G</span>`
       : `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;margin-right:8px">U</span>`;
 
-    const cells = roles.map(r => {
+    const cells = filteredRoles.map(r => {
       const key = `${p.type}:${p.id}:${r.id}`;
       const bindingId = bindingMap[key] || null;
       const checked = bindingId ? "checked" : "";
@@ -1436,7 +1751,6 @@ router.register("products/:pid/applications/:id", async (hash, parts) => {
 
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab(this,'tab-app-pipelines')">Pipelines (${appPipelines.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'tab-app-rbac');loadRbacMatrix('application:${appId}')">RBAC</button>
     </div>
 
     <!-- Pipelines -->
@@ -1466,12 +1780,6 @@ router.register("products/:pid/applications/:id", async (hash, parts) => {
       }
     </div>
 
-    <!-- RBAC -->
-    <div id="tab-app-rbac" class="tab-panel">
-      <div id="rbac-matrix-${appId}" style="min-height:60px">
-        <div class="empty-state"><div class="empty-icon">🔐</div><p>Click the RBAC tab to load the permission matrix.</p></div>
-      </div>
-    </div>
   `);
 });
 
@@ -1479,10 +1787,29 @@ let _plEditorProductId = null;
 let _plEditorPipelineId = null;
 let _plYamlDebounce = null;
 
+// ── Active X6 pipeline editor instance ────────────────────────────────────
+let _peInstance    = null;
+let _peSidePanel   = null;
+
+function _getPeSidePanel() {
+  if (!_peSidePanel) _peSidePanel = new PipelineSidePanel();
+  return _peSidePanel;
+}
+
+async function _peReload(productId, pipelineId) {
+  const pipeline = await api.getPipeline(productId, pipelineId);
+  _pipelineVisualStages = pipeline.stages || [];
+  if (_peInstance) _peInstance.reload(_pipelineVisualStages);
+}
+
 router.register("products/:pid/pipelines/:id", async (hash, parts) => {
   const [,productId,,pipelineId] = parts;
-  _plEditorProductId = productId;
+  _plEditorProductId  = productId;
   _plEditorPipelineId = pipelineId;
+
+  // Destroy any prior canvas instance before re-render
+  if (_peInstance) { _peInstance.destroy(); _peInstance = null; }
+
   setContent(loading());
   const [product, pipeline] = await Promise.all([
     api.getProduct(productId),
@@ -1496,65 +1823,6 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
   const stages = pipeline.stages || [];
   _pipelineVisualStages = stages;
 
-  const stagesHtml = stages.length === 0
-    ? `<div class="empty-state"><div class="empty-icon">📋</div><p>No stages yet. Add your first stage to get started.</p></div>`
-    : stages.map((s, idx) => { const _ac = s.accent_color || STAGE_GRADIENTS[idx % STAGE_GRADIENTS.length].color; return `
-      <div id="stage-block-${s.id}" class="stage-block" data-stage-name="${s.name.replace(/"/g,"&quot;")}" draggable="true"
-        ondragstart="stageDragStart(event,'${s.id}')"
-        ondragover="stageDragOver(event)"
-        ondrop="stageDrop(event,'${s.id}','${productId}','${pipelineId}')"
-        style="border:1px solid var(--gray-200);border-left:4px solid ${_ac};border-radius:8px;margin-bottom:10px;background:#fff">
-        <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;user-select:none"
-          onclick="toggleStageBlock('${s.id}')">
-          <span style="color:var(--gray-400);cursor:grab;font-size:16px" title="Drag to reorder">⠿</span>
-          <span id="stage-arrow-${s.id}" style="font-size:12px;color:var(--gray-500);transition:transform .15s">▼</span>
-          <strong style="font-size:14px;flex:1">#${s.order} ${s.name}</strong>
-          ${s.container_image ? `<code style="font-size:11px;color:var(--gray-500)">${s.container_image}</code>` : ""}
-          ${s.execution_mode === "parallel" ? `<span class="badge badge-blue" title="Runs in parallel with adjacent parallel stages">⇉ parallel</span>` : ""}
-          ${s.is_protected ? `<span class="badge badge-blue">🔒</span>` : ""}
-          <div onclick="event.stopPropagation()">
-            ${pageMenu("stg-"+s.id, [
-              {label: "＋ Add Task", onclick: `showCreateTask('${productId}','${pipelineId}','${s.id}')`},
-              {label: "✏ Edit Stage", onclick: `showEditStage('${productId}','${pipelineId}','${s.id}','${s.name.replace(/'/g,"\\'")}','${s.run_language||"bash"}','${s.container_image||""}',${s.order},${s.is_protected},'${s.accent_color||""}','${s.execution_mode||"sequential"}')`},
-              {label: "🎨 Change Color", onclick: `showStageColorPicker('${productId}','${pipelineId}','${s.id}','${s.name.replace(/'/g,"\\'")}','${s.accent_color||""}')`},
-              {label: "📄 View YAML", onclick: `showStageYaml('${productId}','${pipelineId}','${s.id}','${s.name.replace(/'/g,"\\'")}')` },
-              {divider: true},
-              {label: "🗑 Delete Stage", onclick: `deleteStage('${productId}','${pipelineId}','${s.id}','${s.name.replace(/'/g,"\\'")}')`, danger: true},
-            ])}
-          </div>
-        </div>
-        <div id="stage-body-${s.id}" style="padding:0 12px 12px">
-          ${(s.tasks||[]).length === 0
-            ? `<div style="color:var(--gray-500);font-size:13px;padding:4px 0 2px">No tasks in this stage.</div>`
-            : `<table style="margin:0;width:100%">
-              <thead><tr><th style="width:28px"></th><th>#</th><th>Name</th><th>Type</th><th>Timeout</th><th>Required</th><th>Actions</th></tr></thead>
-              <tbody id="task-tbody-${s.id}">${(s.tasks||[]).map(t => `
-                <tr id="task-row-${t.id}" data-task-name="${t.name.replace(/"/g,"&quot;")}" draggable="true"
-                  ondragstart="taskDragStart(event,'${t.id}','${s.id}')"
-                  ondragover="taskDragOver(event)"
-                  ondrop="taskDrop(event,'${t.id}','${s.id}','${productId}','${pipelineId}')">
-                  <td style="color:var(--gray-400);cursor:grab;font-size:14px;text-align:center">⠿</td>
-                  <td style="color:var(--gray-400)">${t.order}</td>
-                  <td><strong>${t.name}</strong>${t.description ? `<br><small style="color:var(--gray-500)">${t.description}</small>` : ""}</td>
-                  <td>${_taskTypeBadges(t.task_type)}</td>
-                  <td>${t.timeout}s</td>
-                  <td>${t.is_required ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-silver">No</span>'}</td>
-                  <td>
-                    ${pageMenu("tsk-"+t.id, [
-                      {label: "▶ Run Now", onclick: `runTaskNow('${productId}','${pipelineId}','${s.id}','${t.id}','${t.name.replace(/'/g,"\\'")}')` },
-                      {label: "✏ Edit Settings", onclick: `showEditTask('${productId}','${pipelineId}','${s.id}','${t.id}','${t.name.replace(/'/g,"\\'")}','${(t.description||"").replace(/'/g,"\\'")}',${t.order},'${t.on_error||"fail"}',${t.timeout},${t.is_required},'${(t.task_type||"").replace(/'/g,"\\'")}')` },
-                      {label: "📝 Edit Script", onclick: `showEditTaskScript('${productId}','${pipelineId}','${s.id}','${t.id}','${t.name.replace(/'/g,"\\'")}')` },
-                      {label: "📄 View YAML", onclick: `showTaskYaml('${productId}','${pipelineId}','${s.id}','${t.id}','${t.name.replace(/'/g,"\\'")}')` },
-                      {divider: true},
-                      {label: "🗑 Delete Task", onclick: `deleteTask('${productId}','${pipelineId}','${s.id}','${t.id}','${t.name.replace(/'/g,"\\'")}')`, danger: true},
-                    ])}
-                  </td>
-                </tr>`).join("")}
-              </tbody></table>`
-          }
-        </div>
-      </div>`; }).join("");
-
   setContent(`
     <div class="page-header">
       <div>
@@ -1567,33 +1835,22 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
       <div style="display:flex;gap:6px;align-items:center">
         <button class="btn btn-primary btn-sm" onclick="showCreateRun('${pipelineId}','${productId}')">▶ Run</button>
         ${pageMenu("pl-"+pipelineId, [
-          {label: "⇅ Git Sync", onclick: `showGitSyncModal('${productId}','${pipelineId}','${pipeline.git_repo||""}','${pipeline.name.replace(/'/g,"\\'")}')` },
-          {label: "✎ Edit YAML", onclick: `togglePipelineMode('yaml','${productId}','${pipelineId}')`},
+          {label: "⇅ Git Sync",      onclick: `showGitSyncModal('${productId}','${pipelineId}','${pipeline.git_repo||""}','${pipeline.name.replace(/'/g,"\\'")}')` },
+          {label: "✎ Edit YAML",     onclick: `togglePipelineMode('yaml','${productId}','${pipelineId}')`},
           {label: "⬇ Download YAML", onclick: `exportYaml('/api/v1/products/${productId}/pipelines/${pipelineId}/export','${pipeline.name.replace(/'/g,"\\'")}pipeline.yaml')`},
-          {label: "⬆ Import YAML", onclick: `showImportYaml('${productId}','${pipelineId}')`},
+          {label: "⬆ Import YAML",   onclick: `showImportYaml('${productId}','${pipelineId}')`},
         ])}
       </div>
     </div>
 
     ${pipelineContextTabs(productId, pipelineId, "definition")}
 
-    <!-- Normal mode -->
+    <!-- Normal mode (X6 canvas) -->
     <div id="pl-normal-mode">
 
-      <!-- Visual graph at the top — click stage/task to scroll to editor -->
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header">
-          <h2>Pipeline Flow</h2>
-          <span style="font-size:12px;color:var(--gray-400)">Click a stage or task to jump to its editor below</span>
-        </div>
-        <div style="overflow-x:auto;min-height:${stages.length ? "160px" : "60px"};background:var(--gray-50);border-radius:6px;padding:12px">
-          <svg id="pipeline-visual-svg-normal" style="display:block"></svg>
-        </div>
-      </div>
-
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><h2>Details</h2></div>
-        <div class="detail-grid">
+      <!-- Pipeline details strip -->
+      <div class="card" style="margin-bottom:12px">
+        <div class="detail-grid" style="padding:8px 16px">
           <div class="detail-row"><span class="detail-label">ID</span><code style="font-size:12px">${pipeline.id}</code></div>
           <div class="detail-row"><span class="detail-label">Kind</span><span class="detail-value">${pipeline.kind.toUpperCase()}</span></div>
           <div class="detail-row"><span class="detail-label">Branch</span><span class="detail-value">${pipeline.git_branch||"main"}</span></div>
@@ -1601,17 +1858,14 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px" id="stages-editor-card">
-        <div class="card-header">
-          <h2>Stages (${stages.length})</h2>
-          <button class="btn btn-primary btn-sm" onclick="showCreateStage('${productId}','${pipelineId}')">+ New Stage</button>
-        </div>
-        ${stagesHtml}
+      <!-- X6 interactive canvas -->
+      <div class="pe-canvas-outer" id="pe-canvas-outer-${pipelineId}">
+        <div id="pe-container-${pipelineId}" style="width:100%;height:100%"></div>
       </div>
 
     </div>
 
-    <!-- Split-screen YAML + Visual mode -->
+    <!-- Split-screen YAML + visual mode -->
     <div id="pl-yaml-mode" style="display:none">
       <div style="display:flex;gap:0;height:calc(100vh - 180px);min-height:500px">
         <div style="flex:0 0 45%;display:flex;flex-direction:column;border:1px solid var(--gray-200);border-radius:8px 0 0 8px;overflow:hidden">
@@ -1638,15 +1892,47 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
         </div>
       </div>
       <div style="margin-top:8px;display:flex;gap:8px">
-        <button class="btn btn-secondary btn-sm" onclick="togglePipelineMode('normal','${productId}','${pipelineId}')">← Back to Normal View</button>
+        <button class="btn btn-secondary btn-sm" onclick="togglePipelineMode('normal','${productId}','${pipelineId}')">← Back to Canvas View</button>
       </div>
     </div>
 
   `);
 
-  // Render visual at top of normal mode immediately
-  renderPipelineVisual(pipelineId, "pipeline-visual-svg-normal");
-  // Auto-load YAML (populates textarea for split-screen mode when switched)
+  // Mount X6 canvas
+  _peInstance = new PipelineEditor(`pe-container-${pipelineId}`, {
+    productId,
+    pipelineId,
+
+    onAddStage: () => spShowCreateStage(productId, pipelineId),
+
+    onEditStage: (stageId) => {
+      const stage = (_pipelineVisualStages || []).find(s => s.id === stageId);
+      if (stage) spShowEditStage(productId, pipelineId, stage);
+    },
+
+    onAddTask: (stageId) => spShowCreateTask(productId, pipelineId, stageId),
+
+    onEditTask: (taskId, stageId) => {
+      spShowEditTask(productId, pipelineId, stageId, taskId);
+    },
+
+    onReorderStage: async (stageId, newOrder) => {
+      try {
+        await api.updateStage(productId, pipelineId, stageId, { order: newOrder });
+        const s = (_pipelineVisualStages || []).find(s => s.id === stageId);
+        if (s) s.order = newOrder;
+      } catch (e) { toast("Failed to reorder stage: " + e.message, "error"); }
+    },
+
+    onDeleteStage: (stageId) => {
+      const s = (_pipelineVisualStages || []).find(s => s.id === stageId);
+      if (s) deleteStage(productId, pipelineId, stageId, s.name);
+    },
+  });
+
+  _peInstance.load(stages);
+
+  // YAML mode still uses the old SVG preview
   loadPipelineYaml(productId, pipelineId);
 });
 
@@ -1801,7 +2087,7 @@ async function showStageYaml(productId, pipelineId, stageId, stageName) {
        <span style="font-size:12px;color:var(--gray-500)">Edit stage definition. Click Save to apply.</span>
      </div>
      <textarea id="stage-yaml-ta" spellcheck="false"
-       style="width:100%;min-height:340px;font-family:monospace;font-size:12px;padding:10px;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50);resize:vertical;line-height:1.5">
+       style="width:100%;min-height:420px;font-family:monospace;font-size:12px;padding:10px;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50);resize:vertical;line-height:1.5">
 # Loading…
      </textarea>
      <div id="stage-yaml-status" style="margin-top:6px;font-size:12px"></div>`,
@@ -1810,23 +2096,44 @@ async function showStageYaml(productId, pipelineId, stageId, stageName) {
       const st = document.getElementById("stage-yaml-status");
       if (!ta || !ta.value.trim() || ta.value.startsWith("# Loading")) return;
       try {
-        const pipeline = await api.getPipeline(productId, pipelineId);
-        const stage = (pipeline.stages||[]).find(s => s.id === stageId);
-        if (!stage) throw new Error("Stage not found");
-        // Parse updated YAML fields (name, run_language, container_image, order, is_protected)
-        const yamlText = ta.value;
-        const lines = yamlText.split("\n");
+        // Parse stage YAML — handles top-level scalars and the sandbox: sub-block
+        const lines = ta.value.split("\n");
         const parsed = {};
+        const sandbox = {};
+        let inSandbox = false;
         for (const line of lines) {
-          const m = line.match(/^(\w+):\s*(.+)$/);
+          if (line.match(/^sandbox:\s*$/)) { inSandbox = true; continue; }
+          if (inSandbox) {
+            if (line.startsWith("  ")) {
+              const m = line.trim().match(/^(\w+):\s*(.*)$/);
+              if (m) sandbox[m[1]] = m[2].replace(/^['"]|['"]$/g, "");
+              continue;
+            } else { inSandbox = false; }
+          }
+          const m = line.match(/^(\w+):\s*(.*)$/);
           if (m) parsed[m[1]] = m[2].replace(/^['"]|['"]$/g, "");
         }
         const payload = {};
         if (parsed.name) payload.name = parsed.name;
-        if (parsed.run_language) payload.run_language = parsed.run_language;
-        if (parsed.container_image) payload.container_image = parsed.container_image;
-        if (parsed.order) payload.order = parseInt(parsed.order);
-        if (parsed.is_protected !== undefined) payload.is_protected = parsed.is_protected === "true";
+        if ("run_language" in parsed) payload.run_language = parsed.run_language;
+        if ("container_image" in parsed) payload.container_image = parsed.container_image || null;
+        if ("execution_mode" in parsed) payload.execution_mode = parsed.execution_mode;
+        if ("run_condition" in parsed) payload.run_condition = parsed.run_condition;
+        if ("order" in parsed) payload.order = parseInt(parsed.order) || 0;
+        if ("is_protected" in parsed) payload.is_protected = parsed.is_protected === "true";
+        if ("accent_color" in parsed) payload.accent_color = parsed.accent_color || null;
+        if (Object.keys(sandbox).length) {
+          if ("cpu" in sandbox) payload.sandbox_cpu = sandbox.cpu;
+          if ("memory" in sandbox) payload.sandbox_memory = sandbox.memory;
+          if ("timeout" in sandbox) payload.sandbox_timeout = parseInt(sandbox.timeout) || 60;
+          if ("network" in sandbox) payload.sandbox_network = sandbox.network === "true";
+        }
+        if ("entry_gate" in parsed) {
+          try { payload.entry_gate = JSON.parse(parsed.entry_gate); } catch { payload.entry_gate = {}; }
+        }
+        if ("exit_gate" in parsed) {
+          try { payload.exit_gate = JSON.parse(parsed.exit_gate); } catch { payload.exit_gate = {}; }
+        }
         await api.updateStage(productId, pipelineId, stageId, payload);
         if (st) st.innerHTML = `<span style="color:var(--success)">✓ Saved</span>`;
         toast("Stage updated", "success");
@@ -1836,7 +2143,7 @@ async function showStageYaml(productId, pipelineId, stageId, stageName) {
         throw e;
       }
     },
-    "Save"
+    "Save", "xl"
   );
   // Load current stage as YAML
   setTimeout(async () => {
@@ -1846,7 +2153,27 @@ async function showStageYaml(productId, pipelineId, stageId, stageName) {
       const pipeline = await api.getPipeline(productId, pipelineId);
       const stage = (pipeline.stages||[]).find(s => s.id === stageId);
       if (!stage) { ta.value = "# Stage not found"; return; }
-      ta.value = `name: ${stage.name}\norder: ${stage.order}\nrun_language: ${stage.run_language||"bash"}\ncontainer_image: ${stage.container_image||""}\nis_protected: ${stage.is_protected||false}\n`;
+      const sb = stage.sandbox || {};
+      const eg = stage.entry_gate || {};
+      const xg = stage.exit_gate || {};
+      ta.value = [
+        `name: ${stage.name}`,
+        `order: ${stage.order}`,
+        `run_language: ${stage.run_language||"bash"}`,
+        `container_image: ${stage.container_image||""}`,
+        `execution_mode: ${stage.execution_mode||"sequential"}`,
+        `run_condition: ${stage.run_condition||"always"}`,
+        `is_protected: ${stage.is_protected||false}`,
+        `accent_color: ${stage.accent_color||""}`,
+        `sandbox:`,
+        `  cpu: ${sb.cpu||"500m"}`,
+        `  memory: ${sb.memory||"256Mi"}`,
+        `  timeout: ${sb.timeout||60}`,
+        `  network: ${sb.network||false}`,
+        `entry_gate: ${JSON.stringify(eg)}`,
+        `exit_gate: ${JSON.stringify(xg)}`,
+        ``
+      ].join("\n");
     } catch (e) { ta.value = "# Error: " + e.message; }
   }, 50);
 }
@@ -1855,7 +2182,7 @@ async function showStageYaml(productId, pipelineId, stageId, stageName) {
 async function showTaskYaml(productId, pipelineId, stageId, taskId, taskName) {
   openModal(`Task YAML — ${taskName}`,
     `<textarea id="task-yaml-ta" spellcheck="false"
-       style="width:100%;min-height:380px;font-family:monospace;font-size:12px;padding:10px;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50);resize:vertical;line-height:1.5">
+       style="width:100%;min-height:460px;font-family:monospace;font-size:12px;padding:10px;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50);resize:vertical;line-height:1.5">
 # Loading…
      </textarea>
      <div id="task-yaml-status" style="margin-top:6px;font-size:12px"></div>`,
@@ -1866,27 +2193,44 @@ async function showTaskYaml(productId, pipelineId, stageId, taskId, taskName) {
       try {
         const lines = ta.value.split("\n");
         const parsed = {};
-        let inCode = false;
-        let codeLines = [];
+        // Track multi-line block scalars (key: |)
+        let blockKey = null;
+        let blockLines = [];
+        const blockKeys = new Set(["run_code", "gate_script"]);
         for (const line of lines) {
-          if (line.startsWith("run_code: |")) { inCode = true; continue; }
-          if (inCode) {
-            if (line.startsWith("  ")) { codeLines.push(line.slice(2)); continue; }
-            else { inCode = false; }
+          if (blockKey !== null) {
+            if (line.startsWith("  ")) { blockLines.push(line.slice(2)); continue; }
+            else { parsed[blockKey] = blockLines.join("\n"); blockKey = null; blockLines = []; }
           }
-          const m = line.match(/^(\w+):\s*(.+)$/);
+          const blockM = line.match(/^(\w+):\s*\|$/);
+          if (blockM && blockKeys.has(blockM[1])) { blockKey = blockM[1]; blockLines = []; continue; }
+          const m = line.match(/^(\w+):\s*(.*)$/);
           if (m) parsed[m[1]] = m[2].replace(/^['"]|['"]$/g, "");
         }
+        if (blockKey !== null) parsed[blockKey] = blockLines.join("\n");
+
         const payload = {};
         if (parsed.name) payload.name = parsed.name;
-        if (parsed.description !== undefined) payload.description = parsed.description;
-        if (parsed.order) payload.order = parseInt(parsed.order);
+        if ("description" in parsed) payload.description = parsed.description || null;
+        if ("kind" in parsed) payload.kind = parsed.kind;
+        if ("task_type" in parsed) payload.task_type = parsed.task_type || null;
+        if (parsed.order !== undefined) payload.order = parseInt(parsed.order) || 0;
         if (parsed.timeout) payload.timeout = parseInt(parsed.timeout);
         if (parsed.on_error) payload.on_error = parsed.on_error;
         if (parsed.run_language) payload.run_language = parsed.run_language;
-        if (parsed.task_type) payload.task_type = parsed.task_type;
-        if (parsed.is_required !== undefined) payload.is_required = parsed.is_required === "true";
-        if (codeLines.length) payload.run_code = codeLines.join("\n");
+        if (parsed.execution_mode) payload.execution_mode = parsed.execution_mode;
+        if ("is_required" in parsed) payload.is_required = parsed.is_required === "true";
+        if (parsed.run_condition) payload.run_condition = parsed.run_condition;
+        if ("run_code" in parsed) payload.run_code = parsed.run_code;
+        // Gate fields
+        if (parsed.gate_language) payload.gate_language = parsed.gate_language;
+        if ("gate_script" in parsed) payload.gate_script = parsed.gate_script;
+        // Approval fields
+        if ("approval_approvers" in parsed) {
+          try { payload.approval_approvers = JSON.parse(parsed.approval_approvers); } catch { payload.approval_approvers = []; }
+        }
+        if ("approval_required_count" in parsed) payload.approval_required_count = parseInt(parsed.approval_required_count) || 0;
+        if ("approval_timeout" in parsed) payload.approval_timeout = parseInt(parsed.approval_timeout) || 0;
         await api.updateTask(productId, pipelineId, stageId, taskId, payload);
         if (st) st.innerHTML = `<span style="color:var(--success)">✓ Saved</span>`;
         toast("Task updated", "success");
@@ -1896,7 +2240,7 @@ async function showTaskYaml(productId, pipelineId, stageId, taskId, taskName) {
         throw e;
       }
     },
-    "Save"
+    "Save", "xl"
   );
   setTimeout(async () => {
     const ta = document.getElementById("task-yaml-ta");
@@ -1906,8 +2250,16 @@ async function showTaskYaml(productId, pipelineId, stageId, taskId, taskName) {
       const stage = (pipeline.stages||[]).find(s => s.id === stageId);
       const task = stage && (stage.tasks||[]).find(t => t.id === taskId);
       if (!task) { ta.value = "# Task not found"; return; }
+      const kind = task.kind || "script";
       const code = (task.run_code||"").split("\n").map(l => "  " + l).join("\n");
-      ta.value = `name: ${task.name}\norder: ${task.order}\ntask_type: ${task.task_type}\nrun_language: ${task.run_language||"bash"}\ntimeout: ${task.timeout||60}\non_error: ${task.on_error||"fail"}\nis_required: ${task.is_required||false}\ndescription: ${task.description||""}\nrun_code: |\n${code}\n`;
+      let yaml = `name: ${task.name}\nkind: ${kind}\ndescription: ${task.description||""}\norder: ${task.order}\ntask_type: ${task.task_type||""}\nrun_language: ${task.run_language||"bash"}\nexecution_mode: ${task.execution_mode||"sequential"}\ntimeout: ${task.timeout||300}\non_error: ${task.on_error||"fail"}\nis_required: ${task.is_required !== false}\nrun_condition: ${task.run_condition||"always"}\nrun_code: |\n${code}\n`;
+      if (kind === "gate") {
+        const gs = (task.gate_script||"").split("\n").map(l => "  " + l).join("\n");
+        yaml += `gate_language: ${task.gate_language||"bash"}\ngate_script: |\n${gs}\n`;
+      } else if (kind === "approval") {
+        yaml += `approval_approvers: ${JSON.stringify(task.approval_approvers||[])}\napproval_required_count: ${task.approval_required_count||0}\napproval_timeout: ${task.approval_timeout||0}\n`;
+      }
+      ta.value = yaml;
     } catch (e) { ta.value = "# Error: " + e.message; }
   }, 50);
 }
@@ -2633,7 +2985,10 @@ router.register("products/:pid/releases/:rid/audit", async (hash, parts) => {
   setContent(`
     <div class="page-header">
       <div><h1>Audit Report</h1><div class="sub">${release.name} · Generated ${fmtDate(report.generated_at)}</div></div>
-      <a class="btn btn-primary btn-sm" href="/api/v1/products/${productId}/releases/${releaseId}/audit/export" target="_blank">⬇ Export PDF</a>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="navigate('products/${productId}/releases/${releaseId}/audit')">↻ Refresh</button>
+        <a class="btn btn-primary btn-sm" href="/api/v1/products/${productId}/releases/${releaseId}/audit/export" target="_blank">⬇ Export PDF</a>
+      </div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
@@ -3135,46 +3490,98 @@ router.register("environments", async () => {
   `);
 });
 
-// ── Compliance page ────────────────────────────────────────────────────────
-router.register("compliance", async () => {
-  setBreadcrumb({ label: "Compliance" });
+// ── Admission Rules page ───────────────────────────────────────────────────
+router.register("admission-rules", async () => {
+  setBreadcrumb({ label: "Governance", hash: "compliance" }, { label: "Admission Rules" });
   setContent(loading());
-  const [rules, events] = await Promise.all([
-    api.getComplianceRules().catch(() => []),
-    api.getAuditEvents({ limit: 20 }).catch(() => []),
-  ]);
+  const rules = await api.getComplianceRules().catch(() => []);
+
   setContent(`
     <div class="page-header">
-      <div><h1>Compliance</h1><div class="sub">Release admission rules, ISO 27001:2022 controls, and audit events</div></div>
-      <button class="btn btn-primary" onclick="showCreateRule()">+ New Rule</button>
+      <div>
+        <h1>Admission Rules</h1>
+        <div class="sub">Release admission policies — pipelines must meet the minimum compliance rating to join a release</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="navigate('admission-rules')">↻ Refresh</button>
+        <button class="btn btn-primary" onclick="showCreateRule()">+ New Rule</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;padding:16px 20px;background:#f8fafc;border:1px solid #e2e8f0">
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--gray-400);text-transform:uppercase;letter-spacing:.06em">Active Rules</div>
+          <div style="font-size:28px;font-weight:700;color:var(--brand)">${rules.length}</div>
+        </div>
+        <div style="flex:1;min-width:200px;font-size:13px;color:var(--gray-600);padding-top:6px">
+          Admission rules gate pipeline inclusion in releases. When a pipeline's compliance score falls below the minimum rating for its scope, it cannot be added to a release.
+        </div>
+      </div>
+    </div>
+
+    ${rules.length === 0
+      ? `<div class="card"><div class="empty-state">
+           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--gray-300);margin-bottom:8px"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+           <p>No rules defined. All pipelines can be added to any release.</p>
+           <button class="btn btn-primary" onclick="showCreateRule()">Create first rule</button>
+         </div></div>`
+      : `<div class="card"><div class="table-wrap"><table>
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Scope</th>
+              <th>Minimum Rating</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rules.map(r => `
+              <tr>
+                <td>${r.description || "<span style='color:var(--gray-400)'>—</span>"}</td>
+                <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px">${r.scope}</code></td>
+                <td>${ratingBadge(r.min_rating)}</td>
+                <td>
+                  <button class="btn btn-danger btn-sm" onclick="deleteRule('${r.id}')">Disable</button>
+                </td>
+              </tr>`).join("")}
+          </tbody>
+        </table></div></div>`
+    }
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-header"><h2>How Admission Rules Work</h2></div>
+      <div style="padding:16px 20px;font-size:13px;color:var(--gray-600);line-height:1.8">
+        <p><strong>Scope</strong> — rules apply to a specific product (<code>product:&lt;id&gt;</code>) or platform-wide (<code>organization</code>).</p>
+        <p><strong>Minimum Rating</strong> — the lowest acceptable compliance tier: Platinum (≥90%) → Gold (≥75%) → Silver (≥60%) → Bronze (≥40%) → Non-Compliant.</p>
+        <p><strong>Evaluation</strong> — when a pipeline is included in a release, all active rules matching its product scope and the organization scope are checked. If any rule fails, the pipeline is blocked from joining the release.</p>
+      </div>
+    </div>
+  `);
+});
+
+// ── Compliance page ────────────────────────────────────────────────────────
+router.register("compliance", async () => {
+  setBreadcrumb({ label: "Governance", hash: "admission-rules" }, { label: "Compliance" });
+  setContent(loading());
+  const events = await api.getAuditEvents({ limit: 20 }).catch(() => []);
+  setContent(`
+    <div class="page-header">
+      <div><h1>Compliance</h1><div class="sub">ISO 27001:2022 controls and audit events</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="refreshCompliancePage()">↻ Refresh</button>
+        <button class="btn btn-secondary" onclick="navigate('admission-rules')">Admission Rules →</button>
+      </div>
     </div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab(this,'ctab-rules')">Admission Rules (${rules.length})</button>
-      <button class="tab-btn" onclick="switchTab(this,'ctab-iso'); loadIso27001()">ISO 27001:2022</button>
+      <button class="tab-btn active" onclick="switchTab(this,'ctab-iso'); loadIso27001()">ISO 27001:2022</button>
       <button class="tab-btn" onclick="switchTab(this,'ctab-events')">Audit Events (${events.length})</button>
     </div>
 
-    <!-- Admission Rules -->
-    <div id="ctab-rules" class="tab-panel active">
-      ${rules.length === 0
-        ? `<div class="card"><div class="empty-state"><div class="empty-icon">🛡</div><p>No rules defined. Pipelines can be attached to any release.</p></div></div>`
-        : `<div class="card"><div class="table-wrap"><table>
-          <thead><tr><th>Description</th><th>Scope</th><th>Min Rating</th><th>Actions</th></tr></thead>
-          <tbody>${rules.map(r => `
-            <tr>
-              <td>${r.description||"—"}</td>
-              <td><code style="font-size:12px">${r.scope}</code></td>
-              <td>${ratingBadge(r.min_rating)}</td>
-              <td><button class="btn btn-danger btn-sm" onclick="deleteRule('${r.id}')">Disable</button></td>
-            </tr>`).join("")}
-          </tbody></table></div></div>`
-      }
-    </div>
-
     <!-- ISO 27001:2022 -->
-    <div id="ctab-iso" class="tab-panel">
-      <div id="iso27001-content" style="padding:24px;text-align:center;color:var(--gray-400)">Click the ISO 27001:2022 tab to load the evaluation...</div>
+    <div id="ctab-iso" class="tab-panel active">
+      <div id="iso27001-content" style="padding:24px;text-align:center;color:var(--gray-400)">Loading ISO 27001:2022 evaluation...</div>
     </div>
 
     <!-- Audit Events -->
@@ -3182,7 +3589,7 @@ router.register("compliance", async () => {
       <div class="card">
         <div class="card-header"><h2>Recent Audit Events</h2></div>
         ${events.length === 0
-          ? `<div class="empty-state"><div class="empty-icon">📋</div><p>No events yet.</p></div>`
+          ? `<div class="empty-state"><p>No events yet.</p></div>`
           : `<div class="table-wrap"><table>
             <thead><tr><th>Timestamp</th><th>Event</th><th>Actor</th><th>Resource</th><th>Decision</th></tr></thead>
             <tbody>${events.map(e => `
@@ -3198,9 +3605,22 @@ router.register("compliance", async () => {
       </div>
     </div>
   `);
+  // Auto-load ISO 27001 tab
+  loadIso27001();
 });
 
 let _iso27001Loaded = false;
+
+function refreshCompliancePage() {
+  navigate("compliance");
+}
+
+function refreshIso27001() {
+  _iso27001Loaded = false;
+  const container = document.getElementById("iso27001-content");
+  if (container) container.innerHTML = `<div style="padding:32px;text-align:center;color:var(--gray-400)">Evaluating controls…</div>`;
+  loadIso27001();
+}
 
 async function loadIso27001() {
   if (_iso27001Loaded) return;
@@ -3330,6 +3750,7 @@ function _renderIso27001(report) {
 
     <!-- Controls by clause (collapsible) -->
     <div style="margin-bottom:8px;display:flex;gap:8px">
+      <button class="btn btn-secondary btn-sm" onclick="refreshIso27001()">↻ Refresh</button>
       <button class="btn btn-secondary btn-sm" onclick="document.querySelectorAll('[id^=iso-clause-]').forEach(el=>el.style.display='block')">Expand All</button>
       <button class="btn btn-secondary btn-sm" onclick="document.querySelectorAll('[id^=iso-clause-]').forEach(el=>el.style.display='none')">Collapse All</button>
     </div>
@@ -3998,21 +4419,6 @@ async function deleteAppDictEntry(productId, appId, name) {
 
 // ── Administration (Users / Groups / Roles) ────────────────────────────────
 
-const PERSONAS = [
-  "PlatformAdmin", "ProductOwner", "ReleaseManager", "PipelineAuthor",
-  "Deployer", "Approver", "ComplianceAdmin", "ReadOnly",
-];
-
-const PERSONA_COLOR = {
-  PlatformAdmin: "badge-platinum", ProductOwner: "badge-gold",
-  ReleaseManager: "badge-gold", PipelineAuthor: "badge-blue",
-  Deployer: "badge-running", Approver: "badge-success",
-  ComplianceAdmin: "badge-bronze", ReadOnly: "badge-silver",
-};
-
-function personaBadge(p) {
-  return `<span class="badge ${PERSONA_COLOR[p] || "badge-silver"}">${p || "—"}</span>`;
-}
 
 // ── Vault ──────────────────────────────────────────────────────────────────
 router.register("vault", async () => {
@@ -4396,28 +4802,68 @@ router.register("admin", (hash, parts) => navigate("admin/users"));
 // ── User Management (Users / Groups / Roles) ──────────────────────────────
 // ── Admin RBAC page helpers ───────────────────────────────────────────────────
 
+// Scope type metadata: label, scope prefix, flat=true means no resource picker needed,
+// system=true means it maps directly to a fixed scope string (no items to pick)
+const _RBAC_SCOPE_TYPES = [
+  // ── System-level fixed scopes ─────────────────────────────────────────────
+  { id: "system",         label: "System (org-wide)",   prefix: "organization",     flat: true, system: true },
+  { id: "user-mgmt",      label: "User Management",     prefix: "feature:user-mgmt",flat: true, system: true },
+  { id: "permissions",    label: "Permissions",          prefix: "feature:permissions",flat:true,system: true },
+  { id: "monitoring",     label: "Monitoring",           prefix: "feature:monitoring",flat:true, system: true },
+  { id: "global-vars",    label: "Global Variables",    prefix: "feature:global-vars",flat:true, system: true },
+  { id: "app-dictionary", label: "App Dictionary",      prefix: "feature:app-dictionary",flat:true,system:true},
+  // ── Resource-level scopes (items fetched from API) ────────────────────────
+  { id: "product",        label: "Products",     prefix: "product",      flat: true  },
+  { id: "application",    label: "Applications", prefix: "application",  flat: true  },
+  { id: "environment",    label: "Environments", prefix: "environment",  flat: true  },
+  { id: "pipeline",       label: "Pipelines",    prefix: "pipeline",     flat: false },
+  { id: "release",        label: "Releases",     prefix: "release",      flat: false },
+  { id: "template",       label: "Templates",    prefix: "template",     flat: true  },
+  { id: "webhook",        label: "Webhooks",     prefix: "webhook",      flat: true  },
+  { id: "plugin",         label: "Plugins",      prefix: "plugin",       flat: true  },
+  { id: "agent-pool",     label: "Agent Pools",  prefix: "agent-pool",   flat: true  },
+  { id: "vault",          label: "Vault",        prefix: "vault",        flat: true  },
+  { id: "compliance",     label: "Compliance",   prefix: "compliance",   flat: true  },
+];
+
 function _renderAdminRbacPicker() {
+  const systemBtns = _RBAC_SCOPE_TYPES.filter(t => t.system).map(t =>
+    `<button class="btn btn-secondary btn-sm rbac-scope-type" id="scopetype-${t.id}"
+      onclick="_selectRbacScopeType('${t.id}')">${t.label}</button>`
+  ).join("");
+  const resourceBtns = _RBAC_SCOPE_TYPES.filter(t => !t.system).map(t =>
+    `<button class="btn btn-secondary btn-sm rbac-scope-type" id="scopetype-${t.id}"
+      onclick="_selectRbacScopeType('${t.id}')">${t.label}</button>`
+  ).join("");
+
   return `
     <div style="padding:16px">
       <div style="font-size:13px;color:var(--gray-600);margin-bottom:16px">
-        Select a resource scope to view and edit its permission matrix.
-        Permissions are inherited: <em>organization</em> bindings apply everywhere;
-        product/environment bindings apply to that resource only.
+        Select a scope to view and edit its permission matrix.
+        System-level scopes apply to the whole platform; resource scopes apply to a specific item.
       </div>
 
-      <!-- Scope type selector -->
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
-        <button class="btn btn-secondary btn-sm rbac-scope-type active" id="scopetype-system"
-          onclick="_selectRbacScopeType('system')">System (organization)</button>
-        <button class="btn btn-secondary btn-sm rbac-scope-type" id="scopetype-product"
-          onclick="_selectRbacScopeType('product')">Products</button>
-        <button class="btn btn-secondary btn-sm rbac-scope-type" id="scopetype-environment"
-          onclick="_selectRbacScopeType('environment')">Environments</button>
+      <!-- System-level scopes -->
+      <div style="font-size:11px;font-weight:600;color:var(--gray-400);letter-spacing:.5px;margin-bottom:6px">SYSTEM</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${systemBtns}</div>
+
+      <!-- Resource-level scopes -->
+      <div style="font-size:11px;font-weight:600;color:var(--gray-400);letter-spacing:.5px;margin-bottom:6px">RESOURCES</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${resourceBtns}</div>
+
+      <!-- Product parent picker (for pipelines / releases) -->
+      <div id="rbac-product-picker" style="display:none;margin-bottom:10px">
+        <label style="font-size:12px;color:var(--gray-500);margin-bottom:4px;display:block">Product</label>
+        <select id="rbac-product-select" class="form-control" style="max-width:360px"
+          onchange="_onRbacProductChange()">
+          <option value="">— Select a product —</option>
+        </select>
       </div>
 
-      <!-- Resource picker (hidden for system) -->
+      <!-- Resource picker -->
       <div id="rbac-resource-picker" style="display:none;margin-bottom:16px">
-        <select id="rbac-resource-select" class="form-control" style="max-width:380px"
+        <label id="rbac-resource-label" style="font-size:12px;color:var(--gray-500);margin-bottom:4px;display:block">Resource</label>
+        <select id="rbac-resource-select" class="form-control" style="max-width:360px"
           onchange="_loadAdminRbacMatrix()">
           <option value="">— Select a resource —</option>
         </select>
@@ -4430,52 +4876,147 @@ function _renderAdminRbacPicker() {
     </div>`;
 }
 
-// Called after the RBAC tab panel is rendered into the DOM
+// Called after the Permissions page is rendered into the DOM
 async function _initAdminRbacPicker() {
-  // Default: system/organization scope — load immediately
   window._rbacScopeType = "system";
   window._rbacResources = {};
-  // Pre-fetch products + environments for the pickers
-  const [products, envs] = await Promise.all([
+
+  // Pre-fetch all flat resources in parallel
+  const [products, envs, plugins, pools, webhooks] = await Promise.all([
     api.getProducts().catch(() => []),
     api.getEnvironments().catch(() => []),
+    api.getPlugins().catch(() => []),
+    api.getAgentPools().catch(() => []),
+    api.listWebhooks().catch(() => []),
   ]);
+  const [templates, secrets, compliance] = await Promise.all([
+    request("GET", "/pipeline-templates").catch(() => []),
+    api.listSecrets().catch(() => []),
+    api.getComplianceRules().catch(() => []),
+  ]);
+
+  const prodList = (products.items || products || []);
   window._rbacResources = {
-    product: (products.items || products || []).map(p => ({ id: p.id, label: p.name })),
+    product:     prodList.map(p => ({ id: p.id, label: p.name })),
     environment: (envs || []).map(e => ({ id: e.id, label: e.name })),
+    plugin:      (plugins || []).map(p => ({ id: p.id, label: p.display_name || p.name })),
+    "agent-pool":(pools || []).map(p => ({ id: p.id, label: p.name })),
+    webhook:     (webhooks || []).map(w => ({ id: w.id, label: w.name })),
+    template:    (templates || []).map(t => ({ id: t.id, label: t.name })),
+    vault:       (secrets || []).map(s => ({ id: s.id, label: s.name })),
+    compliance:  (compliance || []).map(c => ({ id: c.id, label: c.name || c.control_id })),
+    // applications fetched lazily per product
+    application: [],
+    pipeline: [],
+    release: [],
+    // products also stored for cascading pickers
+    _products: prodList,
   };
-  _loadAdminRbacMatrix();
+
+  // Activate System by default
+  _selectRbacScopeType("system");
 }
 
 function _selectRbacScopeType(type) {
   window._rbacScopeType = type;
-  document.querySelectorAll(".rbac-scope-type").forEach(b => b.classList.remove("active", "btn-primary"));
-  document.querySelectorAll(".rbac-scope-type").forEach(b => b.classList.add("btn-secondary"));
+
+  // Update button styles
+  document.querySelectorAll(".rbac-scope-type").forEach(b => {
+    b.classList.remove("btn-primary");
+    b.classList.add("btn-secondary");
+  });
   const btn = document.getElementById(`scopetype-${type}`);
   if (btn) { btn.classList.remove("btn-secondary"); btn.classList.add("btn-primary"); }
 
-  const picker = document.getElementById("rbac-resource-picker");
-  const sel    = document.getElementById("rbac-resource-select");
-  if (type === "system") {
-    if (picker) picker.style.display = "none";
-    _loadAdminRbacMatrix();
-  } else {
-    if (picker) picker.style.display = "block";
-    const resources = (window._rbacResources || {})[type] || [];
-    if (sel) {
-      sel.innerHTML = `<option value="">— Select a ${type} —</option>` +
-        resources.map(r => `<option value="${type}:${r.id}">${r.label}</option>`).join("");
-    }
-    // Clear matrix until a resource is chosen
-    const mx = document.getElementById("admin-rbac-matrix");
-    if (mx) mx.innerHTML = `<div style="color:var(--gray-400);font-size:13px;padding:8px 0">Select a ${type} above to load its permission matrix.</div>`;
+  const meta = _RBAC_SCOPE_TYPES.find(t => t.id === type);
+  const productPicker  = document.getElementById("rbac-product-picker");
+  const resourcePicker = document.getElementById("rbac-resource-picker");
+  const resourceLabel  = document.getElementById("rbac-resource-label");
+  const mx = document.getElementById("admin-rbac-matrix");
+
+  if (meta.system) {
+    if (productPicker)  productPicker.style.display  = "none";
+    if (resourcePicker) resourcePicker.style.display = "none";
+    _loadAdminRbacMatrix(meta.prefix);
+    return;
   }
+
+  // Pipelines / Releases need product parent first
+  if (!meta.flat) {
+    if (productPicker) {
+      productPicker.style.display = "block";
+      const prodSel = document.getElementById("rbac-product-select");
+      const prods = (window._rbacResources?._products || []);
+      if (prodSel) {
+        prodSel.innerHTML = `<option value="">— Select a product —</option>` +
+          prods.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+        prodSel.value = "";
+      }
+    }
+    if (resourcePicker) resourcePicker.style.display = "none";
+    if (mx) mx.innerHTML = `<div style="color:var(--gray-400);font-size:13px;padding:8px 0">Select a product first.</div>`;
+    return;
+  }
+
+  // Flat resource types
+  if (productPicker)  productPicker.style.display  = "none";
+  if (resourcePicker) resourcePicker.style.display = "block";
+  if (resourceLabel)  resourceLabel.textContent = meta.label;
+
+  const resources = (window._rbacResources || {})[type] || [];
+  const sel = document.getElementById("rbac-resource-select");
+  if (sel) {
+    sel.innerHTML = `<option value="">— Select a ${meta.label.toLowerCase().replace(/s$/, "")} —</option>` +
+      resources.map(r => `<option value="${meta.prefix}:${r.id}">${r.label}</option>`).join("");
+    sel.value = "";
+  }
+  if (mx) mx.innerHTML = `<div style="color:var(--gray-400);font-size:13px;padding:8px 0">Select a resource above to load its permission matrix.</div>`;
 }
 
-async function _loadAdminRbacMatrix() {
+async function _onRbacProductChange() {
+  const type = window._rbacScopeType;
+  const meta = _RBAC_SCOPE_TYPES.find(t => t.id === type);
+  const prodSel = document.getElementById("rbac-product-select");
+  const productId = prodSel?.value || "";
+  const resourcePicker = document.getElementById("rbac-resource-picker");
+  const resourceLabel  = document.getElementById("rbac-resource-label");
+  const mx = document.getElementById("admin-rbac-matrix");
+
+  if (!productId) {
+    if (resourcePicker) resourcePicker.style.display = "none";
+    if (mx) mx.innerHTML = `<div style="color:var(--gray-400);font-size:13px;padding:8px 0">Select a product first.</div>`;
+    return;
+  }
+
+  // Fetch product-scoped resources
+  let resources = [];
+  if (type === "pipeline") {
+    const items = await api.getPipelines(productId).catch(() => []);
+    resources = (items || []).map(p => ({ id: p.id, label: p.name }));
+  } else if (type === "release") {
+    const items = await api.getReleases(productId).catch(() => []);
+    resources = (items || []).map(r => ({ id: r.id, label: `${r.name} ${r.version ? "v"+r.version : ""}`.trim() }));
+  } else if (type === "application") {
+    const items = await api.getApplications(productId).catch(() => []);
+    resources = (items || []).map(a => ({ id: a.id, label: a.name }));
+  }
+
+  if (resourcePicker) resourcePicker.style.display = "block";
+  if (resourceLabel)  resourceLabel.textContent = meta.label;
+  const sel = document.getElementById("rbac-resource-select");
+  if (sel) {
+    sel.innerHTML = `<option value="">— Select a ${meta.label.toLowerCase().replace(/s$/, "")} —</option>` +
+      resources.map(r => `<option value="${meta.prefix}:${r.id}">${r.label}</option>`).join("");
+    sel.value = "";
+  }
+  if (mx) mx.innerHTML = `<div style="color:var(--gray-400);font-size:13px;padding:8px 0">Select a resource above to load its permission matrix.</div>`;
+}
+
+async function _loadAdminRbacMatrix(scopeOverride) {
   const type = window._rbacScopeType || "system";
-  let scope = "organization";
-  if (type !== "system") {
+  const meta = _RBAC_SCOPE_TYPES.find(t => t.id === type);
+  let scope = scopeOverride || "organization";
+  if (!scopeOverride && !meta?.system) {
     const sel = document.getElementById("rbac-resource-select");
     scope = sel?.value || "";
     if (!scope) return;
@@ -4562,7 +5103,7 @@ async function _renderAdminUsers(subTab) {
   if (subTab === "users") {
     panel = `
       <div class="page-header">
-        <div><h1>User Management</h1><div class="sub">Manage platform users, personas and access</div></div>
+        <div><h1>User Management</h1><div class="sub">Manage platform users and access</div></div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-secondary" onclick="showBulkImportUsers()">⬆ Import</button>
           <button class="btn btn-primary" onclick="showCreateUser()">+ New User</button>
@@ -4572,17 +5113,15 @@ async function _renderAdminUsers(subTab) {
       ${users.length === 0
         ? `<div class="card"><div class="empty-state"><p>No users yet.</p></div></div>`
         : `<div class="card"><div class="table-wrap"><table>
-            <thead><tr><th>Username</th><th>Display Name</th><th>Email</th><th>Persona</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Username</th><th>Display Name</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>${users.map(u => `
               <tr>
                 <td><a href="#admin/users/${u.id}" onclick="navigate('admin/users/${u.id}');return false;">${u.username}</a></td>
                 <td>${u.display_name || "—"}</td>
-                <td style="color:var(--gray-600)">${u.email}</td>
-                <td>${personaBadge(u.persona)}</td>
+                <td style="color:var(--gray-600)">${u.email || "—"}</td>
                 <td><span class="badge ${u.is_active ? "badge-success" : "badge-failed"}">${u.is_active ? "Active" : "Inactive"}</span></td>
                 <td style="display:flex;gap:4px;flex-wrap:wrap">
                   <button class="btn btn-secondary btn-sm" onclick="navigate('admin/users/${u.id}')">View</button>
-                  <button class="btn btn-secondary btn-sm" onclick="showEditPersona('${u.id}','${u.persona}')">Persona</button>
                   <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${u.username}')">Delete</button>
                 </td>
               </tr>`).join("")}
@@ -4600,12 +5139,12 @@ async function _renderAdminUsers(subTab) {
           ${groups.map(g => `
             <div class="card">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                <strong>${g.name}</strong>
+                <a href="#admin/groups/${g.id}" onclick="navigate('admin/groups/${g.id}');return false;" style="font-weight:600;color:inherit;text-decoration:none">${g.name}</a>
                 <span class="badge badge-blue">${(g.members || []).length} members</span>
               </div>
               <div style="color:var(--gray-600);font-size:13px;margin-bottom:12px">${g.description || "No description"}</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap">
-                <button class="btn btn-secondary btn-sm" onclick="showGroupMembers('${g.id}','${g.name}')">Members</button>
+                <button class="btn btn-secondary btn-sm" onclick="navigate('admin/groups/${g.id}')">View</button>
                 <button class="btn btn-secondary btn-sm" onclick="showEditGroup('${g.id}','${g.name.replace(/'/g,"\\'")}','${(g.description||"").replace(/'/g,"\\'")}')">Edit</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteGroup('${g.id}','${g.name.replace(/'/g,"\\'")}')">Delete</button>
               </div>
@@ -4624,15 +5163,18 @@ async function _renderAdminUsers(subTab) {
             <thead><tr><th>Name</th><th>Description</th><th>Permissions</th><th>Actions</th></tr></thead>
             <tbody>${roles.map(r => `
               <tr>
-                <td><strong>${r.name}</strong></td>
+                <td>
+                  <strong>${r.name}</strong>
+                  ${r.is_builtin ? `<span class="badge badge-blue" style="margin-left:6px;font-size:10px">built-in</span>` : ""}
+                </td>
                 <td style="color:var(--gray-600)">${r.description || "—"}</td>
-                <td><div style="display:flex;flex-wrap:wrap;gap:4px">${(r.permissions || []).slice(0,6).map(p =>
+                <td><div style="display:flex;flex-wrap:wrap;gap:4px">${(r.permissions || []).slice(0,5).map(p =>
                   `<code style="background:var(--gray-100);padding:1px 6px;border-radius:4px;font-size:11px">${p}</code>`).join("")}
-                  ${(r.permissions || []).length > 6 ? `<span style="font-size:11px;color:var(--gray-500)">+${r.permissions.length - 6} more</span>` : ""}
+                  ${(r.permissions || []).length > 5 ? `<span style="font-size:11px;color:var(--gray-500)">+${r.permissions.length - 5} more</span>` : ""}
                 </div></td>
                 <td style="display:flex;gap:4px">
-                  <button class="btn btn-secondary btn-sm" onclick="showEditRole('${r.id}','${r.name.replace(/'/g,"\\'")}','${(r.description||"").replace(/'/g,"\\'")}',${JSON.stringify(r.permissions||[])})">Edit</button>
-                  <button class="btn btn-danger btn-sm" onclick="deleteRole('${r.id}','${r.name.replace(/'/g,"\\'")}')">Delete</button>
+                  <button class="btn btn-secondary btn-sm" onclick="navigate('admin/roles/${r.id}')">${r.is_builtin ? "View" : "Edit"}</button>
+                  ${r.is_builtin ? "" : `<button class="btn btn-danger btn-sm" onclick="deleteRole('${r.id}','${r.name.replace(/'/g,"\\'")}',false)">Delete</button>`}
                 </td>
               </tr>`).join("")}
             </tbody></table></div></div>`}`;
@@ -4649,17 +5191,384 @@ router.register("admin/users-roles",  () => _renderAdminUsers("roles"));
 router.register("admin/groups",  () => _renderAdminUsers("groups"));
 router.register("admin/roles",   () => _renderAdminUsers("roles"));
 
-router.register("admin/rbac", async () => {
-  setBreadcrumb({ label: "Administration", hash: "admin/users" }, { label: "Permissions" });
+// ── Role detail / permission matrix ──────────────────────────────────────────
+router.register("admin/roles/:id", async (hash, parts) => {
+  const roleId = parts[2];
+  setBreadcrumb({ label: "Administration", hash: "admin/users" }, { label: "Roles", hash: "admin/roles" }, { label: "Loading…" });
+  setContent(loading());
+
+  const role = await api.getRole(roleId).catch(() => null);
+  if (!role) { setContent(`<div class="card"><div class="empty-state"><p>Role not found.</p></div></div>`); return; }
+
+  setBreadcrumb(
+    { label: "Administration", hash: "admin/users" },
+    { label: "Roles", hash: "admin/roles" },
+    { label: role.name }
+  );
+
+  const currentPerms = new Set(role.permissions || []);
+
+  // Build matrix: rows = this role (just one row), columns = each individual permission
+  // Group columns by resource category
+  const colGroups = _PERMISSION_CATALOG.map(g => ({
+    group: g.group,
+    perms: g.perms,
+  }));
+
+  const headerGroups = colGroups.map(g =>
+    `<th colspan="${g.perms.length}" style="text-align:center;background:var(--gray-50);border-bottom:2px solid var(--gray-200);padding:6px 4px;font-size:11px;font-weight:700;color:var(--gray-600);letter-spacing:.3px;border-right:2px solid var(--gray-200)">${g.group}</th>`
+  ).join("");
+
+  const headerPerms = colGroups.map(g =>
+    g.perms.map((p, i) => {
+      const action = p.split(":")[1];
+      const isLast = i === g.perms.length - 1;
+      return `<th style="text-align:center;padding:5px 3px;font-size:10.5px;color:var(--gray-500);font-weight:500;min-width:58px;vertical-align:bottom;${isLast?"border-right:2px solid var(--gray-200)":""}">${action}</th>`;
+    }).join("")
+  ).join("");
+
+  const cells = colGroups.map(g =>
+    g.perms.map((p, i) => {
+      const checked = currentPerms.has(p) ? "checked" : "";
+      const isLast = i === g.perms.length - 1;
+      return `<td style="text-align:center;padding:6px 3px;${isLast?"border-right:2px solid var(--gray-200)":""}">
+        <input type="checkbox" data-perm="${p}" ${checked} ${role.is_builtin ? "" : ""}
+          style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer"
+          onchange="_roleMatrixToggle(this,'${roleId}')">
+      </td>`;
+    }).join("")
+  ).join("");
+
+  const totalPerms = _PERMISSION_CATALOG.reduce((n, g) => n + g.perms.length, 0);
+
   setContent(`
     <div class="page-header">
-      <div><h1>Permissions</h1><div class="sub">Role bindings by resource scope — system, products and environments</div></div>
+      <div>
+        <h1>${role.name} ${role.is_builtin ? '<span class="badge badge-blue" style="font-size:12px;vertical-align:middle">built-in</span>' : ""}</h1>
+        <div class="sub">${role.description || "No description"} &nbsp;·&nbsp; <span id="role-perm-count">${currentPerms.size}</span> / ${totalPerms} permissions</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        ${role.is_builtin ? "" : `
+          <button class="btn btn-secondary" onclick="_roleMatrixSelectAll(true)">Select All</button>
+          <button class="btn btn-secondary" onclick="_roleMatrixSelectAll(false)">Clear All</button>
+        `}
+        <button class="btn btn-secondary" onclick="navigate('admin/roles')">← Back to Roles</button>
+      </div>
     </div>
-    <div class="card" id="admin-rbac-card">
-      ${_renderAdminRbacPicker()}
-    </div>`);
-  _initAdminRbacPicker();
+
+    ${role.is_builtin ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;font-size:13px;color:#1e40af;margin-bottom:16px">
+      Built-in role — permissions are read-only. <strong>All permissions are always granted.</strong>
+    </div>` : ""}
+
+    <div class="card">
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse;width:100%">
+          <thead>
+            <tr><th style="text-align:left;padding:8px 12px;min-width:180px;background:var(--gray-50);border-bottom:2px solid var(--gray-200)">Role</th>${headerGroups}</tr>
+            <tr><th style="background:var(--gray-50);border-bottom:1px solid var(--gray-200)"></th>${headerPerms}</tr>
+          </thead>
+          <tbody>
+            <tr style="background:white">
+              <td style="padding:10px 12px;font-weight:600;font-size:13px;border-right:1px solid var(--gray-100);white-space:nowrap">
+                ${role.name}
+                ${role.is_builtin ? '<span class="badge badge-blue" style="margin-left:4px;font-size:10px">built-in</span>' : ""}
+              </td>
+              ${cells}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:10px 16px;font-size:12px;color:var(--gray-400);border-top:1px solid var(--gray-100)">
+        ${role.is_builtin ? "Built-in role permissions cannot be modified." : "Click a checkbox to immediately grant or revoke that permission."}
+      </div>
+    </div>
+  `);
+
+  // Disable checkboxes for built-in roles
+  if (role.is_builtin) {
+    document.querySelectorAll("[data-perm]").forEach(cb => { cb.disabled = true; });
+  }
 });
+
+window._roleMatrixToggle = async function(checkbox, roleId) {
+  checkbox.disabled = true;
+  const role = await api.getRole(roleId).catch(() => null);
+  if (!role) { checkbox.disabled = false; return; }
+  const current = new Set(role.permissions || []);
+  const perm = checkbox.dataset.perm;
+  if (checkbox.checked) current.add(perm); else current.delete(perm);
+  try {
+    await api.updateRole(roleId, { permissions: Array.from(current) });
+    const countEl = document.getElementById("role-perm-count");
+    if (countEl) countEl.textContent = current.size;
+    toast(checkbox.checked ? `Granted: ${perm}` : `Revoked: ${perm}`, "success");
+  } catch (e) {
+    checkbox.checked = !checkbox.checked;
+    toast(e.message, "error");
+  } finally {
+    checkbox.disabled = false;
+  }
+};
+
+window._roleMatrixSelectAll = async function(checked) {
+  const allPerms = _PERMISSION_CATALOG.flatMap(g => g.perms);
+  const cbs = document.querySelectorAll("[data-perm]");
+  cbs.forEach(cb => { cb.disabled = true; });
+  try {
+    const roleId = window.location.hash.split("/")[2];
+    await api.updateRole(roleId, { permissions: checked ? allPerms : [] });
+    cbs.forEach(cb => { cb.checked = checked; cb.disabled = false; });
+    const countEl = document.getElementById("role-perm-count");
+    if (countEl) countEl.textContent = checked ? allPerms.length : 0;
+    toast(checked ? "All permissions granted" : "All permissions cleared", "success");
+  } catch (e) {
+    cbs.forEach(cb => { cb.disabled = false; });
+    toast(e.message, "error");
+  }
+};
+
+router.register("admin/rbac", async () => {
+  setBreadcrumb({ label: "Administration", hash: "admin/users" }, { label: "Permissions" });
+  setContent(loading());
+
+  const [roles, bindings, users, groups] = await Promise.all([
+    api.getRoles().catch(() => []),
+    api.getScopeBindings("organization").catch(() => []),
+    api.getUsers().catch(() => []),
+    api.getGroups().catch(() => []),
+  ]);
+
+  const colGroups = _PERMISSION_CATALOG.map(g => ({ group: g.group, perms: g.perms }));
+  const totalPerms = _PERMISSION_CATALOG.reduce((n, g) => n + g.perms.length, 0);
+
+  // ── Role Permissions section ──────────────────────────────────────────────
+  const headerGroups = colGroups.map(g =>
+    `<th colspan="${g.perms.length}" style="text-align:center;background:var(--gray-50);border-bottom:2px solid var(--gray-200);padding:6px 4px;font-size:11px;font-weight:700;color:var(--gray-600);letter-spacing:.3px;border-right:2px solid var(--gray-200);white-space:nowrap">${g.group}</th>`
+  ).join("");
+
+  const headerPerms = colGroups.map(g =>
+    g.perms.map((p, i) => {
+      const action = p.split(":")[1];
+      const isLast = i === g.perms.length - 1;
+      return `<th title="${p}" style="text-align:center;padding:5px 2px;font-size:10px;color:var(--gray-500);font-weight:500;min-width:52px;vertical-align:bottom;${isLast ? "border-right:2px solid var(--gray-200)" : ""}">${action}</th>`;
+    }).join("")
+  ).join("");
+
+  const permRows = roles.map(role => {
+    const currentPerms = new Set(role.permissions || []);
+    const cells = colGroups.map(g =>
+      g.perms.map((p, i) => {
+        const checked = currentPerms.has(p) ? "checked" : "";
+        const isLast = i === g.perms.length - 1;
+        const disabled = role.is_builtin ? "disabled" : "";
+        return `<td style="text-align:center;padding:5px 2px;${isLast ? "border-right:2px solid var(--gray-200)" : ""}">
+          <input type="checkbox" data-perm="${p}" data-role="${role.id}" ${checked} ${disabled}
+            style="width:15px;height:15px;accent-color:var(--primary);cursor:${role.is_builtin ? "not-allowed" : "pointer"}"
+            onchange="_permMatrixToggle(this)">
+        </td>`;
+      }).join("")
+    ).join("");
+    return `<tr style="background:white;border-bottom:1px solid var(--gray-100)" data-role-row="${role.id}">
+      <td style="padding:9px 12px;font-weight:600;font-size:13px;border-right:1px solid var(--gray-100);white-space:nowrap;min-width:160px">
+        <a href="#admin/roles/${role.id}" onclick="navigate('admin/roles/${role.id}');return false;" style="color:inherit;text-decoration:none">${role.name}</a>
+        ${role.is_builtin ? '<span class="badge badge-blue" style="margin-left:4px;font-size:10px">built-in</span>' : ""}
+        <div style="font-size:11px;font-weight:400;color:var(--gray-400);margin-top:2px">${currentPerms.size}/${totalPerms}</div>
+      </td>
+      ${cells}
+    </tr>`;
+  }).join("");
+
+  const permMatrix = roles.length === 0
+    ? `<div class="empty-state"><p>No roles found.</p></div>`
+    : `<div style="overflow-x:auto">
+        <table style="border-collapse:collapse;width:100%;min-width:900px">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:8px 12px;min-width:160px;background:var(--gray-50);border-bottom:2px solid var(--gray-200);border-right:1px solid var(--gray-200)">Role</th>
+              ${headerGroups}
+            </tr>
+            <tr>
+              <th style="background:var(--gray-50);border-bottom:1px solid var(--gray-200);border-right:1px solid var(--gray-200)"></th>
+              ${headerPerms}
+            </tr>
+          </thead>
+          <tbody>${permRows}</tbody>
+        </table>
+      </div>
+      <div style="padding:10px 16px;font-size:12px;color:var(--gray-400);border-top:1px solid var(--gray-100)">
+        Click a checkbox to immediately grant or revoke that permission on the role. Built-in roles are read-only. Click a role name to open its detail page.
+      </div>`;
+
+  // ── Role Assignments section ──────────────────────────────────────────────
+  const assignMatrix = _renderSystemAssignmentMatrix("organization", bindings, roles, users, groups);
+
+  setContent(`
+    <div class="page-header">
+      <div>
+        <h1>Permissions</h1>
+        <div class="sub">System-level role permissions and assignments</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="showCreateRole()">+ New Role</button>
+      </div>
+    </div>
+
+    <h3 style="margin:0 0 12px;font-size:15px;font-weight:700">Role Permissions</h3>
+    <div class="card" style="margin-bottom:24px">${permMatrix}</div>
+
+    <h3 style="margin:0 0 12px;font-size:15px;font-weight:700">Role Assignments</h3>
+    <div style="font-size:13px;color:var(--gray-600);margin-bottom:12px">Assign roles to users and groups at the organization scope.</div>
+    ${assignMatrix}
+  `);
+});
+
+// System roles: platform-administration-only permissions (no product child objects)
+const _SYSTEM_ROLE_NAMES = ["system-administrator"];
+// Product roles: roles whose permissions are centred on product child objects
+const _PRODUCT_ROLE_PREFIXES = ["product-admin","product-developer","product-auditor","system-auditor"];
+
+function _isSystemRole(role) {
+  return _SYSTEM_ROLE_NAMES.includes(role.name);
+}
+
+function _renderSystemAssignmentMatrix(scope, bindings, roles, users, groups) {
+  if (!roles.length) return `<div class="card"><div class="empty-state"><p>No roles defined.</p></div></div>`;
+  if (!users.length && !groups.length) return `<div class="card"><div class="empty-state"><p>No users or groups in the system.</p></div></div>`;
+
+  const bindingMap = {};
+  for (const b of bindings) {
+    const key = b.user_id ? `user:${b.user_id}:${b.role_id}` : `group:${b.group_id}:${b.role_id}`;
+    bindingMap[key] = b.id;
+  }
+
+  const allPrincipals = [
+    ...groups.map(g => ({ type: "group", id: g.id, label: g.name, sub: `${g.member_count || 0} members` })),
+    ...users.map(u => ({ type: "user", id: u.id, label: u.display_name || u.username, sub: u.username })),
+  ];
+
+  const tableId = "sys-assign-matrix";
+
+  function _principalCell(p) {
+    const icon = p.type === "group"
+      ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--primary-light);color:var(--primary);font-size:11px;font-weight:700;margin-right:6px">G</span>`
+      : `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;margin-right:6px">U</span>`;
+    const dest = p.type === "group" ? `admin/groups/${p.id}` : `admin/users/${p.id}`;
+    return `<td style="padding:8px 12px;min-width:200px;border-right:1px solid var(--gray-100)" data-label="${(p.label + " " + p.sub).toLowerCase()}">
+      <div style="display:flex;align-items:center">${icon}
+        <div>
+          <div style="font-weight:600;font-size:13px">
+            <a href="#${dest}" onclick="navigate('${dest}');return false;" style="color:inherit;text-decoration:none">${p.label}</a>
+          </div>
+          <div style="font-size:11px;color:var(--gray-400)">${p.sub}</div>
+        </div>
+      </div>
+    </td>`;
+  }
+
+  const colHeaders = roles.map(r =>
+    `<th style="text-align:center;min-width:120px;vertical-align:bottom;padding:6px 6px;font-size:11.5px;font-weight:600;color:var(--gray-700)">
+      ${r.name}
+      ${r.is_builtin ? '<span class="badge badge-blue" style="display:block;margin:3px auto 0;font-size:9px">built-in</span>' : ""}
+    </th>`
+  ).join("");
+
+  const tableRows = allPrincipals.map(p => {
+    const cells = roles.map(r => {
+      const key = `${p.type}:${p.id}:${r.id}`;
+      const bindingId = bindingMap[key] || null;
+      const cbId = `sam-${p.type}-${p.id}-${r.id}`.replace(/[^a-zA-Z0-9-]/g, "-");
+      return `<td style="text-align:center;padding:8px 4px">
+        <input type="checkbox" id="${cbId}" ${bindingId ? "checked" : ""}
+          style="width:17px;height:17px;cursor:pointer;accent-color:var(--primary)"
+          onchange="toggleSystemBinding(this,'${scope}','${p.type}','${p.id}','${r.id}','${bindingId || ""}')">
+      </td>`;
+    }).join("");
+    return `<tr style="border-bottom:1px solid var(--gray-100)">${_principalCell(p)}${cells}</tr>`;
+  }).join("");
+
+  return `
+    <div class="card">
+      <div style="padding:12px 16px 10px;border-bottom:1px solid var(--gray-100);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px">
+          <input type="text" id="${tableId}-search" placeholder="Search users or groups…"
+            style="width:100%;padding:7px 10px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;outline:none"
+            oninput="filterAssignmentMatrix('${tableId}')" />
+        </div>
+        <div style="font-size:12px;color:var(--gray-400)">Scope: <code>organization</code></div>
+      </div>
+      <div style="overflow-x:auto">
+        <table id="${tableId}" style="border-collapse:collapse;width:100%">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:8px 12px;background:var(--gray-50);border-bottom:2px solid var(--gray-200);border-right:1px solid var(--gray-200)">Principal</th>
+              ${colHeaders}
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+      <div style="padding:8px 16px;font-size:12px;color:var(--gray-400);border-top:1px solid var(--gray-100)">
+        Assignments at <code>organization</code> scope grant access to all products. To restrict to a single product, assign from that product's Permissions tab.
+      </div>
+    </div>`;
+}
+
+window.filterAssignmentMatrix = function(tableId) {
+  const query = (document.getElementById(`${tableId}-search`)?.value || "").toLowerCase().trim();
+  const rows = document.querySelectorAll(`#${tableId} tbody tr`);
+  rows.forEach(row => {
+    const labelCell = row.querySelector("td[data-label]");
+    const label = labelCell ? labelCell.getAttribute("data-label") : "";
+    row.style.display = (!query || label.includes(query)) ? "" : "none";
+  });
+};
+
+window.toggleSystemBinding = async function(checkbox, scope, pType, pId, roleId, existingId) {
+  checkbox.disabled = true;
+  try {
+    if (checkbox.checked) {
+      const body = pType === "user" ? { role_id: roleId, scope, user_id: pId } : { role_id: roleId, scope, group_id: pId };
+      const b = await api.createScopeBinding(body);
+      checkbox.onchange = function() { toggleSystemBinding(this, scope, pType, pId, roleId, b.id); };
+      toast("Role assigned", "success");
+    } else {
+      await api.deleteScopeBinding(existingId);
+      checkbox.onchange = function() { toggleSystemBinding(this, scope, pType, pId, roleId, ""); };
+      toast("Role removed", "success");
+    }
+  } catch (e) {
+    checkbox.checked = !checkbox.checked;
+    toast(e.message, "error");
+  } finally {
+    checkbox.disabled = false;
+  }
+};
+
+window._permMatrixToggle = async function(checkbox) {
+  const roleId = checkbox.dataset.role;
+  const perm = checkbox.dataset.perm;
+  checkbox.disabled = true;
+  try {
+    const role = await api.getRole(roleId);
+    const current = new Set(role.permissions || []);
+    if (checkbox.checked) current.add(perm); else current.delete(perm);
+    await api.updateRole(roleId, { permissions: Array.from(current) });
+    const row = document.querySelector(`[data-role-row="${roleId}"]`);
+    if (row) {
+      const counter = row.querySelector("div[style*='font-size:11px']");
+      if (counter) {
+        const totalPerms = _PERMISSION_CATALOG.reduce((n, g) => n + g.perms.length, 0);
+        counter.textContent = `${current.size}/${totalPerms}`;
+      }
+    }
+    toast(checkbox.checked ? `Granted: ${perm}` : `Revoked: ${perm}`, "success");
+  } catch (e) {
+    checkbox.checked = !checkbox.checked;
+    toast(e.message, "error");
+  } finally {
+    checkbox.disabled = false;
+  }
+};
 
 // ── Key Management (API Keys + Vault) ─────────────────────────────────────
 router.register("admin/keys", async () => {
@@ -5272,10 +6181,9 @@ router.register("admin/users/:id", async (hash, parts) => {
     <div class="page-header">
       <div>
         <h1>${user.display_name || user.username}</h1>
-        <div class="sub">${user.email} · ${personaBadge(user.persona)}</div>
+        <div class="sub">${user.email || user.username}</div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-secondary" onclick="showEditPersona('${user.id}','${user.persona}')">Change Persona</button>
         <button class="btn btn-primary" onclick="showAddBinding('${user.id}')">+ Add Role Binding</button>
       </div>
     </div>
@@ -5287,7 +6195,6 @@ router.register("admin/users/:id", async (hash, parts) => {
           <tr><td style="color:var(--gray-600);width:140px">Username</td><td><strong>${user.username}</strong></td></tr>
           <tr><td style="color:var(--gray-600)">Email</td><td>${user.email}</td></tr>
           <tr><td style="color:var(--gray-600)">Display Name</td><td>${user.display_name || "—"}</td></tr>
-          <tr><td style="color:var(--gray-600)">Persona</td><td>${personaBadge(user.persona)}</td></tr>
           <tr><td style="color:var(--gray-600)">Status</td><td><span class="badge ${user.is_active ? "badge-success" : "badge-failed"}">${user.is_active ? "Active" : "Inactive"}</span></td></tr>
           ${user.ldap_dn ? `<tr><td style="color:var(--gray-600)">LDAP DN</td><td><code style="font-size:12px">${user.ldap_dn}</code></td></tr>` : ""}
         </tbody></table>
@@ -5317,19 +6224,19 @@ function showBulkImportUsers() {
   openModal("Bulk Import Users",
     `<p style="font-size:13px;color:var(--gray-600);margin-bottom:12px">
        Paste a JSON array or CSV (with header row) to create multiple users at once.
-       Existing usernames are skipped. Default persona is <strong>ReadOnly</strong>.
+       Existing usernames are skipped.
      </p>
      <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">
-       CSV columns: <code>username, email, display_name, persona, password</code><br>
-       JSON fields: <code>username, email, display_name, persona, password, ldap_dn</code>
+       CSV columns: <code>username, email, display_name, password</code><br>
+       JSON fields: <code>username, email, display_name, password, ldap_dn</code>
      </div>
      <textarea id="bulk-import-text" class="form-control" rows="10" spellcheck="false"
-       placeholder='[{"username":"alice","email":"alice@example.com","persona":"Developer"},
-{"username":"bob","email":"bob@example.com","persona":"ReadOnly"}]
+       placeholder='[{"username":"alice","email":"alice@example.com"},
+{"username":"bob","email":"bob@example.com"}]
 -- or CSV --
-username,email,display_name,persona
-alice,alice@example.com,Alice Smith,Developer
-bob,bob@example.com,Bob Jones,ReadOnly'
+username,email,display_name
+alice,alice@example.com,Alice Smith
+bob,bob@example.com,Bob Jones'
        style="font-family:monospace;font-size:12px;resize:vertical"></textarea>`,
     async () => {
       const text = (el("bulk-import-text")?.value || "").trim();
@@ -5365,21 +6272,17 @@ bob,bob@example.com,Bob Jones,ReadOnly'
 function showCreateUser() {
   openModal("New User",
     `<div class="form-group"><label>Username *</label><input id="uf-username" class="form-control" placeholder="e.g. jdoe"></div>
-     <div class="form-group"><label>Email *</label><input id="uf-email" class="form-control" type="email" placeholder="jdoe@example.com"></div>
+     <div class="form-group"><label>Email</label><input id="uf-email" class="form-control" type="email" placeholder="jdoe@example.com"></div>
      <div class="form-group"><label>Display Name</label><input id="uf-name" class="form-control" placeholder="Jane Doe"></div>
-     <div class="form-group"><label>Persona *</label><select id="uf-persona" class="form-control">
-       ${PERSONAS.map(p => `<option value="${p}">${p}</option>`).join("")}
-     </select></div>
      <div class="form-group"><label>LDAP DN</label><input id="uf-ldap" class="form-control" placeholder="cn=jdoe,ou=users,dc=example,dc=com"></div>`,
     async () => {
       const username = el("uf-username").value.trim();
-      const email = el("uf-email").value.trim();
-      if (!username || !email) return modalError("Username and email are required");
+      if (!username) return modalError("Username is required");
       try {
         await api.createUser({
-          username, email,
+          username,
+          email: el("uf-email").value.trim() || null,
           display_name: el("uf-name").value.trim() || null,
-          persona: el("uf-persona").value,
           ldap_dn: el("uf-ldap").value.trim() || null,
         });
         closeModal(); toast("User created", "success");
@@ -5389,21 +6292,6 @@ function showCreateUser() {
   );
 }
 
-function showEditPersona(userId, current) {
-  openModal("Change Persona",
-    `<div class="form-group"><label>Persona</label><select id="ep-persona" class="form-control">
-       ${PERSONAS.map(p => `<option value="${p}"${p === current ? " selected" : ""}>${p}</option>`).join("")}
-     </select></div>
-     <p style="color:var(--gray-600);font-size:13px;margin-top:8px">Changing the persona will replace the user's organisation-level role binding.</p>`,
-    async () => {
-      try {
-        await api.updateUser(userId, { persona: el("ep-persona").value });
-        closeModal(); toast("Persona updated", "success");
-        navigate("admin/users/" + userId);
-      } catch (e) { modalError(e.message); }
-    }
-  );
-}
 
 async function showAddBinding(userId) {
   const roles = await api.getRoles().catch(() => []);
@@ -5477,7 +6365,7 @@ async function showGroupMembers(groupId, groupName) {
        <label>Add member</label>
        <select id="gm-add" class="form-control">
          <option value="">— select user —</option>
-         ${nonMembers.map(u => `<option value="${u.id}">${u.username} (${u.persona})</option>`).join("")}
+         ${nonMembers.map(u => `<option value="${u.id}">${u.username}${u.display_name ? ` — ${u.display_name}` : ""}</option>`).join("")}
        </select>
      </div>` : ""}`,
     async () => {
@@ -5497,7 +6385,111 @@ async function removeGroupMemberAndRefresh(groupId, userId, groupName) {
     await api.removeGroupMember(groupId, userId);
     toast("Member removed", "success");
     closeModal();
-    navigate("admin/groups");
+    navigate("admin/groups/" + groupId);
+  } catch (e) { toast(e.message, "error"); }
+}
+
+// ── Group detail page ─────────────────────────────────────────────────────────
+router.register("admin/groups/:id", async (hash, parts) => {
+  const groupId = parts[2];
+  setBreadcrumb({ label: "Administration", hash: "admin/users" }, { label: "Groups", hash: "admin/groups" }, { label: "Loading…" });
+  setContent(loading());
+
+  const [group, allUsers, bindings, roles] = await Promise.all([
+    api.getGroup(groupId).catch(() => null),
+    api.getUsers().catch(() => []),
+    api.getGroupBindings(groupId).catch(() => []),
+    api.getRoles().catch(() => []),
+  ]);
+
+  if (!group) { setContent(`<div class="card"><div class="empty-state"><p>Group not found.</p></div></div>`); return; }
+
+  setBreadcrumb(
+    { label: "Administration", hash: "admin/users" },
+    { label: "Groups", hash: "admin/groups" },
+    { label: group.name }
+  );
+
+  const roleMap = Object.fromEntries(roles.map(r => [r.id, r.name]));
+  const memberIds = new Set((group.members || []).map(m => m.id));
+  const nonMembers = allUsers.filter(u => !memberIds.has(u.id));
+
+  setContent(`
+    <div class="page-header">
+      <div>
+        <h1>${group.name}</h1>
+        <div class="sub">${group.description || "No description"} · ${(group.members || []).length} members</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="showEditGroup('${group.id}','${group.name.replace(/'/g,"\\'")}','${(group.description||"").replace(/'/g,"\\'")}')">Edit</button>
+        <button class="btn btn-primary" onclick="showAddGroupBinding('${group.id}')">+ Add Role Binding</button>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-bottom:24px">
+      <div class="card">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+          <h3>Members</h3>
+          ${nonMembers.length > 0 ? `<button class="btn btn-secondary btn-sm" onclick="showGroupMembers('${group.id}','${group.name.replace(/'/g,"\\'")}')">+ Add Member</button>` : ""}
+        </div>
+        ${(group.members || []).length === 0
+          ? `<div class="empty-state"><p>No members yet.</p></div>`
+          : `<div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0">
+              ${(group.members || []).map(m => `
+                <span style="background:var(--gray-100);padding:5px 12px;border-radius:20px;font-size:13px;display:flex;align-items:center;gap:8px">
+                  <a href="#admin/users/${m.id}" onclick="navigate('admin/users/${m.id}');return false;" style="color:inherit;text-decoration:none;font-weight:600">${m.username}</a>
+                  <button style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:16px;line-height:1;padding:0" onclick="removeGroupMemberAndRefresh('${group.id}','${m.id}','${group.name.replace(/'/g,"\\'")}')">×</button>
+                </span>`).join("")}
+            </div>`}
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>Role Bindings</h3></div>
+        ${bindings.length === 0
+          ? `<div class="empty-state"><p>No role bindings. <button class="btn btn-primary btn-sm" style="margin-left:8px" onclick="showAddGroupBinding('${group.id}')">Add one</button></p></div>`
+          : `<div class="table-wrap"><table>
+              <thead><tr><th>Role</th><th>Scope</th><th>Expires</th><th></th></tr></thead>
+              <tbody>${bindings.map(b => `
+                <tr>
+                  <td><strong>${roleMap[b.role_id] || b.role_id}</strong></td>
+                  <td><code style="font-size:12px">${b.scope}</code></td>
+                  <td style="color:var(--gray-600)">${b.expires_at ? fmtDate(b.expires_at) : "Never"}</td>
+                  <td><button class="btn btn-danger btn-sm" onclick="removeGroupBinding('${group.id}','${b.id}')">Remove</button></td>
+                </tr>`).join("")}
+              </tbody></table></div>`}
+      </div>
+    </div>
+  `);
+});
+
+async function showAddGroupBinding(groupId) {
+  const roles = await api.getRoles().catch(() => []);
+  openModal("Add Role Binding",
+    `<div class="form-group"><label>Role *</label><select id="agb-role" class="form-control">
+       ${roles.map(r => `<option value="${r.id}">${r.name}</option>`).join("")}
+     </select></div>
+     <div class="form-group"><label>Scope *</label><input id="agb-scope" class="form-control" placeholder="organization · product:prod-id · environment:env-id"></div>
+     <div class="form-group"><label>Expires At (JIT access)</label><input id="agb-exp" class="form-control" type="datetime-local"></div>`,
+    async () => {
+      const scope = el("agb-scope").value.trim();
+      const role_id = el("agb-role").value;
+      if (!scope || !role_id) return modalError("Role and scope are required");
+      const expires_at = el("agb-exp").value ? new Date(el("agb-exp").value).toISOString() : null;
+      try {
+        await api.addGroupBinding(groupId, { role_id, scope, expires_at });
+        closeModal(); toast("Binding added", "success");
+        navigate("admin/groups/" + groupId);
+      } catch (e) { modalError(e.message); }
+    }
+  );
+}
+
+async function removeGroupBinding(groupId, bindingId) {
+  if (!confirm("Remove this role binding?")) return;
+  try {
+    await api.removeGroupBinding(groupId, bindingId);
+    toast("Binding removed", "success");
+    navigate("admin/groups/" + groupId);
   } catch (e) { toast(e.message, "error"); }
 }
 
@@ -5535,29 +6527,166 @@ async function deleteGroup(id, name) {
   } catch (e) { toast(e.message, "error"); }
 }
 
-function showEditRole(id, name, description, permissions) {
-  openModal("Edit Role",
-    `<div class="form-group"><label>Name *</label><input id="er2-name" class="form-control" value="${name}"></div>
-     <div class="form-group"><label>Description</label><input id="er2-desc" class="form-control" value="${description}"></div>
-     <div class="form-group"><label>Permissions</label>
-       <textarea id="er2-perms" class="form-control" rows="5">${permissions.join("\n")}</textarea>
-       <div style="color:var(--gray-500);font-size:12px;margin-top:4px">One permission per line. Wildcards supported: <code>release.*</code></div>
-     </div>`,
+// Full permission catalog grouped by resource.
+// Seeded with defaults; replaced at boot by fetchPermissionCatalog() from the backend.
+// To register a new resource: add it to PERMISSION_CATALOG in authz_service.py.
+let _PERMISSION_CATALOG = [
+  { group: "Products",        product_scoped: false, perms: ["products:view","products:create","products:edit","products:delete"] },
+  { group: "Applications",    product_scoped: true,  perms: ["applications:view","applications:create","applications:edit","applications:delete"] },
+  { group: "Pipelines",       product_scoped: true,  perms: ["pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:execute","pipelines:run"] },
+  { group: "Releases",        product_scoped: true,  perms: ["releases:view","releases:create","releases:edit","releases:delete","releases:execute","releases:approve"] },
+  { group: "Tasks",           product_scoped: true,  perms: ["tasks:view","tasks:create","tasks:edit","tasks:delete","tasks:execute"] },
+  { group: "Stages",          product_scoped: true,  perms: ["stages:view","stages:create","stages:edit","stages:delete","stages:execute"] },
+  { group: "Environments",    product_scoped: true,  perms: ["environments:view","environments:create","environments:edit","environments:delete"] },
+  { group: "Templates",       product_scoped: true,  perms: ["templates:view","templates:create","templates:edit","templates:delete"] },
+  { group: "Webhooks",        product_scoped: true,  perms: ["webhooks:view","webhooks:create","webhooks:edit","webhooks:delete"] },
+  { group: "Compliance",      product_scoped: true,  perms: ["compliance:view","compliance:edit","compliance:approve"] },
+  { group: "Plugins",         product_scoped: false, perms: ["plugins:view","plugins:install","plugins:configure","plugins:delete"] },
+  { group: "Agent Pools",     product_scoped: false, perms: ["agent-pools:view","agent-pools:create","agent-pools:edit","agent-pools:delete"] },
+  { group: "Vault",           product_scoped: false, perms: ["vault:view","vault:create","vault:reveal","vault:delete"] },
+  { group: "App Dictionary",  product_scoped: false, perms: ["app-dictionary:view","app-dictionary:edit"] },
+  { group: "Monitoring",      product_scoped: false, perms: ["monitoring:view","monitoring:configure"] },
+  { group: "Users",           product_scoped: false, perms: ["users:view","users:create","users:edit","users:delete"] },
+  { group: "Groups",          product_scoped: false, perms: ["groups:view","groups:create","groups:edit","groups:delete"] },
+  { group: "Roles",           product_scoped: false, perms: ["roles:view","roles:create","roles:edit","roles:delete"] },
+  { group: "Permissions",     product_scoped: false, perms: ["permissions:view","permissions:grant","permissions:revoke","permissions:change"] },
+  { group: "Global Variables",product_scoped: false, perms: ["global-vars:view","global-vars:edit"] },
+];
+
+// Fetch the live catalog from the backend and replace the default arrays.
+// Called once after login so new resources added in Python appear automatically.
+async function fetchPermissionCatalog() {
+  try {
+    const catalog = await api.getPermissionCatalog();
+    if (Array.isArray(catalog) && catalog.length > 0) {
+      _PERMISSION_CATALOG = catalog;
+      _PRODUCT_PERM_CATALOG = catalog.filter(g => g.product_scoped);
+    }
+  } catch (_) {
+    // Silently fall back to the hardcoded defaults
+  }
+}
+
+function _renderPermissionPicker(prefix, selectedPerms) {
+  const sel = new Set(selectedPerms || []);
+  const actionLabel = { view:"View", create:"Create", edit:"Edit", delete:"Delete",
+    run:"Run", execute:"Execute", approve:"Approve", reveal:"Reveal", install:"Install",
+    configure:"Configure", grant:"Grant", revoke:"Revoke", change:"Change" };
+
+  const groups = _PERMISSION_CATALOG.map(g => {
+    const allChecked = g.perms.every(p => sel.has(p));
+    const cbId = `perm-grp-${prefix}-${g.group.replace(/\s+/g,"-").toLowerCase()}`;
+    const permCbs = g.perms.map(p => {
+      const action = p.split(":")[1];
+      const cbPId = `perm-${prefix}-${p.replace(/[^a-z0-9]/g,"-")}`;
+      return `<label style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:12px;cursor:pointer;white-space:nowrap">
+        <input type="checkbox" class="perm-cb perm-cb-${prefix}" data-perm="${p}"
+          id="${cbPId}" ${sel.has(p) ? "checked" : ""}
+          style="accent-color:var(--primary);cursor:pointer"
+          onchange="_syncPermGroupCb('${cbId}','${prefix}')">
+        ${actionLabel[action] || action}
+      </label>`;
+    }).join("");
+
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <label style="display:inline-flex;align-items:center;gap:5px;font-weight:600;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="${cbId}" ${allChecked ? "checked" : ""}
+            style="accent-color:var(--primary);cursor:pointer"
+            onchange="_togglePermGroup('${cbId}','${prefix}',${JSON.stringify(g.perms)})">
+          ${g.group}
+        </label>
+        <span style="font-size:11px;color:var(--gray-400)">${g.perms.length} permission${g.perms.length>1?"s":""}</span>
+      </div>
+      <div style="padding-left:20px;display:flex;flex-wrap:wrap;gap:2px">${permCbs}</div>
+    </div>`;
+  }).join("");
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <label style="font-weight:600;font-size:13px">Permissions</label>
+      <div style="display:flex;gap:6px">
+        <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px"
+          onclick="_setAllPerms('${prefix}',true)">Select All</button>
+        <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px"
+          onclick="_setAllPerms('${prefix}',false)">Clear All</button>
+      </div>
+    </div>
+    <div id="perm-picker-${prefix}" style="max-height:340px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:6px;padding:12px;background:var(--gray-50)">
+      ${groups}
+    </div>
+    <div style="font-size:11.5px;color:var(--gray-400);margin-top:6px">
+      <span id="perm-count-${prefix}">${sel.size}</span> permission(s) selected
+    </div>`;
+}
+
+function _togglePermGroup(groupCbId, prefix, perms) {
+  const groupCb = document.getElementById(groupCbId);
+  const checked = groupCb?.checked;
+  perms.forEach(p => {
+    const cb = document.querySelector(`.perm-cb-${prefix}[data-perm="${p}"]`);
+    if (cb) cb.checked = checked;
+  });
+  _updatePermCount(prefix);
+}
+
+function _syncPermGroupCb(groupCbId, prefix) {
+  // Find all perm checkboxes in this group by looking at siblings
+  const groupCb = document.getElementById(groupCbId);
+  if (!groupCb) return;
+  const container = groupCb.closest("div").nextElementSibling;
+  if (container) {
+    const cbs = container.querySelectorAll("input[type=checkbox]");
+    const allChecked = Array.from(cbs).every(c => c.checked);
+    groupCb.checked = allChecked;
+  }
+  _updatePermCount(prefix);
+}
+
+function _setAllPerms(prefix, checked) {
+  document.querySelectorAll(`.perm-cb-${prefix}`).forEach(cb => { cb.checked = checked; });
+  document.querySelectorAll(`[id^="perm-grp-${prefix}-"]`).forEach(cb => { cb.checked = checked; });
+  _updatePermCount(prefix);
+}
+
+function _updatePermCount(prefix) {
+  const count = document.querySelectorAll(`.perm-cb-${prefix}:checked`).length;
+  const el2 = document.getElementById(`perm-count-${prefix}`);
+  if (el2) el2.textContent = count;
+}
+
+function _getSelectedPerms(prefix) {
+  return Array.from(document.querySelectorAll(`.perm-cb-${prefix}:checked`)).map(cb => cb.dataset.perm);
+}
+
+function showEditRole(id, name, description, permissions, isBuiltin) {
+  const nameField = isBuiltin
+    ? `<div class="form-group"><label>Name</label><input class="form-control" value="${name}" disabled><div style="font-size:11.5px;color:var(--gray-400);margin-top:3px">Built-in role — name cannot be changed</div></div>`
+    : `<div class="form-group"><label>Name *</label><input id="er2-name" class="form-control" value="${name}"></div>
+       <div class="form-group"><label>Description</label><input id="er2-desc" class="form-control" value="${description}"></div>`;
+  openModal(`${isBuiltin ? "View" : "Edit"} Role`,
+    nameField + _renderPermissionPicker("er2", permissions),
     async () => {
-      const n = el("er2-name").value.trim();
-      const perms = el("er2-perms").value.trim().split("\n").map(p => p.trim()).filter(Boolean);
-      if (!n) return modalError("Name is required");
+      const perms = _getSelectedPerms("er2");
       if (!perms.length) return modalError("At least one permission is required");
+      const update = { permissions: perms };
+      if (!isBuiltin) {
+        update.name = (document.getElementById("er2-name")?.value || "").trim();
+        update.description = (document.getElementById("er2-desc")?.value || "").trim() || null;
+        if (!update.name) return modalError("Name is required");
+      }
       try {
-        await api.updateRole(id, { name: n, description: el("er2-desc").value.trim() || null, permissions: perms });
+        await api.updateRole(id, update);
         closeModal(); toast("Role updated", "success");
         navigate("admin/roles");
       } catch (e) { modalError(e.message); }
-    }
+    },
+    isBuiltin ? "Close" : "Save"
   );
 }
 
-async function deleteRole(id, name) {
+async function deleteRole(id, name, isBuiltin) {
+  if (isBuiltin) { toast("Built-in roles cannot be deleted", "error"); return; }
   if (!confirm(`Delete role "${name}"? Users with this role will lose access.`)) return;
   try {
     await api.deleteRole(id);
@@ -5568,19 +6697,16 @@ async function deleteRole(id, name) {
 
 function showCreateRole() {
   openModal("New Role",
-    `<div class="form-group"><label>Name *</label><input id="rf2-name" class="form-control" placeholder="e.g. SeniorDeployer"></div>
-     <div class="form-group"><label>Description</label><input id="rf2-desc" class="form-control" placeholder="Optional"></div>
-     <div class="form-group"><label>Permissions *</label>
-       <textarea id="rf2-perms" class="form-control" rows="4" placeholder="One permission per line, e.g.&#10;release.view&#10;release.create&#10;pipeline.*"></textarea>
-       <div style="color:var(--gray-500);font-size:12px;margin-top:4px">Wildcards supported: <code>release.*</code> grants all release permissions</div>
-     </div>`,
+    `<div class="form-group"><label>Name *</label><input id="rf2-name" class="form-control" placeholder="e.g. product-deployer"></div>
+     <div class="form-group"><label>Description</label><input id="rf2-desc" class="form-control" placeholder="Optional"></div>` +
+     _renderPermissionPicker("rf2", []),
     async () => {
-      const name = el("rf2-name").value.trim();
-      const perms = el("rf2-perms").value.trim().split("\n").map(p => p.trim()).filter(Boolean);
+      const name = (document.getElementById("rf2-name")?.value || "").trim();
+      const perms = _getSelectedPerms("rf2");
       if (!name) return modalError("Name is required");
-      if (perms.length === 0) return modalError("At least one permission is required");
+      if (!perms.length) return modalError("Select at least one permission");
       try {
-        await api.createRole({ name, description: el("rf2-desc").value.trim() || null, permissions: perms });
+        await api.createRole({ name, description: (document.getElementById("rf2-desc")?.value || "").trim() || null, permissions: perms });
         closeModal(); toast("Role created", "success");
         navigate("admin/roles");
       } catch (e) { modalError(e.message); }
@@ -5589,94 +6715,207 @@ function showCreateRole() {
 }
 
 // ── Task management (pipeline detail) ─────────────────────────────────────
+function _taskKindSections(kind, t) {
+  // Shared run_condition selector
+  const rc = t ? (t.run_condition || "always") : "always";
+  const runCondHtml = `
+    <div class="form-group"><label>Run Condition</label>
+      <select id="tf-runcond" class="form-control">
+        <option value="always"${rc==="always"?" selected":""}>Always</option>
+        <option value="on_success"${rc==="on_success"?" selected":""}>On success only</option>
+        <option value="on_failure"${rc==="on_failure"?" selected":""}>On failure only</option>
+        <option value="on_warning"${rc==="on_warning"?" selected":""}>On warning only</option>
+      </select>
+    </div>`;
+
+  if (kind === "gate") {
+    const gl = t ? (t.gate_language || "bash") : "bash";
+    const gs = t ? ((t.gate_script || "").replace(/</g,"&lt;").replace(/>/g,"&gt;")) : "";
+    return `
+      <div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px">
+        <strong>Gate Task</strong> — runs a script that must exit <code>0</code> to pass. If it fails, the stage is blocked.
+      </div>
+      <div class="form-group"><label>Gate Language</label>
+        <select id="tf-gate-lang" class="form-control">
+          <option value="bash"${gl==="bash"?" selected":""}>Bash</option>
+          <option value="python"${gl==="python"?" selected":""}>Python</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Gate Script *</label>
+        <textarea id="tf-gate-script" class="form-control code-editor" rows="8" placeholder="#!/bin/bash&#10;# Exit 0 to pass, non-zero to block&#10;curl -sf https://my-quality-gate/api/pass || exit 1">${gs}</textarea>
+      </div>
+      ${runCondHtml}`;
+  }
+
+  if (kind === "approval") {
+    const approvers = t ? (t.approval_approvers || []) : [];
+    const approversJson = JSON.stringify(approvers, null, 2);
+    const reqCount = t ? (t.approval_required_count || 0) : 0;
+    const apvTimeout = t ? (t.approval_timeout || 0) : 0;
+    return `
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 14px;margin-bottom:12px;font-size:13px">
+        <strong>Approval Task</strong> — pauses execution until the required approvers approve. Any approver can reject to immediately fail the stage.
+      </div>
+      <div class="form-group">
+        <label>Approvers (JSON)</label>
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:6px">
+          List of <code>{"type":"user","ref":"username"}</code>, <code>{"type":"group","ref":"group-name"}</code>, or <code>{"type":"role","ref":"role-name"}</code>
+        </div>
+        <textarea id="tf-approvers" class="form-control code-editor" rows="6" placeholder='[&#10;  {"type":"user","ref":"alice"},&#10;  {"type":"role","ref":"product-admin"}&#10;]'>${approversJson}</textarea>
+      </div>
+      <div class="form-group"><label>Required approvals (0 = all listed)</label>
+        <input id="tf-apv-count" class="form-control" type="number" value="${reqCount}" min="0">
+      </div>
+      <div class="form-group"><label>Timeout (seconds, 0 = no timeout)</label>
+        <input id="tf-apv-timeout" class="form-control" type="number" value="${apvTimeout}" min="0">
+      </div>
+      ${runCondHtml}`;
+  }
+
+  // script (default)
+  const lang = t ? (t.run_language || "bash") : "bash";
+  const code = t ? ((t.run_code || "").replace(/</g,"&lt;").replace(/>/g,"&gt;")) : "";
+  const mode = t ? (t.execution_mode || "sequential") : "sequential";
+  return `
+    <div class="form-group"><label>Language</label>
+      <select id="tf-lang" class="form-control">
+        <option value="bash"${lang==="bash"?" selected":""}>Bash</option>
+        <option value="python"${lang==="python"?" selected":""}>Python</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Script</label>
+      <textarea id="tf-code" class="form-control code-editor" rows="8" placeholder="#!/bin/bash&#10;echo 'Hello'&#10;exit 0">${code}</textarea>
+    </div>
+    <div class="form-group"><label>Execution Mode</label>
+      <select id="tf-mode" class="form-control">
+        <option value="sequential"${mode==="sequential"?" selected":""}>Sequential (runs after previous task)</option>
+        <option value="parallel"${mode==="parallel"?" selected":""}>Parallel (runs alongside others)</option>
+      </select>
+    </div>
+    ${runCondHtml}`;
+}
+
+function _readTaskFormPayload(kind, base) {
+  const payload = { ...base, kind, run_condition: (el("tf-runcond")||{}).value || "always" };
+  if (kind === "gate") {
+    payload.gate_language = el("tf-gate-lang").value;
+    payload.gate_script   = el("tf-gate-script").value || "";
+  } else if (kind === "approval") {
+    try { payload.approval_approvers = JSON.parse(el("tf-approvers").value || "[]"); }
+    catch { payload.approval_approvers = []; }
+    payload.approval_required_count = parseInt(el("tf-apv-count").value) || 0;
+    payload.approval_timeout = parseInt(el("tf-apv-timeout").value) || 0;
+  } else {
+    payload.run_language   = (el("tf-lang")||{}).value || "bash";
+    payload.run_code       = (el("tf-code")||{}).value || "";
+    payload.execution_mode = (el("tf-mode")||{}).value || "sequential";
+  }
+  return payload;
+}
+
+function _taskKindBadge(kind) {
+  const map = { gate: ["#fde68a","#92400e","⊘ Gate"], approval: ["#bfdbfe","#1e3a8a","✓ Approval"], script: ["#e2e8f0","#374151","⚙ Script"] };
+  const [bg, color, label] = map[kind] || map.script;
+  return `<span style="background:${bg};color:${color};padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600">${label}</span>`;
+}
+
 function showCreateTask(productId, pipelineId, stageId) {
-  openModal("New Task",
-    `<div class="form-group"><label>Name *</label><input id="tf-name" class="form-control" placeholder="e.g. Run unit tests"></div>
-     <div class="form-group"><label>Description</label><input id="tf-desc" class="form-control" placeholder="Optional"></div>
-     ${_taskTypeSelector("")}
-     <div class="form-group"><label>Language *</label>
-       <select id="tf-lang" class="form-control">
-         <option value="bash">Bash</option>
-         <option value="python">Python</option>
-       </select>
-     </div>
-     <div class="form-group"><label>Script</label>
-       <textarea id="tf-code" class="form-control code-editor" rows="8" placeholder="#!/bin/bash&#10;echo 'Hello'&#10;exit 0"></textarea>
-     </div>
-     <div class="form-group"><label>Execution Mode</label>
-       <select id="tf-mode" class="form-control">
-         <option value="sequential">Sequential (runs after previous task)</option>
-         <option value="parallel">Parallel (runs alongside others)</option>
-       </select>
-     </div>
-     <div class="form-group"><label>On Error</label>
-       <select id="tf-err" class="form-control">
-         <option value="fail">Fail stage</option>
-         <option value="warn">Warn (continue with warning)</option>
-         <option value="continue">Continue (ignore error)</option>
-       </select>
-     </div>
-     <div class="form-group"><label>Order</label><input id="tf-order" class="form-control" type="number" value="0"></div>
-     <div class="form-group"><label>Timeout (seconds)</label><input id="tf-timeout" class="form-control" type="number" value="300"></div>`,
+  const buildForm = (kind) => `
+    <div class="form-group"><label>Name *</label><input id="tf-name" class="form-control" placeholder="e.g. Run unit tests"></div>
+    <div class="form-group"><label>Description</label><input id="tf-desc" class="form-control" placeholder="Optional"></div>
+    <div class="form-group"><label>Task Kind</label>
+      <select id="tf-kind" class="form-control" onchange="document.getElementById('tf-kind-body').innerHTML=_taskKindSections(this.value,null)">
+        <option value="script"${kind==="script"?" selected":""}>Script — run a bash/python script</option>
+        <option value="gate"${kind==="gate"?" selected":""}>Gate — script must exit 0 to pass</option>
+        <option value="approval"${kind==="approval"?" selected":""}>Approval — wait for named approvers</option>
+      </select>
+    </div>
+    ${_taskTypeSelector("")}
+    <div id="tf-kind-body">${_taskKindSections(kind, null)}</div>
+    <div class="form-group"><label>On Error</label>
+      <select id="tf-err" class="form-control">
+        <option value="fail">Fail stage</option>
+        <option value="warn">Warn (continue with warning)</option>
+        <option value="continue">Continue (ignore error)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Order</label><input id="tf-order" class="form-control" type="number" value="0"></div>
+    <div class="form-group"><label>Timeout (seconds)</label><input id="tf-timeout" class="form-control" type="number" value="300"></div>`;
+
+  openModal("New Task", buildForm("script"),
     async () => {
       const name = el("tf-name").value.trim();
       if (!name) return modalError("Name is required");
+      const kind = el("tf-kind").value;
       try {
-        await api.createTask(productId, pipelineId, stageId, {
+        await api.createTask(productId, pipelineId, stageId, _readTaskFormPayload(kind, {
           name,
           description: el("tf-desc").value.trim() || null,
           task_type: _resolveTaskType() || null,
-          run_language: el("tf-lang").value,
-          run_code: el("tf-code").value || "",
-          execution_mode: el("tf-mode").value,
           on_error: el("tf-err").value,
           order: parseInt(el("tf-order").value) || 0,
           timeout: parseInt(el("tf-timeout").value) || 300,
-        });
+        }));
         closeModal(); toast("Task created", "success");
         navigate(`products/${productId}/pipelines/${pipelineId}`);
       } catch (e) { modalError(e.message); }
-    }
+    },
+    "Save", "lg"
   );
 }
 
 function showEditTask(productId, pipelineId, stageId, taskId, name, desc, order, onError, timeout, isRequired, taskType) {
-  openModal("Edit Task",
-    `<div class="form-group"><label>Name *</label><input id="et-name" class="form-control" value="${name}"></div>
-     <div class="form-group"><label>Description</label><input id="et-desc" class="form-control" value="${desc}"></div>
-     ${_taskTypeSelector(taskType || "")}
-     <div class="form-group"><label>On Error</label>
-       <select id="et-err" class="form-control">
-         <option value="fail"${onError==="fail"?" selected":""}>Fail stage</option>
-         <option value="warn"${onError==="warn"?" selected":""}>Warn (continue with warning)</option>
-         <option value="continue"${onError==="continue"?" selected":""}>Continue (ignore error)</option>
-       </select>
-     </div>
-     <div class="form-group"><label>Order</label><input id="et-order" class="form-control" type="number" value="${order}"></div>
-     <div class="form-group"><label>Timeout (seconds)</label><input id="et-timeout" class="form-control" type="number" value="${timeout}"></div>
-     <div class="form-group"><label>Required</label>
-       <select id="et-req" class="form-control">
-         <option value="true"${isRequired?" selected":""}>Yes</option>
-         <option value="false"${!isRequired?" selected":""}>No</option>
-       </select>
-     </div>`,
-    async () => {
-      const n = el("et-name").value.trim();
-      if (!n) return modalError("Name is required");
-      try {
-        await api.updateTask(productId, pipelineId, stageId, taskId, {
-          name: n, description: el("et-desc").value.trim() || null,
-          task_type: _resolveTaskType() || null,
-          on_error: el("et-err").value,
-          order: parseInt(el("et-order").value) || 0,
-          timeout: parseInt(el("et-timeout").value) || 300,
-          is_required: el("et-req").value === "true",
-        });
-        closeModal(); toast("Task updated", "success");
-        navigate(`products/${productId}/pipelines/${pipelineId}`);
-      } catch (e) { modalError(e.message); }
-    }
-  );
+  // Load full task to get kind + gate/approval fields
+  api.getTask(productId, pipelineId, stageId, taskId).then(t => {
+    const kind = t.kind || "script";
+    openModal("Edit Task",
+      `<div class="form-group"><label>Name *</label><input id="et-name" class="form-control" value="${t.name}"></div>
+       <div class="form-group"><label>Description</label><input id="et-desc" class="form-control" value="${t.description||""}"></div>
+       <div class="form-group"><label>Task Kind</label>
+         <select id="tf-kind" class="form-control" onchange="document.getElementById('tf-kind-body').innerHTML=_taskKindSections(this.value,null)">
+           <option value="script"${kind==="script"?" selected":""}>Script — run a bash/python script</option>
+           <option value="gate"${kind==="gate"?" selected":""}>Gate — script must exit 0 to pass</option>
+           <option value="approval"${kind==="approval"?" selected":""}>Approval — wait for named approvers</option>
+         </select>
+       </div>
+       ${_taskTypeSelector(t.task_type || "")}
+       <div id="tf-kind-body">${_taskKindSections(kind, t)}</div>
+       <div class="form-group"><label>On Error</label>
+         <select id="et-err" class="form-control">
+           <option value="fail"${(t.on_error||"fail")==="fail"?" selected":""}>Fail stage</option>
+           <option value="warn"${t.on_error==="warn"?" selected":""}>Warn (continue with warning)</option>
+           <option value="continue"${t.on_error==="continue"?" selected":""}>Continue (ignore error)</option>
+         </select>
+       </div>
+       <div class="form-group"><label>Order</label><input id="et-order" class="form-control" type="number" value="${t.order}"></div>
+       <div class="form-group"><label>Timeout (seconds)</label><input id="et-timeout" class="form-control" type="number" value="${t.timeout}"></div>
+       <div class="form-group"><label>Required</label>
+         <select id="et-req" class="form-control">
+           <option value="true"${t.is_required?" selected":""}>Yes</option>
+           <option value="false"${!t.is_required?" selected":""}>No</option>
+         </select>
+       </div>`,
+      async () => {
+        const n = el("et-name").value.trim();
+        if (!n) return modalError("Name is required");
+        const k = el("tf-kind").value;
+        try {
+          await api.updateTask(productId, pipelineId, stageId, taskId, _readTaskFormPayload(k, {
+            name: n,
+            description: el("et-desc").value.trim() || null,
+            task_type: _resolveTaskType() || null,
+            on_error: el("et-err").value,
+            order: parseInt(el("et-order").value) || 0,
+            timeout: parseInt(el("et-timeout").value) || 300,
+            is_required: el("et-req").value === "true",
+          }));
+          closeModal(); toast("Task updated", "success");
+          navigate(`products/${productId}/pipelines/${pipelineId}`);
+        } catch (e) { modalError(e.message); }
+      },
+      "Save", "lg"
+    );
+  }).catch(() => toast("Failed to load task", "error"));
 }
 
 function showEditTaskScript(productId, pipelineId, stageId, taskId, taskName) {
@@ -5843,47 +7082,101 @@ function showCreateStage(productId, pipelineId) {
 
 function showEditStage(productId, pipelineId, stageId, name, runLang, containerImg, order, isProtected, accentColor, execMode) {
   execMode = execMode || "sequential";
-  openModal("Edit Stage",
-    `<div class="form-group"><label>Name *</label><input id="es2-name" class="form-control" value="${name}"></div>
-     <div class="form-group"><label>Language</label>
-       <select id="es2-lang" class="form-control">
-         <option value="bash"${runLang==="bash"?" selected":""}>Bash</option>
-         <option value="python"${runLang==="python"?" selected":""}>Python</option>
-       </select>
-     </div>
-     <div class="form-group"><label>Container Image</label><input id="es2-img" class="form-control" value="${containerImg}"></div>
-     <div class="form-group"><label>Execution Mode</label>
-       <select id="es2-mode" class="form-control">
-         <option value="sequential"${execMode==="sequential"?" selected":""}>Sequential (runs after previous stage)</option>
-         <option value="parallel"${execMode==="parallel"?" selected":""}>Parallel (runs alongside adjacent parallel stages)</option>
-       </select>
-     </div>
-     <div class="form-group"><label>Order</label><input id="es2-order" class="form-control" type="number" value="${order}"></div>
-     <div class="form-group"><label>Protected</label>
-       <select id="es2-prot" class="form-control">
-         <option value="false"${!isProtected?" selected":""}>No</option>
-         <option value="true"${isProtected?" selected":""}>Yes</option>
-       </select>
-     </div>
-     <div class="form-group"><label>Accent Color</label>${_gradientPickerHtml("es2-color", accentColor || STAGE_GRADIENTS[0].color)}</div>`,
-    async () => {
-      const n = el("es2-name").value.trim();
-      if (!n) return modalError("Name is required");
-      try {
-        await api.updateStage(productId, pipelineId, stageId, {
-          name: n,
-          run_language: el("es2-lang").value,
-          container_image: el("es2-img").value.trim() || null,
-          execution_mode: el("es2-mode").value,
-          order: parseInt(el("es2-order").value) || 0,
-          is_protected: el("es2-prot").value === "true",
-          accent_color: document.getElementById("es2-color").value || null,
+  // Load full stage to get gate + run_condition fields
+  api.getStage(productId, pipelineId, stageId).then(stage => {
+    const rc = stage.run_condition || "always";
+    const eg = stage.entry_gate || {};
+    const xg = stage.exit_gate  || {};
+
+    const gateSection = (prefix, cfg, label, borderColor, bgColor) => `
+      <div style="border:1px solid ${borderColor};background:${bgColor};border-radius:8px;padding:12px 14px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <strong style="font-size:13px">${label}</strong>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;cursor:pointer;margin:0">
+            <input type="checkbox" id="${prefix}-enabled" ${cfg.enabled?" checked":""}
+              onchange="document.getElementById('${prefix}-body').style.display=this.checked?'':'none'">
+            Enabled
+          </label>
+        </div>
+        <div id="${prefix}-body" style="display:${cfg.enabled?"":"none"}">
+          <div class="form-group" style="margin-bottom:8px"><label>Language</label>
+            <select id="${prefix}-lang" class="form-control" style="width:160px">
+              <option value="bash"${(cfg.language||"bash")==="bash"?" selected":""}>Bash</option>
+              <option value="python"${cfg.language==="python"?" selected":""}>Python</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:8px"><label>Timeout (s)</label>
+            <input id="${prefix}-timeout" class="form-control" type="number" value="${cfg.timeout||60}" style="width:100px">
+          </div>
+          <div class="form-group"><label>Script</label>
+            <textarea id="${prefix}-script" class="form-control code-editor" rows="5"
+              placeholder="Exit 0 to pass, non-zero to block">${(cfg.script||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
+          </div>
+        </div>
+      </div>`;
+
+    openModal("Edit Stage",
+      `<div class="form-group"><label>Name *</label><input id="es2-name" class="form-control" value="${stage.name}"></div>
+       <div class="form-group"><label>Language</label>
+         <select id="es2-lang" class="form-control">
+           <option value="bash"${(stage.run_language||"bash")==="bash"?" selected":""}>Bash</option>
+           <option value="python"${stage.run_language==="python"?" selected":""}>Python</option>
+         </select>
+       </div>
+       <div class="form-group"><label>Container Image</label><input id="es2-img" class="form-control" value="${stage.container_image||""}"></div>
+       <div class="form-group"><label>Execution Mode</label>
+         <select id="es2-mode" class="form-control">
+           <option value="sequential"${execMode==="sequential"?" selected":""}>Sequential (runs after previous stage)</option>
+           <option value="parallel"${execMode==="parallel"?" selected":""}>Parallel (runs alongside adjacent parallel stages)</option>
+         </select>
+       </div>
+       <div class="form-group"><label>Run Condition</label>
+         <select id="es2-runcond" class="form-control">
+           <option value="always"${rc==="always"?" selected":""}>Always</option>
+           <option value="on_success"${rc==="on_success"?" selected":""}>On success only</option>
+           <option value="on_failure"${rc==="on_failure"?" selected":""}>On failure only</option>
+           <option value="on_warning"${rc==="on_warning"?" selected":""}>On warning only</option>
+         </select>
+       </div>
+       <div class="form-group"><label>Order</label><input id="es2-order" class="form-control" type="number" value="${stage.order}"></div>
+       <div class="form-group"><label>Protected</label>
+         <select id="es2-prot" class="form-control">
+           <option value="false"${!stage.is_protected?" selected":""}>No</option>
+           <option value="true"${stage.is_protected?" selected":""}>Yes</option>
+         </select>
+       </div>
+       <div class="form-group"><label>Accent Color</label>${_gradientPickerHtml("es2-color", stage.accent_color || STAGE_GRADIENTS[0].color)}</div>
+       <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--gray-500);margin:16px 0 8px">Gates</div>
+       ${gateSection("eg", eg, "⊘ Entry Gate", "#fde68a", "#fffbeb")}
+       ${gateSection("xg", xg, "✓ Exit Gate",  "#a7f3d0", "#f0fdf4")}`,
+      async () => {
+        const n = el("es2-name").value.trim();
+        if (!n) return modalError("Name is required");
+        const readGate = (prefix) => ({
+          enabled:  document.getElementById(`${prefix}-enabled`).checked,
+          language: (el(`${prefix}-lang`)||{}).value || "bash",
+          timeout:  parseInt((el(`${prefix}-timeout`)||{}).value) || 60,
+          script:   (el(`${prefix}-script`)||{}).value || "",
         });
-        closeModal(); toast("Stage updated", "success");
-        navigate(`products/${productId}/pipelines/${pipelineId}`);
-      } catch (e) { modalError(e.message); }
-    }
-  );
+        try {
+          await api.updateStage(productId, pipelineId, stageId, {
+            name: n,
+            run_language: el("es2-lang").value,
+            container_image: el("es2-img").value.trim() || null,
+            execution_mode: el("es2-mode").value,
+            run_condition: el("es2-runcond").value,
+            order: parseInt(el("es2-order").value) || 0,
+            is_protected: el("es2-prot").value === "true",
+            accent_color: document.getElementById("es2-color").value || null,
+            entry_gate: readGate("eg"),
+            exit_gate:  readGate("xg"),
+          });
+          closeModal(); toast("Stage updated", "success");
+          navigate(`products/${productId}/pipelines/${pipelineId}`);
+        } catch (e) { modalError(e.message); }
+      }
+    );
+  }).catch(() => toast("Failed to load stage", "error"));
 }
 
 async function deleteStage(productId, pipelineId, stageId, name) {
@@ -5893,6 +7186,361 @@ async function deleteStage(productId, pipelineId, stageId, name) {
     toast("Stage deleted", "success");
     navigate(`products/${productId}/pipelines/${pipelineId}`);
   } catch (e) { toast(e.message, "error"); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Side-panel versions of stage / task forms (used by the X6 canvas editor)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function _spAccentSwatchHtml(inputId, currentColor) {
+  const STAGE_GRADIENT_COLORS = STAGE_GRADIENTS.map(g => g.color);
+  const swatches = STAGE_GRADIENT_COLORS.map(c => {
+    const sel = c === (currentColor || STAGE_GRADIENTS[0].color) ? " selected" : "";
+    return `<div class="pe-swatch${sel}" style="background:${c}" onclick="
+      this.parentNode.querySelectorAll('.pe-swatch').forEach(s=>s.classList.remove('selected'));
+      this.classList.add('selected');
+      document.getElementById('${inputId}').value='${c}'"></div>`;
+  }).join("");
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${swatches}</div>
+          <input type="hidden" id="${inputId}" value="${currentColor || STAGE_GRADIENTS[0].color}">`;
+}
+
+function _spGateSection(prefix, cfg, label) {
+  const enabled = !!(cfg && cfg.enabled);
+  return `
+    <div class="pe-gate-section${enabled?" enabled":""}" id="${prefix}-wrap">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${enabled?8:0}px">
+        <strong style="font-size:12px;color:#94a3b8">${label}</strong>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin:0;color:#cbd5e1">
+          <input type="checkbox" id="${prefix}-enabled" ${enabled?"checked":""}
+            onchange="
+              const b=document.getElementById('${prefix}-body');
+              const w=document.getElementById('${prefix}-wrap');
+              b.style.display=this.checked?'':'none';
+              w.classList.toggle('enabled',this.checked)">
+          Enabled
+        </label>
+      </div>
+      <div id="${prefix}-body" style="display:${enabled?"":"none"}">
+        <div class="form-group" style="margin-bottom:8px"><label>Language</label>
+          <select id="${prefix}-lang" class="form-control" style="width:140px">
+            <option value="bash"${(cfg.language||"bash")==="bash"?" selected":""}>Bash</option>
+            <option value="python"${cfg.language==="python"?" selected":""}>Python</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:8px"><label>Timeout (s)</label>
+          <input id="${prefix}-timeout" class="form-control" type="number" value="${cfg.timeout||60}" style="width:100px">
+        </div>
+        <div class="form-group"><label>Script</label>
+          <textarea id="${prefix}-script" class="pe-yaml-editor" rows="5">${(cfg.script||"").replace(/</g,"&lt;")}</textarea>
+        </div>
+      </div>
+    </div>`;
+}
+
+function _spReadGate(prefix) {
+  return {
+    enabled:  !!(document.getElementById(`${prefix}-enabled`) || {}).checked,
+    language: (el(`${prefix}-lang`)  || {}).value || "bash",
+    timeout:  parseInt((el(`${prefix}-timeout`) || {}).value) || 60,
+    script:   (el(`${prefix}-script`) || {}).value || "",
+  };
+}
+
+// ── Side-panel: Create Stage ────────────────────────────────────────────────
+function spShowCreateStage(productId, pipelineId) {
+  const sp = _getPeSidePanel();
+  sp.open("New Stage", `
+    <div class="form-group"><label>Name *</label><input id="sp-sf-name" class="form-control" placeholder="e.g. Build, Test, Deploy"></div>
+    <div class="form-group"><label>Language</label>
+      <select id="sp-sf-lang" class="form-control">
+        <option value="bash">Bash</option>
+        <option value="python">Python</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Container Image</label>
+      <input id="sp-sf-img" class="form-control" placeholder="e.g. ubuntu:22.04 (optional)">
+    </div>
+    <div class="form-group"><label>Execution Mode</label>
+      <select id="sp-sf-mode" class="form-control">
+        <option value="sequential">Sequential</option>
+        <option value="parallel">Parallel (runs alongside adjacent stages)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Order</label>
+      <input id="sp-sf-order" class="form-control" type="number" value="0">
+    </div>
+    <div class="form-group"><label>Protected</label>
+      <select id="sp-sf-prot" class="form-control">
+        <option value="false">No</option>
+        <option value="true">Yes (requires approval gate)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Accent Color</label>${_spAccentSwatchHtml("sp-sf-color","")}</div>
+  `, async () => {
+    const name = (el("sp-sf-name")||{}).value.trim();
+    if (!name) return sp.error("Name is required");
+    sp.setSaving(true);
+    try {
+      await api.createStage(productId, pipelineId, {
+        name,
+        run_language: el("sp-sf-lang").value,
+        container_image: el("sp-sf-img").value.trim() || null,
+        execution_mode: el("sp-sf-mode").value,
+        order: parseInt(el("sp-sf-order").value) || 0,
+        is_protected: el("sp-sf-prot").value === "true",
+        accent_color: (document.getElementById("sp-sf-color")||{}).value || null,
+      });
+      sp.close();
+      toast("Stage created", "success");
+      await _peReload(productId, pipelineId);
+    } catch (e) { sp.error(e.message); }
+    finally { sp.setSaving(false); }
+  }, "Create Stage");
+}
+
+// ── Side-panel: Edit Stage ──────────────────────────────────────────────────
+async function spShowEditStage(productId, pipelineId, stage) {
+  const sp = _getPeSidePanel();
+  // Load full stage from API to get gate fields
+  let fullStage;
+  try { fullStage = await api.getStage(productId, pipelineId, stage.id); }
+  catch { fullStage = stage; }
+  const eg = fullStage.entry_gate || {};
+  const xg = fullStage.exit_gate  || {};
+  const rc = fullStage.run_condition || "always";
+
+  sp.open(`Edit Stage — ${stage.name}`, `
+    <div class="form-group"><label>Name *</label>
+      <input id="sp-es-name" class="form-control" value="${fullStage.name}">
+    </div>
+    <div class="form-group"><label>Language</label>
+      <select id="sp-es-lang" class="form-control">
+        <option value="bash"${(fullStage.run_language||"bash")==="bash"?" selected":""}>Bash</option>
+        <option value="python"${fullStage.run_language==="python"?" selected":""}>Python</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Container Image</label>
+      <input id="sp-es-img" class="form-control" value="${fullStage.container_image||""}">
+    </div>
+    <div class="form-group"><label>Execution Mode</label>
+      <select id="sp-es-mode" class="form-control">
+        <option value="sequential"${(fullStage.execution_mode||"sequential")==="sequential"?" selected":""}>Sequential</option>
+        <option value="parallel"${fullStage.execution_mode==="parallel"?" selected":""}>Parallel</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Run Condition</label>
+      <select id="sp-es-runcond" class="form-control">
+        <option value="always"${rc==="always"?" selected":""}>Always</option>
+        <option value="on_success"${rc==="on_success"?" selected":""}>On success only</option>
+        <option value="on_failure"${rc==="on_failure"?" selected":""}>On failure only</option>
+        <option value="on_warning"${rc==="on_warning"?" selected":""}>On warning only</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Order</label>
+      <input id="sp-es-order" class="form-control" type="number" value="${fullStage.order}">
+    </div>
+    <div class="form-group"><label>Protected</label>
+      <select id="sp-es-prot" class="form-control">
+        <option value="false"${!fullStage.is_protected?" selected":""}>No</option>
+        <option value="true"${fullStage.is_protected?" selected":""}>Yes</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Accent Color</label>${_spAccentSwatchHtml("sp-es-color", fullStage.accent_color || STAGE_GRADIENTS[0].color)}</div>
+    <hr class="pe-sp-divider">
+    <div class="pe-sp-section-label">Gates</div>
+    ${_spGateSection("sp-eg", eg, "⊘ Entry Gate")}
+    ${_spGateSection("sp-xg", xg, "✓ Exit Gate")}
+    <hr class="pe-sp-divider">
+    <button class="pe-btn pe-btn-danger" style="width:100%"
+      onclick="_spDeleteStageFromPanel('${productId}','${pipelineId}','${fullStage.id}','${fullStage.name.replace(/'/g,"\\'")}')">
+      🗑 Delete Stage
+    </button>
+  `, async () => {
+    const n = (el("sp-es-name")||{}).value.trim();
+    if (!n) return sp.error("Name is required");
+    sp.setSaving(true);
+    try {
+      await api.updateStage(productId, pipelineId, fullStage.id, {
+        name: n,
+        run_language: el("sp-es-lang").value,
+        container_image: el("sp-es-img").value.trim() || null,
+        execution_mode: el("sp-es-mode").value,
+        run_condition: el("sp-es-runcond").value,
+        order: parseInt(el("sp-es-order").value) || 0,
+        is_protected: el("sp-es-prot").value === "true",
+        accent_color: (document.getElementById("sp-es-color")||{}).value || null,
+        entry_gate: _spReadGate("sp-eg"),
+        exit_gate:  _spReadGate("sp-xg"),
+      });
+      sp.close();
+      toast("Stage updated", "success");
+      await _peReload(productId, pipelineId);
+    } catch (e) { sp.error(e.message); }
+    finally { sp.setSaving(false); }
+  }, "Save Stage");
+}
+
+async function _spDeleteStageFromPanel(productId, pipelineId, stageId, name) {
+  _getPeSidePanel().close();
+  await deleteStage(productId, pipelineId, stageId, name);
+}
+
+// ── Side-panel: Create Task ─────────────────────────────────────────────────
+function spShowCreateTask(productId, pipelineId, stageId) {
+  const sp = _getPeSidePanel();
+  const kindSections = (kind) => _taskKindSections(kind, null);
+  sp.open("New Task", `
+    <div class="form-group"><label>Name *</label>
+      <input id="sp-tf-name" class="form-control" placeholder="e.g. Run unit tests">
+    </div>
+    <div class="form-group"><label>Description</label>
+      <input id="sp-tf-desc" class="form-control" placeholder="Optional">
+    </div>
+    <div class="form-group"><label>Task Kind</label>
+      <select id="sp-tf-kind" class="form-control"
+        onchange="document.getElementById('sp-tf-kind-body').innerHTML=_taskKindSections(this.value,null)">
+        <option value="script">Script — run a bash/python script</option>
+        <option value="gate">Gate — script must exit 0 to pass</option>
+        <option value="approval">Approval — wait for named approvers</option>
+      </select>
+    </div>
+    ${_taskTypeSelector("")}
+    <div id="sp-tf-kind-body">${kindSections("script")}</div>
+    <div class="form-group"><label>On Error</label>
+      <select id="sp-tf-err" class="form-control">
+        <option value="fail">Fail stage</option>
+        <option value="warn">Warn (continue with warning)</option>
+        <option value="continue">Continue (ignore error)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Order</label>
+      <input id="sp-tf-order" class="form-control" type="number" value="0">
+    </div>
+    <div class="form-group"><label>Timeout (seconds)</label>
+      <input id="sp-tf-timeout" class="form-control" type="number" value="300">
+    </div>
+  `, async () => {
+    const name = (el("sp-tf-name")||{}).value.trim();
+    if (!name) return sp.error("Name is required");
+    const kind = (el("sp-tf-kind")||{}).value || "script";
+    sp.setSaving(true);
+    try {
+      await api.createTask(productId, pipelineId, stageId, _readTaskFormPayload(kind, {
+        name,
+        description: (el("sp-tf-desc")||{}).value.trim() || null,
+        task_type: _resolveTaskType() || null,
+        on_error: (el("sp-tf-err")||{}).value,
+        order: parseInt((el("sp-tf-order")||{}).value) || 0,
+        timeout: parseInt((el("sp-tf-timeout")||{}).value) || 300,
+      }));
+      sp.close();
+      toast("Task created", "success");
+      await _peReload(productId, pipelineId);
+    } catch (e) { sp.error(e.message); }
+    finally { sp.setSaving(false); }
+  }, "Create Task");
+}
+
+// ── Side-panel: Edit Task ───────────────────────────────────────────────────
+async function spShowEditTask(productId, pipelineId, stageId, taskId) {
+  const sp = _getPeSidePanel();
+  let t;
+  try { t = await api.getTask(productId, pipelineId, stageId, taskId); }
+  catch { toast("Could not load task", "error"); return; }
+  const kind = t.kind || "script";
+
+  sp.open(`Edit Task — ${t.name}`, `
+    <div class="form-group"><label>Name *</label>
+      <input id="sp-et-name" class="form-control" value="${t.name}">
+    </div>
+    <div class="form-group"><label>Description</label>
+      <input id="sp-et-desc" class="form-control" value="${t.description||""}">
+    </div>
+    <div class="form-group"><label>Task Kind</label>
+      <select id="tf-kind" class="form-control"
+        onchange="document.getElementById('tf-kind-body').innerHTML=_taskKindSections(this.value,null)">
+        <option value="script"${kind==="script"?" selected":""}>Script — run a bash/python script</option>
+        <option value="gate"${kind==="gate"?" selected":""}>Gate — script must exit 0 to pass</option>
+        <option value="approval"${kind==="approval"?" selected":""}>Approval — wait for named approvers</option>
+      </select>
+    </div>
+    ${_taskTypeSelector(t.task_type || "")}
+    <div id="tf-kind-body">${_taskKindSections(kind, t)}</div>
+    <div class="form-group"><label>On Error</label>
+      <select id="sp-et-err" class="form-control">
+        <option value="fail"${(t.on_error||"fail")==="fail"?" selected":""}>Fail stage</option>
+        <option value="warn"${t.on_error==="warn"?" selected":""}>Warn (continue with warning)</option>
+        <option value="continue"${t.on_error==="continue"?" selected":""}>Continue (ignore error)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Order</label>
+      <input id="sp-et-order" class="form-control" type="number" value="${t.order}">
+    </div>
+    <div class="form-group"><label>Timeout (seconds)</label>
+      <input id="sp-et-timeout" class="form-control" type="number" value="${t.timeout}">
+    </div>
+    <div class="form-group"><label>Required</label>
+      <select id="sp-et-req" class="form-control">
+        <option value="true"${t.is_required?" selected":""}>Yes</option>
+        <option value="false"${!t.is_required?" selected":""}>No</option>
+      </select>
+    </div>
+    <hr class="pe-sp-divider">
+    <div class="pe-sp-section-label">Script</div>
+    <div class="form-group"><label>Language</label>
+      <select id="sp-et-lang" class="form-control" style="width:140px">
+        <option value="bash"${(t.run_language||"bash")==="bash"?" selected":""}>Bash</option>
+        <option value="python"${t.run_language==="python"?" selected":""}>Python</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Script</label>
+      <textarea id="sp-et-code" class="pe-yaml-editor" rows="10">${(t.run_code||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
+    </div>
+    <hr class="pe-sp-divider">
+    <div style="display:flex;gap:8px">
+      <button class="pe-btn pe-btn-ghost" style="flex:1"
+        onclick="spRunTaskInPanel('${productId}','${pipelineId}','${stageId}','${taskId}','${t.name.replace(/'/g,"\\'")}')">
+        ▶ Run Now
+      </button>
+      <button class="pe-btn pe-btn-danger"
+        onclick="_spDeleteTaskFromPanel('${productId}','${pipelineId}','${stageId}','${taskId}','${t.name.replace(/'/g,"\\'")}')">
+        🗑 Delete
+      </button>
+    </div>
+  `, async () => {
+    const n = (el("sp-et-name")||{}).value.trim();
+    if (!n) return sp.error("Name is required");
+    const k = (el("tf-kind")||{}).value || "script";
+    sp.setSaving(true);
+    try {
+      await api.updateTask(productId, pipelineId, stageId, taskId, _readTaskFormPayload(k, {
+        name: n,
+        description: (el("sp-et-desc")||{}).value.trim() || null,
+        task_type: _resolveTaskType() || null,
+        on_error: (el("sp-et-err")||{}).value,
+        order: parseInt((el("sp-et-order")||{}).value) || 0,
+        timeout: parseInt((el("sp-et-timeout")||{}).value) || 300,
+        is_required: (el("sp-et-req")||{}).value === "true",
+        run_language: (el("sp-et-lang")||{}).value || "bash",
+        run_code: (el("sp-et-code")||{}).value || "",
+      }));
+      sp.close();
+      toast("Task updated", "success");
+      await _peReload(productId, pipelineId);
+    } catch (e) { sp.error(e.message); }
+    finally { sp.setSaving(false); }
+  }, "Save Task");
+}
+
+async function _spDeleteTaskFromPanel(productId, pipelineId, stageId, taskId, name) {
+  _getPeSidePanel().close();
+  await deleteTask(productId, pipelineId, stageId, taskId, name);
+}
+
+function spRunTaskInPanel(productId, pipelineId, stageId, taskId, taskName) {
+  _getPeSidePanel().close();
+  runTaskNow(productId, pipelineId, stageId, taskId, taskName);
 }
 
 // ── Agents page ────────────────────────────────────────────────────────────
@@ -6128,6 +7776,9 @@ async function showStageColorPicker(productId, pipelineId, stageId, stageName, c
 }
 
 // ── Pipeline visual editor (SVG) ──────────────────────────────────────────
+// Stages are grouped into "slots":
+//   - A sequential stage → single-column slot
+//   - A run of consecutive parallel stages → one multi-row slot (fork/join)
 function renderPipelineVisual(pipelineId, svgId) {
   const svg = document.getElementById(svgId || "pipeline-visual-svg-normal");
   if (!svg) return;
@@ -6141,35 +7792,22 @@ function renderPipelineVisual(pipelineId, svgId) {
 
   // ── Layout constants ──────────────────────────────────────────────────────
   const COL_W      = 200;   // column card width
-  const COL_GAP    = 48;    // gap between columns (arrow space)
-  const PAD_X      = 24;    // canvas left/right padding
-  const PAD_Y      = 24;    // canvas top/bottom padding
-  const HDR_H      = 52;    // column header height
-  const ACCENT_H   = 4;     // coloured accent bar at top of column
-  const TASK_H     = 48;    // task card height
-  const TASK_GAP   = 6;     // gap between task cards
-  const TASK_MX    = 10;    // task card horizontal margin inside column
-  const COL_FOOT   = 10;    // padding below last task card
-  const CORNER     = 8;     // card border radius
-  const TASK_CR    = 5;     // task card border radius
+  const COL_GAP    = 56;    // gap between slots (arrow space)
+  const PAR_ROW_GAP = 12;   // vertical gap between parallel stage rows
+  const PAD_X      = 24;
+  const PAD_Y      = 24;
+  const HDR_H      = 52;
+  const ACCENT_H   = 4;
+  const TASK_H     = 48;
+  const TASK_GAP   = 6;
+  const TASK_MX    = 10;
+  const COL_FOOT   = 10;
+  const CORNER     = 8;
+  const TASK_CR    = 5;
+  const PAR_BAND_PAD = 10;  // padding inside parallel band bracket
 
-  // Stage accent colours — cycle through palette
   const ACCENT_PALETTE = ["#3b82f6","#8b5cf6","#10b981","#f59e0b","#ef4444","#06b6d4","#f97316","#6366f1"];
 
-  // ── Column metrics ────────────────────────────────────────────────────────
-  const sorted = [...stages].sort((a, b) => a.order - b.order);
-  const cols = sorted.map((stage, idx) => {
-    const tasks = (stage.tasks || []).sort((a, b) => a.order - b.order);
-    const colH = HDR_H + tasks.length * (TASK_H + TASK_GAP) + (tasks.length ? TASK_GAP : 0) + COL_FOOT;
-    const accent = stage.accent_color || ACCENT_PALETTE[idx % ACCENT_PALETTE.length];
-    return { stage, tasks, colH, accent };
-  });
-
-  const maxColH = Math.max(...cols.map(c => c.colH), HDR_H + COL_FOOT + 20);
-  const totalW  = PAD_X * 2 + cols.length * COL_W + (cols.length - 1) * COL_GAP;
-  const totalH  = PAD_Y * 2 + maxColH;
-
-  // ── Task-type colour map ──────────────────────────────────────────────────
   const TYPE_COLOR = {
     "unit-test":"#3b82f6","integration-test":"#8b5cf6","e2e-test":"#6366f1",
     "build":"#f59e0b","docker-build":"#f97316","compile":"#eab308",
@@ -6179,7 +7817,33 @@ function renderPipelineVisual(pipelineId, svgId) {
     "python":"#3b82f6",
   };
 
+  const KIND_META = {
+    "gate":     { color: "#f59e0b", icon: null, svgIcon: true,  label: "Gate"     },
+    "approval": { color: "#8b5cf6", icon: "✋", svgIcon: false, label: "Approval" },
+    "script":   { color: null,      icon: null, svgIcon: false, label: null       },
+  };
+
+  // Draw a gate symbol: two vertical posts + horizontal barrier bar
+  function _drawGateIcon(cx, cy, color) {
+    const r = 9;
+    const items = [];
+    items.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}20"/>`);
+    // Left post
+    items.push(`<rect x="${cx-6}" y="${cy-5}" width="2" height="9" rx="1" fill="${color}"/>`);
+    // Right post
+    items.push(`<rect x="${cx+4}" y="${cy-5}" width="2" height="9" rx="1" fill="${color}"/>`);
+    // Horizontal barrier (gate bar)
+    items.push(`<rect x="${cx-6}" y="${cy-5}" width="12" height="2.5" rx="1" fill="${color}"/>`);
+    // Small diagonal stripes on bar for "gate" look
+    items.push(`<line x1="${cx-3}" y1="${cy-5}" x2="${cx-5}" y2="${cy-2.5}" stroke="${color}50" stroke-width="1"/>`);
+    items.push(`<line x1="${cx}" y1="${cy-5}" x2="${cx-2}" y2="${cy-2.5}" stroke="${color}50" stroke-width="1"/>`);
+    items.push(`<line x1="${cx+3}" y1="${cy-5}" x2="${cx+1}" y2="${cy-2.5}" stroke="${color}50" stroke-width="1"/>`);
+    return items.join("");
+  }
+
   function taskAccent(task) {
+    const k = task.kind || "script";
+    if (KIND_META[k] && KIND_META[k].color) return KIND_META[k].color;
     if (task.task_type) {
       for (const t of task.task_type.split(",")) {
         const c = TYPE_COLOR[t.trim().toLowerCase()];
@@ -6189,17 +7853,62 @@ function renderPipelineVisual(pipelineId, svgId) {
     return "#94a3b8";
   }
 
-  // ── SVG elements ──────────────────────────────────────────────────────────
-  const el = [];
+  // ── Sort stages & build per-stage metrics ─────────────────────────────────
+  const sorted = [...stages].sort((a, b) => a.order - b.order);
+  const colData = sorted.map((stage, idx) => {
+    const tasks = (stage.tasks || []).sort((a, b) => a.order - b.order);
+    const colH = HDR_H + tasks.length * (TASK_H + TASK_GAP) + (tasks.length ? TASK_GAP : 0) + COL_FOOT;
+    const accent = stage.accent_color || ACCENT_PALETTE[idx % ACCENT_PALETTE.length];
+    const isParallel = (stage.execution_mode || "sequential") === "parallel";
+    return { stage, tasks, colH, accent, isParallel };
+  });
 
-  // ── defs: drop-shadow filters, arrowhead, per-stage gradients ────────────
-  const gradDefs = cols.map(({ stage, accent }) => {
+  // ── Group stages into slots ───────────────────────────────────────────────
+  // A "slot" is either:
+  //   { type: "sequential", col }
+  //   { type: "parallel",   cols: [...] }
+  const slots = [];
+  let i = 0;
+  while (i < colData.length) {
+    if (colData[i].isParallel) {
+      const group = [];
+      while (i < colData.length && colData[i].isParallel) {
+        group.push(colData[i++]);
+      }
+      slots.push({ type: "parallel", cols: group });
+    } else {
+      slots.push({ type: "sequential", col: colData[i++] });
+    }
+  }
+
+  // ── Compute slot widths and heights ──────────────────────────────────────
+  // Sequential slot → width = COL_W, height = col.colH
+  // Parallel slot   → width = COL_W, height = sum of all col.colH + gaps + band padding
+  const slotMetrics = slots.map(slot => {
+    if (slot.type === "sequential") {
+      return { w: COL_W, h: slot.col.colH };
+    } else {
+      const totalH = slot.cols.reduce((sum, c) => sum + c.colH, 0)
+                   + (slot.cols.length - 1) * PAR_ROW_GAP
+                   + PAR_BAND_PAD * 2;
+      return { w: COL_W, h: totalH };
+    }
+  });
+
+  const maxSlotH = Math.max(...slotMetrics.map(m => m.h), HDR_H + COL_FOOT + 20);
+  const totalW   = PAD_X * 2 + slots.length * COL_W + (slots.length - 1) * COL_GAP;
+  const totalH   = PAD_Y * 2 + maxSlotH;
+
+  // ── Collect all gradient defs ─────────────────────────────────────────────
+  const gradDefs = colData.map(({ stage, accent }) => {
     const grad = _getGradForColor(accent);
     return `<linearGradient id="stg-grad-${stage.id}" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="${grad[0]}"/>
       <stop offset="100%" stop-color="${grad[1]}"/>
     </linearGradient>`;
   }).join("\n");
+
+  const el = [];
   el.push(`<defs>
     <filter id="dshadow-${pipelineId}" x="-10%" y="-10%" width="130%" height="130%">
       <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#00000018"/>
@@ -6210,98 +7919,221 @@ function renderPipelineVisual(pipelineId, svgId) {
     <marker id="arr-${pipelineId}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
       <path d="M1,1 L7,4 L1,7 Z" fill="#94a3b8"/>
     </marker>
+    <marker id="arr-par-${pipelineId}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1,1 L7,4 L1,7 Z" fill="#6366f1"/>
+    </marker>
     ${gradDefs}
   </defs>`);
 
-  // ── background ────────────────────────────────────────────────────────────
   el.push(`<rect width="${totalW}" height="${totalH}" fill="#f1f5f9" rx="10"/>`);
 
-  cols.forEach(({ stage, tasks, colH, accent }, idx) => {
-    const cx = PAD_X + idx * (COL_W + COL_GAP);
-    const cy = PAD_Y;
-
-    // ── Connector arrow to next column ──────────────────────────────────────
-    if (idx < cols.length - 1) {
-      const ax1 = cx + COL_W + 6;
-      const ax2 = cx + COL_W + COL_GAP - 6;
-      const ay  = cy + HDR_H / 2;
-      el.push(`<line x1="${ax1}" y1="${ay}" x2="${ax2}" y2="${ay}" stroke="#94a3b8" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#arr-${pipelineId})"/>`);
-    }
-
-    // ── Column card ─────────────────────────────────────────────────────────
-    el.push(`<rect x="${cx}" y="${cy}" width="${COL_W}" height="${maxColH}" rx="${CORNER}" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5" filter="url(#dshadow-${pipelineId})"/>`);
-    // Accent bar top (gradient)
+  // ── Helper: draw one stage column ─────────────────────────────────────────
+  function drawStageCol({ stage, tasks, colH, accent, isParallel }, cx, cy, slotMaxH) {
+    // Column card (extends to slotMaxH so all cols in a parallel group align)
+    el.push(`<rect x="${cx}" y="${cy}" width="${COL_W}" height="${slotMaxH}" rx="${CORNER}" fill="#ffffff" stroke="${isParallel ? "#6366f120" : "#e2e8f0"}" stroke-width="${isParallel ? 2 : 1.5}" filter="url(#dshadow-${pipelineId})"/>`);
+    // Accent bar
     el.push(`<rect x="${cx}" y="${cy}" width="${COL_W}" height="${ACCENT_H}" rx="${CORNER}" fill="url(#stg-grad-${stage.id})"/>`);
     el.push(`<rect x="${cx}" y="${cy + ACCENT_H - CORNER}" width="${COL_W}" height="${CORNER}" fill="url(#stg-grad-${stage.id})"/>`);
 
-    // ── Column header (clickable) ────────────────────────────────────────────
-    const stageLabel = stage.name.length > 20 ? stage.name.slice(0, 18) + "…" : stage.name;
+    // Header
+    const stageLabel = stage.name.length > 18 ? stage.name.slice(0, 16) + "…" : stage.name;
     el.push(`<g style="cursor:pointer" onclick="visualScrollToStage('${stage.id}')" title="Go to stage">`);
-    // Stage number badge
     el.push(`<rect x="${cx + 10}" y="${cy + ACCENT_H + 8}" width="22" height="18" rx="4" fill="${accent}18"/>`);
     el.push(`<text x="${cx + 21}" y="${cy + ACCENT_H + 20}" text-anchor="middle" font-size="10" font-weight="700" fill="${accent}" font-family="system-ui,sans-serif">${stage.order}</text>`);
-    // Stage name
     el.push(`<text x="${cx + 38}" y="${cy + ACCENT_H + 18}" font-size="12" font-weight="700" fill="#0f172a" font-family="system-ui,sans-serif">${stageLabel}</text>`);
     // Task count chip
-    const tCount = tasks.length;
-    const chipLabel = `${tCount} task${tCount !== 1 ? "s" : ""}`;
+    const chipLabel = `${tasks.length} task${tasks.length !== 1 ? "s" : ""}`;
     el.push(`<rect x="${cx + 10}" y="${cy + ACCENT_H + 30}" width="${chipLabel.length * 6 + 10}" height="14" rx="7" fill="${accent}15"/>`);
     el.push(`<text x="${cx + 15}" y="${cy + ACCENT_H + 41}" font-size="10" fill="${accent}" font-weight="600" font-family="system-ui,sans-serif">${chipLabel}</text>`);
-    // Protected lock icon
+
+    // Inline badges row: parallel, protected, entry gate, exit gate, run condition
+    let badgeX = cx + chipLabel.length * 6 + 24;
+    const entryGate = stage.entry_gate || {};
+    const exitGate  = stage.exit_gate  || {};
+    const runCond   = stage.run_condition || "always";
+    if (entryGate.enabled) {
+      el.push(`<rect x="${badgeX}" y="${cy + ACCENT_H + 30}" width="48" height="14" rx="7" fill="#fde68a"/>`);
+      // mini gate icon
+      el.push(`<rect x="${badgeX+4}" y="${cy+ACCENT_H+33}" width="1.5" height="6" rx="0.5" fill="#92400e"/>`);
+      el.push(`<rect x="${badgeX+9}" y="${cy+ACCENT_H+33}" width="1.5" height="6" rx="0.5" fill="#92400e"/>`);
+      el.push(`<rect x="${badgeX+4}" y="${cy+ACCENT_H+33}" width="7" height="2" rx="0.5" fill="#92400e"/>`);
+      el.push(`<text x="${badgeX + 28}" y="${cy + ACCENT_H + 41}" text-anchor="middle" font-size="9" font-weight="700" fill="#92400e" font-family="system-ui,sans-serif">entry</text>`);
+      badgeX += 52;
+    }
+    if (exitGate.enabled) {
+      el.push(`<rect x="${badgeX}" y="${cy + ACCENT_H + 30}" width="42" height="14" rx="7" fill="#d1fae5"/>`);
+      el.push(`<text x="${badgeX + 21}" y="${cy + ACCENT_H + 41}" text-anchor="middle" font-size="9" font-weight="700" fill="#065f46" font-family="system-ui,sans-serif">✓ exit</text>`);
+      badgeX += 46;
+    }
+    if (runCond !== "always") {
+      const condW = runCond.length * 5.5 + 14;
+      el.push(`<rect x="${badgeX}" y="${cy + ACCENT_H + 30}" width="${condW}" height="14" rx="7" fill="#e0e7ff"/>`);
+      el.push(`<text x="${badgeX + condW/2}" y="${cy + ACCENT_H + 41}" text-anchor="middle" font-size="9" font-weight="600" fill="#3730a3" font-family="system-ui,sans-serif">${runCond}</text>`);
+      badgeX += condW + 4;
+    }
+    // Parallel badge
+    if (isParallel) {
+      el.push(`<rect x="${cx + COL_W - 56}" y="${cy + ACCENT_H + 8}" width="46" height="14" rx="7" fill="#6366f118"/>`);
+      el.push(`<text x="${cx + COL_W - 33}" y="${cy + ACCENT_H + 19}" text-anchor="middle" font-size="9" font-weight="700" fill="#6366f1" font-family="system-ui,sans-serif">⇉ parallel</text>`);
+    }
     if (stage.is_protected) {
       el.push(`<text x="${cx + COL_W - 14}" y="${cy + ACCENT_H + 20}" text-anchor="middle" font-size="12" fill="#64748b" font-family="system-ui,sans-serif">🔒</text>`);
     }
     el.push(`</g>`);
 
-    // ── Divider under header ─────────────────────────────────────────────────
     el.push(`<line x1="${cx + 8}" y1="${cy + HDR_H}" x2="${cx + COL_W - 8}" y2="${cy + HDR_H}" stroke="#f1f5f9" stroke-width="1.5"/>`);
 
-    // ── Task cards ───────────────────────────────────────────────────────────
+    // Tasks — group consecutive parallel tasks, draw bracket around them
     let ty = cy + HDR_H + TASK_GAP;
     if (tasks.length === 0) {
       el.push(`<text x="${cx + COL_W/2}" y="${ty + 20}" text-anchor="middle" font-size="11" fill="#cbd5e1" font-family="system-ui,sans-serif">No tasks yet</text>`);
     }
+
+    // Build task groups (same parallel-run grouping logic)
+    const taskGroups = [];
     for (const task of tasks) {
-      const tx    = cx + TASK_MX;
-      const tw    = COL_W - TASK_MX * 2;
-      const tacc  = taskAccent(task);
-      const tName = task.name.length > 22 ? task.name.slice(0, 20) + "…" : task.name;
-      const tTag  = task.task_type ? task.task_type.split(",")[0].trim() : (task.run_language && task.run_language !== "bash" ? task.run_language : "");
-      const tRequired = task.is_required;
-      const tOnErr = task.on_error || "fail";
+      const tMode = task.execution_mode || "sequential";
+      if (tMode === "parallel" && taskGroups.length > 0) {
+        const prev = taskGroups[taskGroups.length - 1];
+        if ((prev[0].execution_mode || "sequential") === "parallel") {
+          prev.push(task); continue;
+        }
+      }
+      taskGroups.push([task]);
+    }
 
-      el.push(`<g style="cursor:pointer" onclick="visualScrollToTask('${task.id}','${stage.id}')" title="${task.name}">`);
-      // Card
-      el.push(`<rect x="${tx}" y="${ty}" width="${tw}" height="${TASK_H}" rx="${TASK_CR}" fill="#ffffff" stroke="#e8eef6" stroke-width="1" filter="url(#tshadow-${pipelineId})"/>`);
-      // Left accent stripe
-      el.push(`<rect x="${tx}" y="${ty}" width="3" height="${TASK_H}" rx="${TASK_CR}" fill="${tacc}"/>`);
-      el.push(`<rect x="${tx + 3 - TASK_CR}" y="${ty}" width="${TASK_CR}" height="${TASK_H}" fill="${tacc}"/>`);
+    for (const tGroup of taskGroups) {
+      const isParGroup = (tGroup[0].execution_mode || "sequential") === "parallel" && tGroup.length > 1;
 
-      // Task number circle
-      el.push(`<circle cx="${tx + 18}" cy="${ty + TASK_H/2}" r="9" fill="${tacc}15"/>`);
-      el.push(`<text x="${tx + 18}" y="${ty + TASK_H/2 + 4}" text-anchor="middle" font-size="9" font-weight="700" fill="${tacc}" font-family="system-ui,sans-serif">${task.order}</text>`);
-
-      // Task name
-      el.push(`<text x="${tx + 32}" y="${ty + 16}" font-size="11" font-weight="600" fill="#1e293b" font-family="system-ui,sans-serif">${tName}</text>`);
-
-      // Tag + on_error indicator row
-      if (tTag) {
-        const tagW = Math.min(tTag.length * 5.8 + 10, tw - 44);
-        el.push(`<rect x="${tx + 32}" y="${ty + 22}" width="${tagW}" height="13" rx="3" fill="${tacc}15"/>`);
-        el.push(`<text x="${tx + 37}" y="${ty + 32}" font-size="9" font-weight="600" fill="${tacc}" font-family="system-ui,sans-serif">${tTag.length > 14 ? tTag.slice(0,13)+"…" : tTag}</text>`);
+      if (isParGroup) {
+        // Draw a subtle bracket behind the parallel task group
+        const groupH = tGroup.length * (TASK_H + TASK_GAP) - TASK_GAP;
+        el.push(`<rect x="${cx + TASK_MX - 3}" y="${ty - 2}" width="${COL_W - TASK_MX * 2 + 6}" height="${groupH + 4}" rx="5" fill="#6366f108" stroke="#6366f130" stroke-width="1" stroke-dasharray="3,2"/>`);
+        // "⇉" parallel label top-right of the bracket
+        el.push(`<text x="${cx + COL_W - TASK_MX - 2}" y="${ty + 9}" text-anchor="end" font-size="8" font-weight="700" fill="#6366f1" font-family="system-ui,sans-serif">⇉</text>`);
       }
 
-      // on_error dot
-      const dotColor = tOnErr === "warn" ? "#f59e0b" : "#ef4444";
-      el.push(`<circle cx="${tx + tw - 10}" cy="${ty + TASK_H - 12}" r="4" fill="${dotColor}30" stroke="${dotColor}" stroke-width="1.2"/>`);
+      for (const task of tGroup) {
+        const tx   = cx + TASK_MX;
+        const tw   = COL_W - TASK_MX * 2;
+        const tkind = task.kind || "script";
+        const tacc = taskAccent(task);
+        const km   = KIND_META[tkind] || KIND_META["script"];
+        const tName = task.name.length > 22 ? task.name.slice(0, 20) + "…" : task.name;
+        const dotColor = (task.on_error || "fail") === "warn" ? "#f59e0b" : "#ef4444";
+        const tCondLabel = (task.run_condition && task.run_condition !== "always") ? task.run_condition : "";
 
-      // Required star
-      if (tRequired) {
-        el.push(`<text x="${tx + tw - 22}" y="${ty + TASK_H - 8}" font-size="10" fill="#f59e0b" font-family="system-ui,sans-serif">★</text>`);
+        // Kind-specific card background tint
+        const cardFill = tkind === "gate" ? "#fffbeb" : tkind === "approval" ? "#faf5ff" : "#ffffff";
+        const cardStroke = tkind === "gate" ? "#fde68a" : tkind === "approval" ? "#ddd6fe" : (isParGroup ? "#6366f120" : "#e8eef6");
+
+        el.push(`<g style="cursor:pointer" onclick="visualScrollToTask('${task.id}','${stage.id}')" title="${task.name}: ${tkind}">`);
+        el.push(`<rect x="${tx}" y="${ty}" width="${tw}" height="${TASK_H}" rx="${TASK_CR}" fill="${cardFill}" stroke="${cardStroke}" stroke-width="1" filter="url(#tshadow-${pipelineId})"/>`);
+        // Left accent bar
+        el.push(`<rect x="${tx}" y="${ty}" width="3" height="${TASK_H}" rx="${TASK_CR}" fill="${tacc}"/>`);
+        el.push(`<rect x="${tx + 3 - TASK_CR}" y="${ty}" width="${TASK_CR}" height="${TASK_H}" fill="${tacc}"/>`);
+        // Kind icon circle
+        if (km.svgIcon && tkind === "gate") {
+          el.push(_drawGateIcon(tx + 18, ty + TASK_H / 2, tacc));
+        } else if (km.icon) {
+          el.push(`<circle cx="${tx + 18}" cy="${ty + TASK_H/2}" r="9" fill="${tacc}20"/>`);
+          el.push(`<text x="${tx + 18}" y="${ty + TASK_H/2 + 4}" text-anchor="middle" font-size="9" font-weight="700" fill="${tacc}" font-family="system-ui,sans-serif">${km.icon}</text>`);
+        } else {
+          el.push(`<circle cx="${tx + 18}" cy="${ty + TASK_H/2}" r="9" fill="${tacc}20"/>`);
+          el.push(`<text x="${tx + 18}" y="${ty + TASK_H/2 + 4}" text-anchor="middle" font-size="9" font-weight="700" fill="${tacc}" font-family="system-ui,sans-serif">${task.order}</text>`);
+        }
+        el.push(`<text x="${tx + 32}" y="${ty + 16}" font-size="11" font-weight="600" fill="#1e293b" font-family="system-ui,sans-serif">${tName}</text>`);
+        // Sub-row: kind badge or task_type tag
+        let subX = tx + 32;
+        if (tkind !== "script") {
+          const kLbl = km.label;
+          const kW = kLbl.length * 5.8 + 10;
+          el.push(`<rect x="${subX}" y="${ty + 22}" width="${kW}" height="13" rx="3" fill="${tacc}20"/>`);
+          el.push(`<text x="${subX + 5}" y="${ty + 32}" font-size="9" font-weight="700" fill="${tacc}" font-family="system-ui,sans-serif">${kLbl}</text>`);
+          subX += kW + 5;
+        }
+        if (task.task_type && tkind === "script") {
+          const tTag = task.task_type.split(",")[0].trim();
+          const tagW = Math.min(tTag.length * 5.8 + 10, tw - 44);
+          el.push(`<rect x="${subX}" y="${ty + 22}" width="${tagW}" height="13" rx="3" fill="${tacc}15"/>`);
+          el.push(`<text x="${subX + 5}" y="${ty + 32}" font-size="9" font-weight="600" fill="${tacc}" font-family="system-ui,sans-serif">${tTag.length > 14 ? tTag.slice(0,13)+"…" : tTag}</text>`);
+        } else if (task.run_language && task.run_language !== "bash" && tkind === "script") {
+          const tTag = task.run_language;
+          const tagW = Math.min(tTag.length * 5.8 + 10, tw - 44);
+          el.push(`<rect x="${subX}" y="${ty + 22}" width="${tagW}" height="13" rx="3" fill="${tacc}15"/>`);
+          el.push(`<text x="${subX + 5}" y="${ty + 32}" font-size="9" font-weight="600" fill="${tacc}" font-family="system-ui,sans-serif">${tTag}</text>`);
+        }
+        // Run condition pill (right side, if not "always")
+        if (tCondLabel) {
+          const cW = tCondLabel.length * 5.5 + 8;
+          const cX = tx + tw - cW - 2;
+          const cY = ty + 2;
+          el.push(`<rect x="${cX}" y="${cY}" width="${cW}" height="12" rx="6" fill="#e0e7ff"/>`);
+          el.push(`<text x="${cX + cW/2}" y="${cY + 9}" text-anchor="middle" font-size="8" font-weight="600" fill="#3730a3" font-family="system-ui,sans-serif">${tCondLabel}</text>`);
+        }
+        el.push(`<circle cx="${tx + tw - 10}" cy="${ty + TASK_H - 12}" r="4" fill="${dotColor}30" stroke="${dotColor}" stroke-width="1.2"/>`);
+        if (task.is_required) {
+          el.push(`<text x="${tx + tw - 22}" y="${ty + TASK_H - 8}" font-size="10" fill="#f59e0b" font-family="system-ui,sans-serif">★</text>`);
+        }
+        el.push(`</g>`);
+        ty += TASK_H + TASK_GAP;
+      }
+    }
+  }
+
+  // ── Render each slot ──────────────────────────────────────────────────────
+  slots.forEach((slot, si) => {
+    const slotX = PAD_X + si * (COL_W + COL_GAP);
+    const slotY = PAD_Y;
+    const { h: slotH } = slotMetrics[si];
+    const slotCenterY = slotY + slotH / 2;
+
+    // Arrow from previous slot
+    if (si > 0) {
+      const prevSlotX = PAD_X + (si - 1) * (COL_W + COL_GAP);
+      const ax1 = prevSlotX + COL_W + 6;
+      const ax2 = slotX - 6;
+      const isPar = slot.type === "parallel" || slots[si - 1].type === "parallel";
+      const arrowColor = isPar ? "#6366f1" : "#94a3b8";
+      const markId = isPar ? `arr-par-${pipelineId}` : `arr-${pipelineId}`;
+      el.push(`<line x1="${ax1}" y1="${slotCenterY}" x2="${ax2}" y2="${slotCenterY}" stroke="${arrowColor}" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#${markId})"/>`);
+    }
+
+    if (slot.type === "sequential") {
+      drawStageCol(slot.col, slotX, slotY, maxSlotH);
+    } else {
+      // Parallel group: draw a light bracket behind all rows, then fork/join lines
+      const bandX = slotX - PAR_BAND_PAD;
+      const bandW = COL_W + PAR_BAND_PAD * 2;
+      el.push(`<rect x="${bandX}" y="${slotY}" width="${bandW}" height="${slotH}" rx="10" fill="#6366f108" stroke="#6366f130" stroke-width="1.5" stroke-dasharray="5,3"/>`);
+
+      // "parallel" label above the band
+      el.push(`<text x="${slotX + COL_W/2}" y="${slotY - 6}" text-anchor="middle" font-size="10" font-weight="700" fill="#6366f1" font-family="system-ui,sans-serif">⇉ parallel group</text>`);
+
+      // Fork: vertical line left side connecting all row centres
+      const forkX = slotX - 2;
+      const rowCentres = [];
+      let rowY = slotY + PAR_BAND_PAD;
+      for (const col of slot.cols) {
+        rowCentres.push(rowY + col.colH / 2);
+        rowY += col.colH + PAR_ROW_GAP;
+      }
+      if (rowCentres.length > 1) {
+        el.push(`<line x1="${forkX}" y1="${rowCentres[0]}" x2="${forkX}" y2="${rowCentres[rowCentres.length-1]}" stroke="#6366f150" stroke-width="2"/>`);
+        for (const ry of rowCentres) {
+          el.push(`<line x1="${forkX}" y1="${ry}" x2="${slotX + 6}" y2="${ry}" stroke="#6366f170" stroke-width="1.5" marker-end="url(#arr-par-${pipelineId})"/>`);
+        }
+        // Join: vertical line right side
+        const joinX = slotX + COL_W + 2;
+        el.push(`<line x1="${joinX}" y1="${rowCentres[0]}" x2="${joinX}" y2="${rowCentres[rowCentres.length-1]}" stroke="#6366f150" stroke-width="2"/>`);
       }
 
-      el.push(`</g>`);
-      ty += TASK_H + TASK_GAP;
+      // Draw each parallel stage row
+      rowY = slotY + PAR_BAND_PAD;
+      for (const col of slot.cols) {
+        drawStageCol(col, slotX, rowY, col.colH);
+        rowY += col.colH + PAR_ROW_GAP;
+      }
     }
   });
 
@@ -6649,50 +8481,105 @@ function _renderPipelineRun(run, productId, pipelineId) {
 
   // ── Stage detail cards ────────────────────────────────────────────────
   const stageDetails = stageRuns.map(sr => {
+    const srProps = sr.runtime_properties || {};
+    const entryGateResult = srProps.entry_gate;
+    const exitGateResult  = srProps.exit_gate;
+
+    const gateResultBanner = (result, label) => {
+      if (!result) return "";
+      const color = result.passed ? "#065f46" : "#991b1b";
+      const bg    = result.passed ? "#d1fae5" : "#fee2e2";
+      const icon  = result.passed ? "✓" : "✗";
+      return `<div style="background:${bg};color:${color};padding:8px 14px;font-size:12px;font-weight:600;display:flex;gap:10px;align-items:center">
+        <span>${icon} ${label}: ${result.passed ? "Passed" : "Failed"}</span>
+        ${result.logs ? `<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:1px 7px" onclick="toggleLog('gate-log-${label.replace(/ /g,"-")}-${sr.id}')">Logs</button>` : ""}
+      </div>
+      ${result.logs ? `<div id="gate-log-${label.replace(/ /g,"-")}-${sr.id}" class="task-log-block"><div class="log-viewer"><pre style="margin:0;white-space:pre-wrap;font-size:12px">${result.logs.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</pre></div></div>` : ""}`;
+    };
+
     const taskRows = (sr.task_runs || []).map(tr => {
       const tc = _statusColor(tr.status);
+      const kind = tr.task_kind || "script";
+
+      // Approval panel
+      const approvalPanel = kind === "approval" ? (() => {
+        const decisions = tr.approval_decisions || [];
+        const decisionRows = decisions.map(d => {
+          const dc = d.decision === "approved" ? "#065f46" : "#991b1b";
+          const dBg = d.decision === "approved" ? "#d1fae5" : "#fee2e2";
+          return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #f1f5f9">
+            <span style="background:${dBg};color:${dc};padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600">${d.decision}</span>
+            <strong style="font-size:13px">${d.display_name || d.username}</strong>
+            ${d.comment ? `<span style="color:var(--gray-500);font-size:12px">"${d.comment}"</span>` : ""}
+            <span style="color:var(--gray-400);font-size:11px;margin-left:auto">${fmtDate(d.decided_at)}</span>
+          </div>`;
+        }).join("") || `<div style="padding:10px 14px;color:var(--gray-400);font-size:13px">No decisions yet.</div>`;
+
+        const awaitingActions = tr.status === "AwaitingApproval" ? `
+          <div style="padding:10px 14px;display:flex;gap:8px;border-top:1px solid #f1f5f9">
+            <input id="apv-comment-${tr.id}" class="form-control" style="font-size:13px" placeholder="Comment (optional)">
+            <button class="btn btn-success btn-sm" onclick="submitApproval('${tr.id}','approved')">✓ Approve</button>
+            <button class="btn btn-danger btn-sm" onclick="submitApproval('${tr.id}','rejected')">✗ Reject</button>
+          </div>` : "";
+
+        return `<div id="apv-${tr.id}" class="task-log-block" style="display:block;border-top:2px solid ${tr.status==="AwaitingApproval"?"#7c3aed":"#bfdbfe"}">
+          <div style="background:${tr.status==="AwaitingApproval"?"linear-gradient(90deg,#f5f3ff,#eff6ff)":"#eff6ff"};padding:8px 14px;font-size:12px;font-weight:700;color:${tr.status==="AwaitingApproval"?"#5b21b6":"#1e40af"};border-bottom:1px solid #bfdbfe;display:flex;align-items:center;gap:8px">
+            ${tr.status==="AwaitingApproval"?"✋ Approval Required":"📋 Approval Decisions"}
+            ${tr.status==="AwaitingApproval"?`<span style="font-size:11px;font-weight:400;color:#7c3aed;margin-left:4px">Submit your decision below to continue the pipeline</span>`:""}
+          </div>
+          ${decisionRows}
+          ${awaitingActions}
+        </div>`;
+      })() : "";
+
+      const kindBadge = kind !== "script" ? _taskKindBadge(kind) : "";
+
+      const isAwaiting = tr.status === "AwaitingApproval";
+      const rowStyle = isAwaiting
+        ? `border-left:4px solid #7c3aed;background:linear-gradient(90deg,#f5f3ff,#fff);`
+        : `border-left:3px solid ${tc}${tr.status==="Skipped"?";opacity:0.55":""}`;
+
       return `
-        <div class="task-run-row" style="border-left:3px solid ${tc}">
+        <div class="task-run-row" id="tr-row-${tr.id}" style="${rowStyle}">
           <div style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap">
             <span class="task-run-name">${tr.task_name || tr.task_id}</span>
+            ${kindBadge}
             ${statusBadge(tr.status)}
+            ${isAwaiting ? `<span style="animation:pulse 1.5s ease-in-out infinite;background:#7c3aed;color:#fff;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">⏳ Awaiting your decision</span>` : ""}
             <span class="task-run-duration">${fmtDuration(tr.started_at, tr.finished_at)}</span>
             ${tr.return_code !== null && tr.return_code !== undefined
               ? `<code style="font-size:11px;color:var(--gray-400)">exit ${tr.return_code}</code>`
               : ""}
-            <button class="btn btn-secondary btn-sm ctx-inspect-btn" style="font-size:11px;padding:2px 8px"
-              onclick="toggleLog('ctx-${tr.id}')">Context</button>
+            ${kind === "script" ? `<button class="btn btn-secondary btn-sm ctx-inspect-btn" style="font-size:11px;padding:2px 8px"
+              onclick="toggleLog('ctx-${tr.id}')">Context</button>` : ""}
             <button class="task-log-toggle" onclick="toggleLog('log-${tr.id}')">Logs</button>
           </div>
-          <div id="ctx-${tr.id}" class="task-log-block">
+          ${approvalPanel}
+          ${kind === "script" ? `<div id="ctx-${tr.id}" class="task-log-block">
             <div class="ctx-inspector" id="ctx-inner-${tr.id}">
               <div class="ctx-tabs">
                 <button class="ctx-tab active" onclick="ctxTab('${tr.id}','env',this)">CDT Variables</button>
                 <button class="ctx-tab" onclick="ctxTab('${tr.id}','props',this)">Properties</button>
                 <button class="ctx-tab" onclick="ctxTab('${tr.id}','output',this)">Output JSON</button>
               </div>
-              <div id="ctx-pane-env-${tr.id}" class="ctx-pane ctx-pane-active">
-                ${_ctxEnvTable(tr)}
-              </div>
-              <div id="ctx-pane-props-${tr.id}" class="ctx-pane">
-                ${_ctxPropsTable(tr)}
-              </div>
-              <div id="ctx-pane-output-${tr.id}" class="ctx-pane">
-                ${_ctxOutputPanel(tr)}
-              </div>
+              <div id="ctx-pane-env-${tr.id}" class="ctx-pane ctx-pane-active">${_ctxEnvTable(tr)}</div>
+              <div id="ctx-pane-props-${tr.id}" class="ctx-pane">${_ctxPropsTable(tr)}</div>
+              <div id="ctx-pane-output-${tr.id}" class="ctx-pane">${_ctxOutputPanel(tr)}</div>
             </div>
-          </div>
+          </div>` : ""}
           <div id="log-${tr.id}" class="task-log-block">
             <div class="log-viewer"><pre style="margin:0;white-space:pre-wrap;font-size:12px">${tr.logs ? tr.logs.replace(/</g,"&lt;").replace(/>/g,"&gt;") : "(no logs)"}</pre></div>
           </div>
         </div>`;
     }).join("");
 
-    const headerBg = { Succeeded: "#f8fafc", Failed: "#fef2f2", Running: "#eff6ff", Warning: "#fffbeb", Cancelled: "#f8fafc" }[sr.status] || "var(--gray-50)";
+    const headerBg = { Succeeded: "#f8fafc", Failed: "#fef2f2", Running: "#eff6ff", Warning: "#fffbeb", Cancelled: "#f8fafc", Skipped: "#f8fafc" }[sr.status] || "var(--gray-50)";
     const stageAccent = ((_pipelineVisualStages||[]).find(s => s.id === sr.stage_id) || {}).accent_color || _statusColor(sr.status);
     const canRestart = TERMINAL.has(run.status);
-    const srProps = sr.runtime_properties || {};
-    const srPropsJson = Object.keys(srProps).length ? JSON.stringify(srProps, null, 2) : null;
+    const srPropsForDisplay = {...srProps};
+    delete srPropsForDisplay.entry_gate;
+    delete srPropsForDisplay.exit_gate;
+    const srPropsJson = Object.keys(srPropsForDisplay).length ? JSON.stringify(srPropsForDisplay, null, 2) : null;
     return `
       <div id="sr-${sr.id}" class="card" style="margin-bottom:14px;border-left:4px solid ${stageAccent}">
         <div class="card-header" style="background:${headerBg}">
@@ -6704,10 +8591,12 @@ function _renderPipelineRun(run, productId, pipelineId) {
             ${canRestart ? `<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px" onclick="rerunFromStage('${run.id}','${sr.id}')">↺ Restart from here</button>` : ""}
           </div>
         </div>
+        ${gateResultBanner(entryGateResult, "Entry Gate")}
         ${srPropsJson ? `<div id="srctx-${sr.id}" class="task-log-block"><pre class="ctx-json-pre">${srPropsJson.replace(/</g,"&lt;")}</pre></div>` : ""}
         ${(sr.task_runs||[]).length === 0
           ? `<div style="padding:14px;color:var(--gray-400);font-size:13px">No tasks.</div>`
           : taskRows}
+        ${gateResultBanner(exitGateResult, "Exit Gate")}
       </div>`;
   }).join("");
 
@@ -6715,6 +8604,28 @@ function _renderPipelineRun(run, productId, pipelineId) {
   const ctxTabs = productId && pipelineId ? pipelineContextTabs(productId, pipelineId, "runs") : "";
   const pipelineProps = run.runtime_properties || {};
   const pipelinePropsJson = JSON.stringify(pipelineProps, null, 2);
+
+  // ── Collect all tasks awaiting approval across all stage runs ──────────────
+  const awaitingTaskRuns = stageRuns.flatMap(sr =>
+    (sr.task_runs || []).filter(tr => tr.status === "AwaitingApproval")
+  );
+  const approvalBanner = awaitingTaskRuns.length > 0 ? `
+    <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;border-radius:10px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;box-shadow:0 4px 16px #4f46e540">
+      <div style="font-size:22px">✋</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:15px;margin-bottom:3px">Approval Required</div>
+        <div style="font-size:13px;opacity:0.9">${awaitingTaskRuns.map(tr => `<strong>${tr.task_name || tr.task_id}</strong>`).join(", ")} ${awaitingTaskRuns.length === 1 ? "is" : "are"} waiting for your decision.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${awaitingTaskRuns.map(tr => `
+          <div style="display:flex;align-items:center;gap:6px;background:#ffffff20;border-radius:8px;padding:6px 10px">
+            <span style="font-size:12px;font-weight:600;white-space:nowrap">${tr.task_name || tr.task_id}</span>
+            <input id="apv-comment-banner-${tr.id}" class="form-control" style="font-size:12px;width:140px;background:#ffffff20;border-color:#ffffff40;color:#fff" placeholder="Comment…">
+            <button class="btn btn-sm" style="background:#22c55e;color:#fff;font-weight:700;border:none" onclick="submitApprovalBanner('${tr.id}','approved')">✓ Approve</button>
+            <button class="btn btn-sm" style="background:#ef4444;color:#fff;font-weight:700;border:none" onclick="submitApprovalBanner('${tr.id}','rejected')">✗ Reject</button>
+          </div>`).join("")}
+      </div>
+    </div>` : "";
 
   return `
     <div class="page-header">
@@ -6731,6 +8642,8 @@ function _renderPipelineRun(run, productId, pipelineId) {
         <button class="btn btn-secondary btn-sm" onclick="rerunPipeline('${run.id}')">↺ Re-run</button>
       </div>
     </div>
+
+    ${approvalBanner}
 
     <!-- Audit / Compliance reports — top of page for quick access -->
     <div class="card" style="margin-bottom:16px">
@@ -7179,6 +9092,31 @@ async function rerunFromStage(runId, stageRunId) {
   }
 }
 
+async function submitApproval(taskRunId, decision) {
+  const comment = (document.getElementById("apv-comment-" + taskRunId) || {}).value || "";
+  try {
+    await api.submitApproval(taskRunId, { decision, comment });
+    toast(decision === "approved" ? "Approved — pipeline continuing" : "Rejected — pipeline will stop", decision === "approved" ? "success" : "error");
+    // Refresh current run view
+    const hash = window.location.hash.replace("#", "");
+    navigate(hash);
+  } catch (e) {
+    toast(e.message || "Failed to submit decision", "error");
+  }
+}
+
+async function submitApprovalBanner(taskRunId, decision) {
+  const comment = (document.getElementById("apv-comment-banner-" + taskRunId) || {}).value || "";
+  try {
+    await api.submitApproval(taskRunId, { decision, comment });
+    toast(decision === "approved" ? "Approved — pipeline continuing" : "Rejected — pipeline will stop", decision === "approved" ? "success" : "error");
+    const hash = window.location.hash.replace("#", "");
+    navigate(hash);
+  } catch (e) {
+    toast(e.message || "Failed to submit decision", "error");
+  }
+}
+
 router.register("pipeline-runs/:id", async (hash, parts) => {
   const runId = parts[1];
   setBreadcrumb({ label: "Pipeline Run" });
@@ -7588,15 +9526,229 @@ async function testPluginConfig(pluginId, configId) {
   }, 3000);
 }
 
-// ── Docs page ──────────────────────────────────────────────────────────────
-router.register("docs", () => {
-  setBreadcrumb({ label: "Documentation" });
+// ── Shared markdown renderer (used by all doc pages) ─────────────────────
+function mdToHtml(src) {
+    // Process fenced code blocks first (protect content from further transforms)
+    const codeBlocks = [];
+    let s = src.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push(`<div style="margin:14px 0"><pre style="background:#1e293b;color:#e2e8f0;padding:14px 18px;border-radius:8px;overflow-x:auto;font-size:12.5px;line-height:1.65;margin:0">${lang ? `<div style="color:#64748b;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">${lang}</div>` : ""}<code>${code.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</code></pre></div>`);
+      return `\x00CODE${idx}\x00`;
+    });
+
+    // Tables — parse | header | row | format
+    s = s.replace(/((?:^\|.+\|\n)+)/gm, (block) => {
+      const lines = block.trim().split("\n");
+      if (lines.length < 2) return block;
+      const toCell = (line, tag) => {
+        const cells = line.split("|").slice(1, -1);
+        return cells.map(c => `<${tag} style="padding:8px 12px;border-bottom:1px solid #e2e8f0;text-align:left;font-size:13px;vertical-align:top">${c.trim()}</${tag}>`).join("");
+      };
+      const headerRow = `<tr style="background:#f8fafc">${toCell(lines[0], "th")}</tr>`;
+      // skip separator line (---) at index 1
+      const bodyRows = lines.slice(2).map(l => `<tr style="border-bottom:1px solid #f1f5f9">${toCell(l, "td")}</tr>`).join("");
+      return `<div style="overflow-x:auto;margin:12px 0"><table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">${headerRow}${bodyRows}</table></div>`;
+    });
+
+    // Blockquotes
+    s = s.replace(/((?:^> .+\n?)+)/gm, (block) => {
+      const content = block.replace(/^> /gm, "");
+      return `<div style="border-left:3px solid var(--brand,#6366f1);background:#f8f8ff;padding:10px 16px;border-radius:0 6px 6px 0;margin:12px 0;font-size:13px;color:#334155">${content.trim()}</div>`;
+    });
+
+    // Inline code
+    s = s.replace(/`([^`\n]+)`/g, '<code style="background:#f1f5f9;color:#7c3aed;padding:2px 6px;border-radius:4px;font-size:12.5px;font-family:monospace">$1</code>');
+    // H1–H4
+    s = s.replace(/^#### (.+)$/gm, '<h4 style="font-size:13px;font-weight:700;color:#475569;margin:16px 0 5px">$1</h4>');
+    s = s.replace(/^### (.+)$/gm, '<h3 style="font-size:15px;font-weight:700;color:#1e293b;margin:22px 0 8px;padding-left:10px;border-left:3px solid var(--brand,#6366f1)">$1</h3>');
+    s = s.replace(/^## (.+)$/gm, '<h2 style="font-size:19px;font-weight:700;color:#0f172a;margin:32px 0 10px;padding-bottom:8px;border-bottom:2px solid #e2e8f0">$1</h2>');
+    s = s.replace(/^# (.+)$/gm, '<h1 style="font-size:24px;font-weight:800;color:#0f172a;margin:0 0 8px">$1</h1>');
+    // HR
+    s = s.replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0"/>');
+    // Bold + italic
+    s = s.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // Unordered lists
+    s = s.replace(/((?:^- .+\n?)+)/gm, (block) =>
+      `<ul style="margin:8px 0 12px 4px;padding:0;list-style:none">${block.replace(/^- (.+)$/gm, '<li style="margin:5px 0;font-size:13.5px;padding-left:18px;position:relative;color:#334155"><span style="position:absolute;left:0;color:var(--brand,#6366f1);font-weight:700">·</span>$1</li>')}</ul>`);
+    // Ordered lists
+    s = s.replace(/((?:^\d+\. .+\n?)+)/gm, (block) =>
+      `<ol style="margin:8px 0 12px 20px;padding:0">${block.replace(/^\d+\. (.+)$/gm, '<li style="margin:5px 0;font-size:13.5px;color:#334155">$1</li>')}</ol>`);
+    // TOC links → plain text spans
+    s = s.replace(/\[([^\]]+)\]\(#[^)]+\)/g, '<span style="color:var(--brand,#6366f1)">$1</span>');
+    // External links
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--brand,#6366f1);text-decoration:underline">$1</a>');
+    // Paragraphs
+    s = s.replace(/^(?!<[a-zA-Z/]|\x00|$)(.+)$/gm, '<p style="margin:6px 0;font-size:13.5px;line-height:1.75;color:#334155">$1</p>');
+    // Restore code blocks — mermaid blocks become diagram containers
+    s = s.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeBlocks[+i]);
+  return s;
+}
+
+// ── Technical Documentation ───────────────────────────────────────────────
+router.register("docs/technical", async () => {
+  setBreadcrumb({ label: "Documentation", hash: "docs" }, { label: "Technical Docs" });
+  setContent(loading());
+
+  let md = "";
+  try {
+    const res = await fetch("/api/v1/docs/technical-doc");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    md = await res.text();
+  } catch (e) {
+    setContent(`<div class="card"><div class="alert alert-danger">Failed to load documentation: ${e.message}</div></div>`);
+    return;
+  }
+
+  // Extract mermaid blocks before markdown conversion, replace with diagram divs
+  const mermaidDiagrams = [];
+  const mdWithDiagramPlaceholders = md.replace(/```mermaid\n([\s\S]*?)```/g, (_, code) => {
+    const idx = mermaidDiagrams.length;
+    mermaidDiagrams.push(code.trim());
+    return `\x00MERMAID${idx}\x00`;
+  });
+
+  const html = mdToHtml(mdWithDiagramPlaceholders);
+
+  // Build TOC from H2 entries
+  const tocItems = [...md.matchAll(/^## (.+)$/gm)].map((m, i) => {
+    const label = m[1];
+    const anchor = `tdc-${i}`;
+    return { label, anchor };
+  });
+
+  const tocHtml = tocItems.length ? `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h2>Table of Contents</h2></div>
+      <div style="padding:8px 16px 16px;column-count:2;column-gap:32px">
+        ${tocItems.map(t => `<div style="margin:4px 0"><a href="#" onclick="document.getElementById('${t.anchor}').scrollIntoView({behavior:'smooth'});return false;" style="color:var(--brand);font-size:13px;text-decoration:none">${t.label}</a></div>`).join("")}
+      </div>
+    </div>` : "";
+
+  // Inject anchor IDs onto H2 tags
+  let anchored = html;
+  let idx = 0;
+  anchored = anchored.replace(/<h2 /g, () => `<h2 id="tdc-${idx++}" `);
+
+  // Replace mermaid placeholders with styled diagram containers
+  anchored = anchored.replace(/\x00MERMAID(\d+)\x00/g, (_, i) => {
+    const code = mermaidDiagrams[+i].replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<div class="mermaid-diagram" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin:16px 0;text-align:center;overflow-x:auto"><div class="mermaid">${mermaidDiagrams[+i]}</div></div>`;
+  });
+
   setContent(`
     <div class="page-header">
-      <div><h1>Documentation</h1><div class="sub">Conduit — comprehensive usage guide and API reference</div></div>
+      <div><h1>Technical Documentation</h1><div class="sub">Conduit platform — architecture, API, data models, and deployment</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="navigate('docs')">API Reference</button>
+        <button class="btn btn-secondary btn-sm" onclick="navigate('tutorial')">Training</button>
+      </div>
+    </div>
+    ${tocHtml}
+    <div class="card">
+      <div style="padding:24px 28px;max-width:1100px;line-height:1.7">
+        ${anchored}
+      </div>
+    </div>
+  `);
+
+  // Load and initialize Mermaid.js for diagram rendering
+  if (mermaidDiagrams.length > 0) {
+    if (!window.mermaid) {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
+      script.onload = () => {
+        window.mermaid.initialize({ startOnLoad: false, theme: "neutral", fontFamily: "inherit", fontSize: 15 });
+        window.mermaid.run({ querySelector: ".mermaid" });
+      };
+      document.head.appendChild(script);
+    } else {
+      window.mermaid.run({ querySelector: ".mermaid" });
+    }
+  }
+});
+
+// ── Admin Guide ───────────────────────────────────────────────────────────
+router.register("docs/admin-guide", async () => {
+  setBreadcrumb({ label: "Documentation", hash: "docs/technical" }, { label: "Admin Guide" });
+  setContent(loading());
+
+  let md = "";
+  try {
+    const res = await fetch("/api/v1/docs/admin-guide");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    md = await res.text();
+  } catch (e) {
+    setContent(`<div class="card"><div class="alert alert-danger">Failed to load admin guide: ${e.message}</div></div>`);
+    return;
+  }
+
+  const mermaidDiagrams = [];
+  const mdClean = md.replace(/```mermaid\n([\s\S]*?)```/g, (_, code) => {
+    const idx = mermaidDiagrams.length;
+    mermaidDiagrams.push(code.trim());
+    return `\x00MERMAID${idx}\x00`;
+  });
+
+  const html = mdToHtml(mdClean);
+
+  const tocItems = [...md.matchAll(/^## (.+)$/gm)].map((m, i) => ({ label: m[1], anchor: `adm-${i}` }));
+  const tocHtml = tocItems.length ? `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h2>Table of Contents</h2></div>
+      <div style="padding:8px 16px 16px;column-count:2;column-gap:32px">
+        ${tocItems.map(t => `<div style="margin:4px 0"><a href="#" onclick="document.getElementById('${t.anchor}').scrollIntoView({behavior:'smooth'});return false;" style="color:var(--brand);font-size:13px;text-decoration:none">${t.label}</a></div>`).join("")}
+      </div>
+    </div>` : "";
+
+  let anchored = html;
+  let idx = 0;
+  anchored = anchored.replace(/<h2 /g, () => `<h2 id="adm-${idx++}" `);
+  anchored = anchored.replace(/\x00MERMAID(\d+)\x00/g, (_, i) =>
+    `<div class="mermaid-diagram" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin:16px 0;text-align:center;overflow-x:auto"><div class="mermaid">${mermaidDiagrams[+i]}</div></div>`
+  );
+
+  setContent(`
+    <div class="page-header">
+      <div><h1>System Administrator Guide</h1><div class="sub">User management, RBAC, integrations, compliance and platform operations</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="navigate('docs/technical')">Technical Docs</button>
+        <button class="btn btn-secondary btn-sm" onclick="navigate('tutorial')">Training</button>
+      </div>
+    </div>
+    ${tocHtml}
+    <div class="card">
+      <div style="padding:24px 28px;max-width:1100px;line-height:1.7">
+        ${anchored}
+      </div>
+    </div>
+  `);
+
+  if (mermaidDiagrams.length > 0) {
+    if (!window.mermaid) {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
+      script.onload = () => {
+        window.mermaid.initialize({ startOnLoad: false, theme: "neutral", fontFamily: "inherit", fontSize: 15 });
+        window.mermaid.run({ querySelector: ".mermaid" });
+      };
+      document.head.appendChild(script);
+    } else {
+      window.mermaid.run({ querySelector: ".mermaid" });
+    }
+  }
+});
+
+// ── API Reference ─────────────────────────────────────────────────────────
+router.register("docs", () => {
+  setBreadcrumb({ label: "Documentation", hash: "docs/technical" }, { label: "API Reference" });
+  setContent(`
+    <div class="page-header">
+      <div><h1>API Reference</h1><div class="sub">REST endpoints, authentication, and interactive Swagger explorer</div></div>
       <div style="display:flex;gap:8px">
         <a class="btn btn-secondary btn-sm" href="/api/v1/docs/swagger" target="_blank">Swagger UI</a>
-        <button class="btn btn-primary btn-sm" onclick="navigate('tutorial')">Tutorial &rarr;</button>
+        <button class="btn btn-primary btn-sm" onclick="navigate('tutorial')">Training &rarr;</button>
       </div>
     </div>
 
@@ -7933,7 +10085,7 @@ echo '{"deployed":"'"$BUILD_OUT"'","cluster":"prod-us-east-1"}'</pre>
 // ── Tutorial ───────────────────────────────────────────────────────────────
 
 router.register("tutorial", () => {
-  setBreadcrumb({ label: "Tutorial" });
+  setBreadcrumb({ label: "Documentation", hash: "docs/technical" }, { label: "Training" });
   setContent(`
     <div class="page-header">
       <div><h1>Conduit Tutorial</h1><div class="sub">Step-by-step guide from zero to a running pipeline</div></div>
@@ -8698,6 +10850,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       _currentUser = await api.me();
       updateTopbarUser();
+      fetchPermissionCatalog();  // non-blocking; replaces default catalog arrays
       router.init();
     } catch {
       // Token invalid/expired — show login

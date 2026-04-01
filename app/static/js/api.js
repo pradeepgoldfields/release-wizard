@@ -74,6 +74,7 @@ const api = {
 
   // Stages
   createStage: (pid, plid, data) => request("POST", `/products/${pid}/pipelines/${plid}/stages`, data),
+  getStage: (pid, plid, sid) => request("GET", `/products/${pid}/pipelines/${plid}/stages/${sid}`),
   updateStage: (pid, plid, sid, data) => request("PUT", `/products/${pid}/pipelines/${plid}/stages/${sid}`, data),
   deleteStage: (pid, plid, sid) => request("DELETE", `/products/${pid}/pipelines/${plid}/stages/${sid}`),
 
@@ -86,6 +87,8 @@ const api = {
   runTask: (pid, plid, sid, tid, data) => request("POST", `/products/${pid}/pipelines/${plid}/stages/${sid}/tasks/${tid}/run`, data),
   listTaskRuns: (pid, plid, sid, tid) => request("GET", `/products/${pid}/pipelines/${plid}/stages/${sid}/tasks/${tid}/runs`),
   getTaskRun: (runId) => request("GET", `/task-runs/${runId}`),
+  listApprovals: (taskRunId) => request("GET", `/task-runs/${taskRunId}/approvals`),
+  submitApproval: (taskRunId, data) => request("POST", `/task-runs/${taskRunId}/approvals`, data),
 
   // Agent Pools
   getAgentPools: () => request("GET", "/agent-pools"),
@@ -143,11 +146,17 @@ const api = {
   deleteGroup: (id) => request("DELETE", `/groups/${id}`),
   addGroupMember: (groupId, userId) => request("POST", `/groups/${groupId}/members/${userId}`),
   removeGroupMember: (groupId, userId) => request("DELETE", `/groups/${groupId}/members/${userId}`),
+  getGroupBindings: (id) => request("GET", `/groups/${id}/bindings`),
+  addGroupBinding: (id, data) => request("POST", `/groups/${id}/bindings`, data),
+  removeGroupBinding: (groupId, bindingId) => request("DELETE", `/groups/${groupId}/bindings/${bindingId}`),
 
   // RBAC scope bindings
   getScopeBindings: (scope) => request("GET", `/rbac/bindings?scope=${encodeURIComponent(scope)}`),
   createScopeBinding: (data) => request("POST", "/rbac/bindings", data),
   deleteScopeBinding: (id) => request("DELETE", `/rbac/bindings/${id}`),
+
+  // Permission catalogue
+  getPermissionCatalog: () => request("GET", "/permissions/catalog"),
 
   // Roles
   getRoles: () => request("GET", "/roles"),
@@ -208,6 +217,12 @@ const api = {
   deleteWebhook: (id) => request("DELETE", `/webhooks/${id}`),
   getWebhookDeliveries: (id) => request("GET", `/webhooks/${id}/deliveries`),
   getWebhookToken: (id) => request("GET", `/webhooks/${id}/token`),
+
+  // Feature Toggles
+  getToggles: () => request("GET", "/feature-toggles"),
+  createToggle: (data) => request("POST", "/feature-toggles", data),
+  updateToggle: (id, data) => request("PATCH", `/feature-toggles/${id}`, data),
+  deleteToggle: (id) => request("DELETE", `/feature-toggles/${id}`),
 
   // AI Chat
   chat: (messages) => request("POST", "/chat", { messages }),

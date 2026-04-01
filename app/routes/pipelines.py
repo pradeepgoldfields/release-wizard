@@ -9,8 +9,8 @@ from flask import Blueprint, jsonify, request
 
 from app.extensions import db
 from app.models.pipeline import Pipeline, Stage
-from app.models.product import Product
 from app.models.task import Task
+from app.routes._authz import current_user_id, require_product_access
 from app.services.id_service import resource_id
 from app.services.pipeline_service import create_pipeline, update_compliance_score
 from app.utils import paginate
@@ -22,11 +22,11 @@ pipelines_bp = Blueprint(
 
 @pipelines_bp.get("")
 def list_pipelines(product_id: str):
-    """Return pipelines for a product.
-
-    Query params: ``limit`` (default 50, max 200), ``offset`` (default 0).
-    """
-    db.get_or_404(Product, product_id)
+    """Return pipelines for a product. Requires pipelines:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "pipelines:view")
+    if err:
+        return err
     query = Pipeline.query.filter_by(product_id=product_id).order_by(Pipeline.name)
     items, meta = paginate(query)
     return jsonify({"items": [p.to_dict() for p in items], "meta": meta})
@@ -34,12 +34,11 @@ def list_pipelines(product_id: str):
 
 @pipelines_bp.post("")
 def create_pipeline_endpoint(product_id: str):
-    """Create a new pipeline under a product.
-
-    Required body: ``name``
-    Optional: ``kind``, ``git_repo``, ``git_branch``, ``stages``
-    """
-    db.get_or_404(Product, product_id)
+    """Create a new pipeline under a product. Requires pipelines:create."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "pipelines:create")
+    if err:
+        return err
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -58,14 +57,22 @@ def create_pipeline_endpoint(product_id: str):
 
 @pipelines_bp.get("/<pipeline_id>")
 def get_pipeline(product_id: str, pipeline_id: str):
-    """Return a single pipeline with its stages."""
+    """Return a single pipeline. Requires pipelines:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "pipelines:view")
+    if err:
+        return err
     pipeline = Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     return jsonify(pipeline.to_dict(include_stages=True))
 
 
 @pipelines_bp.put("/<pipeline_id>")
 def update_pipeline(product_id: str, pipeline_id: str):
-    """Update mutable pipeline fields."""
+    """Update mutable pipeline fields. Requires pipelines:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "pipelines:edit")
+    if err:
+        return err
     pipeline = Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     data = request.get_json(silent=True) or {}
     for field in ("name", "kind", "git_repo", "git_branch", "definition_sha", "application_id"):
@@ -77,7 +84,11 @@ def update_pipeline(product_id: str, pipeline_id: str):
 
 @pipelines_bp.delete("/<pipeline_id>")
 def delete_pipeline(product_id: str, pipeline_id: str):
-    """Delete a pipeline and all its stages and runs."""
+    """Delete a pipeline. Requires pipelines:delete."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "pipelines:delete")
+    if err:
+        return err
     pipeline = Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     db.session.delete(pipeline)
     db.session.commit()
@@ -86,8 +97,12 @@ def delete_pipeline(product_id: str, pipeline_id: str):
 
 @pipelines_bp.post("/<pipeline_id>/copy")
 def copy_pipeline(product_id: str, pipeline_id: str):
-    """Duplicate a pipeline (with all its stages and tasks) into the same or another product."""
-    from sqlalchemy.orm import joinedload
+    """Duplicate a pipeline. Requires pipelines:create."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "pipelines:create")
+    if err:
+        return err
+    from sqlalchemy.orm import joinedload  # noqa: PLC0415
 
     src = (
         Pipeline.query.options(joinedload(Pipeline.stages).joinedload(Stage.tasks))
@@ -140,11 +155,11 @@ def copy_pipeline(product_id: str, pipeline_id: str):
 
 @pipelines_bp.post("/<pipeline_id>/compliance")
 def update_pipeline_compliance(product_id: str, pipeline_id: str):
-    """Recalculate and persist the weighted compliance score for a pipeline.
-
-    Required body: ``mandatory_pct``, ``best_practice_pct``, ``runtime_pct``, ``metadata_pct``
-    All values are percentages (0–100).
-    """
+    """Recalculate compliance score. Requires pipelines:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "pipelines:edit")
+    if err:
+        return err
     data = request.get_json(silent=True) or {}
     pipeline = update_compliance_score(
         product_id=product_id,
@@ -167,11 +182,11 @@ def update_pipeline_compliance(product_id: str, pipeline_id: str):
 
 @pipelines_bp.post("/<pipeline_id>/stages")
 def create_stage(product_id: str, pipeline_id: str):
-    """Create a new stage within a pipeline.
-
-    Required body: ``name``
-    Optional: ``order``, ``run_language``, ``container_image``, ``is_protected``
-    """
+    """Create a stage within a pipeline. Requires stages:create."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "stages:create")
+    if err:
+        return err
     pipeline = Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -193,9 +208,25 @@ def create_stage(product_id: str, pipeline_id: str):
     return jsonify(stage.to_dict(include_tasks=True)), 201
 
 
+@pipelines_bp.get("/<pipeline_id>/stages/<stage_id>")
+def get_stage(product_id: str, pipeline_id: str, stage_id: str):
+    """Return a single stage with tasks. Requires stages:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "stages:view")
+    if err:
+        return err
+    Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
+    stage = Stage.query.filter_by(id=stage_id, pipeline_id=pipeline_id).first_or_404()
+    return jsonify(stage.to_dict(include_tasks=True))
+
+
 @pipelines_bp.put("/<pipeline_id>/stages/<stage_id>")
 def update_stage(product_id: str, pipeline_id: str, stage_id: str):
-    """Update mutable stage fields."""
+    """Update mutable stage fields. Requires stages:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "stages:edit")
+    if err:
+        return err
     Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     stage = Stage.query.filter_by(id=stage_id, pipeline_id=pipeline_id).first_or_404()
     data = request.get_json(silent=True) or {}
@@ -212,13 +243,27 @@ def update_stage(product_id: str, pipeline_id: str, stage_id: str):
             if data["execution_mode"] in ("sequential", "parallel")
             else "sequential"
         )
+    if "run_condition" in data:
+        stage.run_condition = data["run_condition"] or "always"
+    if "entry_gate" in data:
+        import json as _json  # noqa: PLC0415
+        val = data["entry_gate"]
+        stage.entry_gate = _json.dumps(val) if isinstance(val, dict) else (val or "{}")
+    if "exit_gate" in data:
+        import json as _json  # noqa: PLC0415
+        val = data["exit_gate"]
+        stage.exit_gate = _json.dumps(val) if isinstance(val, dict) else (val or "{}")
     db.session.commit()
     return jsonify(stage.to_dict(include_tasks=True))
 
 
 @pipelines_bp.delete("/<pipeline_id>/stages/<stage_id>")
 def delete_stage(product_id: str, pipeline_id: str, stage_id: str):
-    """Delete a stage and all its tasks."""
+    """Delete a stage. Requires stages:delete."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "stages:delete")
+    if err:
+        return err
     Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     stage = Stage.query.filter_by(id=stage_id, pipeline_id=pipeline_id).first_or_404()
     db.session.delete(stage)
@@ -231,24 +276,31 @@ def delete_stage(product_id: str, pipeline_id: str, stage_id: str):
 
 @pipelines_bp.get("/<pipeline_id>/stages/<stage_id>/tasks")
 def list_tasks(product_id: str, pipeline_id: str, stage_id: str):
-    """Return all tasks for a stage, ordered by sequence."""
+    """Return all tasks for a stage. Requires tasks:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "tasks:view")
+    if err:
+        return err
     stage = Stage.query.filter_by(id=stage_id, pipeline_id=pipeline_id).first_or_404()
     return jsonify([t.to_dict() for t in stage.tasks])
 
 
 @pipelines_bp.post("/<pipeline_id>/stages/<stage_id>/tasks")
 def create_task(product_id: str, pipeline_id: str, stage_id: str):
-    """Create a new task within a stage.
-
-    Required body: ``name``
-    Optional: ``description``, ``order``, ``run_language``, ``run_code``,
-              ``execution_mode``, ``on_error``, ``timeout``, ``is_required``
-    """
+    """Create a task within a stage. Requires tasks:create."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "tasks:create")
+    if err:
+        return err
     Stage.query.filter_by(id=stage_id, pipeline_id=pipeline_id).first_or_404()
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"error": "name is required"}), 400
+    import json as _json  # noqa: PLC0415
+    approval_approvers = data.get("approval_approvers", [])
+    if isinstance(approval_approvers, list):
+        approval_approvers = _json.dumps(approval_approvers)
     task = Task(
         id=resource_id("task"),
         stage_id=stage_id,
@@ -262,6 +314,13 @@ def create_task(product_id: str, pipeline_id: str, stage_id: str):
         timeout=int(data.get("timeout", 300)),
         is_required=bool(data.get("is_required", True)),
         task_type=data.get("task_type") or None,
+        kind=data.get("kind", "script"),
+        gate_script=data.get("gate_script", ""),
+        gate_language=data.get("gate_language", "bash"),
+        approval_approvers=approval_approvers,
+        approval_required_count=int(data.get("approval_required_count", 0)),
+        approval_timeout=int(data.get("approval_timeout", 0)),
+        run_condition=data.get("run_condition", "always"),
     )
     db.session.add(task)
     db.session.commit()
@@ -270,7 +329,11 @@ def create_task(product_id: str, pipeline_id: str, stage_id: str):
 
 @pipelines_bp.get("/<pipeline_id>/stages/<stage_id>/tasks/<task_id>")
 def get_task(product_id: str, pipeline_id: str, stage_id: str, task_id: str):
-    """Return a single task."""
+    """Return a single task. Requires tasks:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "tasks:view")
+    if err:
+        return err
     Stage.query.filter_by(id=stage_id, pipeline_id=pipeline_id).first_or_404()
     task = Task.query.filter_by(id=task_id, stage_id=stage_id).first_or_404()
     return jsonify(task.to_dict())
@@ -278,11 +341,17 @@ def get_task(product_id: str, pipeline_id: str, stage_id: str, task_id: str):
 
 @pipelines_bp.put("/<pipeline_id>/stages/<stage_id>/tasks/<task_id>")
 def update_task(product_id: str, pipeline_id: str, stage_id: str, task_id: str):
-    """Update a task's fields."""
+    """Update a task. Requires tasks:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "tasks:edit")
+    if err:
+        return err
     Stage.query.filter_by(id=stage_id, pipeline_id=pipeline_id).first_or_404()
     task = Task.query.filter_by(id=task_id, stage_id=stage_id).first_or_404()
     data = request.get_json(silent=True) or {}
-    for field in ("name", "description", "run_language", "run_code", "execution_mode", "on_error"):
+    import json as _json  # noqa: PLC0415
+    for field in ("name", "description", "run_language", "run_code", "execution_mode",
+                  "on_error", "kind", "gate_script", "gate_language", "run_condition"):
         if field in data:
             setattr(task, field, data[field])
     if "order" in data:
@@ -293,13 +362,24 @@ def update_task(product_id: str, pipeline_id: str, stage_id: str, task_id: str):
         task.is_required = bool(data["is_required"])
     if "task_type" in data:
         task.task_type = data["task_type"] or None
+    if "approval_approvers" in data:
+        val = data["approval_approvers"]
+        task.approval_approvers = _json.dumps(val) if isinstance(val, list) else (val or "[]")
+    if "approval_required_count" in data:
+        task.approval_required_count = int(data["approval_required_count"])
+    if "approval_timeout" in data:
+        task.approval_timeout = int(data["approval_timeout"])
     db.session.commit()
     return jsonify(task.to_dict())
 
 
 @pipelines_bp.delete("/<pipeline_id>/stages/<stage_id>/tasks/<task_id>")
 def delete_task(product_id: str, pipeline_id: str, stage_id: str, task_id: str):
-    """Delete a task from a stage."""
+    """Delete a task. Requires tasks:delete."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "tasks:delete")
+    if err:
+        return err
     Stage.query.filter_by(id=stage_id, pipeline_id=pipeline_id).first_or_404()
     task = Task.query.filter_by(id=task_id, stage_id=stage_id).first_or_404()
     db.session.delete(task)

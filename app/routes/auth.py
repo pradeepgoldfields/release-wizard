@@ -203,7 +203,6 @@ def _issue_token(user: User) -> str:
     payload = {
         "sub": user.id,
         "usr": user.username,
-        "per": user.persona,
         "iat": now,
         "exp": now + timedelta(hours=expiry_hours),
     }
@@ -289,7 +288,6 @@ def _try_ldap_login(username: str, password: str) -> User | None:
             user = User(
                 id=resource_id("usr"),
                 username=username,
-                persona="ReadOnly",
                 is_active=True,
             )
             db.session.add(user)
@@ -312,20 +310,29 @@ def _try_ldap_login(username: str, password: str) -> User | None:
 
 
 def ensure_admin_user(app) -> None:
-    """Create the default admin user on first boot if no users exist."""
+    """Create the default admin user on first boot if no users exist.
+
+    The admin user is marked ``is_builtin=True`` so it cannot be deleted via the API.
+    If the user already exists (e.g. from a previous install), mark it as built-in
+    on the next startup so the protection applies retroactively.
+    """
     with app.app_context():
-        if User.query.count() > 0:
+        existing = User.query.filter_by(username="admin").first()
+        if existing:
+            if not existing.is_builtin:
+                existing.is_builtin = True
+                db.session.commit()
             return
         password = "admin"
-        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
         user = User(
             id=resource_id("usr"),
             username="admin",
             email="admin@conduit.local",
             display_name="Administrator",
             password_hash=hashed,
-            persona="PlatformAdmin",
             is_active=True,
+            is_builtin=True,
         )
         db.session.add(user)
         db.session.commit()

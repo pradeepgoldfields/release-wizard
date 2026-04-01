@@ -24,8 +24,7 @@ user_groups = db.Table(
 class User(db.Model):
     """A platform user, optionally synced from an LDAP directory.
 
-    The ``persona`` field assigns a default role template applied at creation.
-    Explicit RoleBindings always take precedence over the persona default.
+    Access is governed entirely by RoleBindings — there is no persona layer.
     """
 
     __tablename__ = "users"
@@ -36,8 +35,8 @@ class User(db.Model):
     display_name = db.Column(db.String(256))
     password_hash = db.Column(db.String(256))  # bcrypt hash; null = LDAP-only user
     ldap_dn = db.Column(db.String(512))
-    persona = db.Column(db.String(64), default="ReadOnly")
     is_active = db.Column(db.Boolean, default=True)
+    is_builtin = db.Column(db.Boolean, default=False, nullable=False)  # protected system users
     last_login = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(UTC))
 
@@ -47,7 +46,7 @@ class User(db.Model):
     )
 
     def __repr__(self) -> str:
-        return f"<User id={self.id!r} username={self.username!r} persona={self.persona!r}>"
+        return f"<User id={self.id!r} username={self.username!r}>"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-safe dictionary (no credentials)."""
@@ -56,8 +55,8 @@ class User(db.Model):
             "username": self.username,
             "email": self.email,
             "display_name": self.display_name,
-            "persona": self.persona,
             "is_active": self.is_active,
+            "is_builtin": bool(self.is_builtin),
             "last_login": self.last_login.isoformat() if self.last_login else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
@@ -108,6 +107,7 @@ class Role(db.Model):
     name = db.Column(db.String(128), unique=True, nullable=False)
     permissions = db.Column(db.Text, nullable=False)
     description = db.Column(db.Text)
+    is_builtin = db.Column(db.Boolean, default=False, nullable=False)
 
     role_bindings = db.relationship(
         "RoleBinding", back_populates="role", cascade="all, delete-orphan"
@@ -128,6 +128,7 @@ class Role(db.Model):
             "name": self.name,
             "permissions": self.permission_list,
             "description": self.description,
+            "is_builtin": bool(self.is_builtin),
         }
 
 

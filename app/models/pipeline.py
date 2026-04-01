@@ -36,6 +36,15 @@ class Stage(db.Model):
     accent_color = db.Column(db.String(64))  # user-chosen hex or gradient stop, e.g. "#3b82f6"
     execution_mode = db.Column(db.String(16), default="sequential")  # sequential | parallel
 
+    # ── Gates ─────────────────────────────────────────────────────────────────
+    # JSON: {"enabled": true, "language": "bash", "script": "...", "timeout": 60}
+    entry_gate = db.Column(db.Text, default="{}")
+    exit_gate = db.Column(db.Text, default="{}")
+
+    # ── Run condition ─────────────────────────────────────────────────────────
+    # "always" | "on_success" | "on_failure" | "on_warning"
+    run_condition = db.Column(db.String(32), default="always")
+
     pipeline = db.relationship("Pipeline", back_populates="stages")
     tasks = db.relationship(
         "Task", back_populates="stage", cascade="all, delete-orphan", order_by="Task.order"
@@ -65,6 +74,9 @@ class Stage(db.Model):
             "is_protected": self.is_protected,
             "accent_color": self.accent_color or None,
             "execution_mode": self.execution_mode or "sequential",
+            "entry_gate": json.loads(self.entry_gate or "{}"),
+            "exit_gate": json.loads(self.exit_gate or "{}"),
+            "run_condition": self.run_condition or "always",
         }
         if include_tasks:
             data["tasks"] = [t.to_dict() for t in self.tasks]

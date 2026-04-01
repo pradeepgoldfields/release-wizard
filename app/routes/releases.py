@@ -10,8 +10,8 @@ from flask import Blueprint, jsonify, request, send_file
 from app.extensions import db
 from app.models.application import ApplicationArtifact
 from app.models.pipeline import Pipeline
-from app.models.product import Product
 from app.models.release import Release, ReleaseApplicationGroup
+from app.routes._authz import current_user_id, require_product_access
 from app.services.audit_service import build_release_audit_report
 from app.services.id_service import resource_id
 from app.services.pdf_service import export_audit_report_pdf
@@ -22,8 +22,11 @@ releases_bp = Blueprint("releases", __name__, url_prefix="/api/v1/products/<prod
 
 @releases_bp.get("")
 def list_releases(product_id: str):
-    """Return all releases for a product, newest first."""
-    db.get_or_404(Product, product_id)
+    """Return all releases for a product. Requires releases:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:view")
+    if err:
+        return err
     releases = (
         Release.query.filter_by(product_id=product_id).order_by(Release.created_at.desc()).all()
     )
@@ -32,12 +35,11 @@ def list_releases(product_id: str):
 
 @releases_bp.post("")
 def create_release_endpoint(product_id: str):
-    """Create a new release under a product.
-
-    Required body: ``name``
-    Optional: ``version``, ``description``, ``created_by``
-    """
-    db.get_or_404(Product, product_id)
+    """Create a new release. Requires releases:create."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:create")
+    if err:
+        return err
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -54,14 +56,22 @@ def create_release_endpoint(product_id: str):
 
 @releases_bp.get("/<release_id>")
 def get_release(product_id: str, release_id: str):
-    """Return a single release with its attached pipelines."""
+    """Return a single release. Requires releases:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:view")
+    if err:
+        return err
     release = Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
     return jsonify(release.to_dict(include_pipelines=True))
 
 
 @releases_bp.put("/<release_id>")
 def update_release(product_id: str, release_id: str):
-    """Update a release's name, version, or description."""
+    """Update a release. Requires releases:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:edit")
+    if err:
+        return err
     release = Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
     data = request.get_json(silent=True) or {}
     if "name" in data:
@@ -76,7 +86,11 @@ def update_release(product_id: str, release_id: str):
 
 @releases_bp.delete("/<release_id>")
 def delete_release(product_id: str, release_id: str):
-    """Permanently delete a release."""
+    """Delete a release. Requires releases:delete."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:delete")
+    if err:
+        return err
     release = Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
     db.session.delete(release)
     db.session.commit()
@@ -88,23 +102,21 @@ def delete_release(product_id: str, release_id: str):
 
 @releases_bp.post("/<release_id>/pipelines")
 def attach_pipeline(product_id: str, release_id: str):
-    """Attach a pipeline to a release, subject to compliance admission rules.
-
-    Required body: ``pipeline_id``
-    Optional: ``requested_by``
-    """
+    """Attach a pipeline to a release. Requires releases:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:edit")
+    if err:
+        return err
     data = request.get_json(silent=True) or {}
     pipeline_id = (data.get("pipeline_id") or "").strip()
     if not pipeline_id:
         return jsonify({"error": "pipeline_id is required"}), 400
-
     result = attach_pipeline_to_release(
         product_id=product_id,
         release_id=release_id,
         pipeline_id=pipeline_id,
         requested_by=data.get("requested_by", "unknown"),
     )
-
     if not result["allowed"]:
         return jsonify(
             {
@@ -112,19 +124,16 @@ def attach_pipeline(product_id: str, release_id: str):
                 "violations": result["violations"],
             }
         ), 422
-
-    return jsonify(
-        {
-            "release_id": release_id,
-            "pipeline_id": pipeline_id,
-            "admission": "passed",
-        }
-    ), 200
+    return jsonify({"release_id": release_id, "pipeline_id": pipeline_id, "admission": "passed"}), 200
 
 
 @releases_bp.delete("/<release_id>/pipelines/<pipeline_id>")
 def detach_pipeline(product_id: str, release_id: str, pipeline_id: str):
-    """Remove a pipeline from a release."""
+    """Remove a pipeline from a release. Requires releases:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:edit")
+    if err:
+        return err
     release = Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
     pipeline = db.get_or_404(Pipeline, pipeline_id)
     if pipeline in release.pipelines:
@@ -138,18 +147,22 @@ def detach_pipeline(product_id: str, release_id: str, pipeline_id: str):
 
 @releases_bp.get("/<release_id>/application-groups")
 def list_application_groups(product_id: str, release_id: str):
-    """Return all application groups attached to a release."""
+    """Return application groups for a release. Requires releases:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:view")
+    if err:
+        return err
     release = Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
     return jsonify([g.to_dict() for g in release.application_groups])
 
 
 @releases_bp.post("/<release_id>/application-groups")
 def add_application_group(product_id: str, release_id: str):
-    """Attach an application group to a release with selected pipelines.
-
-    Required body: ``application_id``, ``pipeline_ids`` (list)
-    Optional: ``execution_mode`` (sequential|parallel), ``order``
-    """
+    """Attach an application group to a release. Requires releases:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:edit")
+    if err:
+        return err
     release = Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
     data = request.get_json(silent=True) or {}
     application_id = (data.get("application_id") or "").strip()
@@ -158,11 +171,9 @@ def add_application_group(product_id: str, release_id: str):
         return jsonify({"error": "application_id is required"}), 400
     if not isinstance(pipeline_ids, list):
         return jsonify({"error": "pipeline_ids must be a list"}), 400
-    # Validate application belongs to this product
     app = ApplicationArtifact.query.filter_by(
         id=application_id, product_id=product_id
     ).first_or_404()
-    # Remove existing group for this app in this release (replace)
     existing = ReleaseApplicationGroup.query.filter_by(
         release_id=release_id, application_id=application_id
     ).first()
@@ -182,8 +193,12 @@ def add_application_group(product_id: str, release_id: str):
 
 
 @releases_bp.delete("/<release_id>/application-groups/<group_id>")
-def remove_application_group(_product_id: str, release_id: str, group_id: str):
-    """Remove an application group from a release."""
+def remove_application_group(product_id: str, release_id: str, group_id: str):
+    """Remove an application group. Requires releases:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:edit")
+    if err:
+        return err
     group = ReleaseApplicationGroup.query.filter_by(
         id=group_id, release_id=release_id
     ).first_or_404()
@@ -197,7 +212,11 @@ def remove_application_group(_product_id: str, release_id: str, group_id: str):
 
 @releases_bp.get("/<release_id>/audit")
 def get_audit_report(product_id: str, release_id: str):
-    """Return the structured audit report for a release as JSON."""
+    """Return the audit report as JSON. Requires releases:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:view")
+    if err:
+        return err
     Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
     report = build_release_audit_report(release_id)
     return jsonify(report)
@@ -205,11 +224,11 @@ def get_audit_report(product_id: str, release_id: str):
 
 @releases_bp.get("/<release_id>/audit/export")
 def export_audit_pdf(product_id: str, release_id: str):
-    """Generate and stream the audit report as a PDF file.
-
-    Requires WeasyPrint system libraries (available inside the UBI container).
-    Returns 501 with a helpful message if libraries are absent (e.g. on Windows dev).
-    """
+    """Stream the audit report as PDF. Requires releases:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "releases:view")
+    if err:
+        return err
     Release.query.filter_by(id=release_id, product_id=product_id).first_or_404()
     report = build_release_audit_report(release_id)
     try:

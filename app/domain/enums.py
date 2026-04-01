@@ -55,19 +55,3 @@ class AuditDecision(StrEnum):
     ALLOW = "ALLOW"
     DENY = "DENY"
 
-
-class UserPersona(StrEnum):
-    """
-    Pre-defined user personas that map to a default set of role bindings.
-    Personas are a convenience layer on top of RBAC — they do not replace
-    explicit role bindings but pre-populate them when a user is created.
-    """
-
-    PLATFORM_ADMIN = "PlatformAdmin"
-    PRODUCT_OWNER = "ProductOwner"
-    RELEASE_MANAGER = "ReleaseManager"
-    PIPELINE_AUTHOR = "PipelineAuthor"
-    DEPLOYER = "Deployer"
-    APPROVER = "Approver"
-    COMPLIANCE_ADMIN = "ComplianceAdmin"
-    READ_ONLY = "ReadOnly"

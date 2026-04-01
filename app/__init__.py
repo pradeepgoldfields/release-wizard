@@ -49,6 +49,8 @@ def create_app(config=None) -> Flask:
     from app.models import (  # noqa: F401
         AgentPool,
         ApplicationArtifact,
+        ApprovalDecision,
+        FeatureToggle,
         AuditEvent,
         ComplianceRule,
         Environment,
@@ -75,6 +77,7 @@ def create_app(config=None) -> Flask:
         WebhookDelivery,
     )
     from app.routes.agents import agents_bp
+    from app.routes.feature_toggles import feature_toggles_bp
     from app.routes.auth import _current_user, auth_bp, ensure_admin_user
     from app.routes.chat import chat_bp
     from app.routes.compliance import compliance_bp
@@ -119,6 +122,7 @@ def create_app(config=None) -> Flask:
     app.register_blueprint(yaml_bp)
     app.register_blueprint(plugins_bp)
     app.register_blueprint(vault_bp)
+    app.register_blueprint(feature_toggles_bp)
     app.register_blueprint(webhook_bp)
     app.register_blueprint(swagger_bp)
     app.register_blueprint(openapi_bp)
@@ -166,29 +170,27 @@ def create_app(config=None) -> Flask:
         "/metrics",
     }
 
-    if not app.config.get("TESTING"):
+    @app.before_request
+    def require_auth():
+        from flask import jsonify
 
-        @app.before_request
-        def require_auth():
-            from flask import jsonify
-
-            path = request.path
-            # Allow public paths and anything under the Swagger/docs UI
-            if (
-                path in _PUBLIC
-                or path.startswith("/api/v1/docs")
-                or path.startswith("/static")
-                or path.startswith("/api/v1/webhooks/")
-                and path.endswith("/trigger")
-            ):
-                return None
-            if not path.startswith("/api/v1"):
-                return None  # serve HTML pages unauthenticated
-            user = _current_user()
-            if not user:
-                return jsonify({"error": "Authentication required", "code": "UNAUTHENTICATED"}), 401
-            g.current_user = user
+        path = request.path
+        # Allow public paths and anything under the Swagger/docs UI
+        if (
+            path in _PUBLIC
+            or path.startswith("/api/v1/docs")
+            or path.startswith("/static")
+            or path.startswith("/api/v1/webhooks/")
+            and path.endswith("/trigger")
+        ):
             return None
+        if not path.startswith("/api/v1"):
+            return None  # serve HTML pages unauthenticated
+        user = _current_user()
+        if not user:
+            return jsonify({"error": "Authentication required", "code": "UNAUTHENTICATED"}), 401
+        g.current_user = user
+        return None
 
     # Seed default admin on first boot (skip during testing)
     if not app.config.get("TESTING"):
@@ -196,6 +198,7 @@ def create_app(config=None) -> Flask:
             db.create_all()
             _apply_schema_migrations()
             ensure_admin_user(app)
+            _ensure_builtin_roles()
             _load_db_settings(app)
 
     return app
@@ -236,3 +239,219 @@ def _apply_schema_migrations() -> None:
             )
             conn.commit()
         log.info("schema_migration", extra={"migration": "stages.execution_mode added"})
+
+    # ── Migration 002: roles.is_builtin ──────────────────────────────────────
+    role_cols = {c["name"] for c in inspector.get_columns("roles")}
+    if "is_builtin" not in role_cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE roles ADD COLUMN is_builtin BOOLEAN DEFAULT 0 NOT NULL"))
+            conn.commit()
+        log.info("schema_migration", extra={"migration": "roles.is_builtin added"})
+
+    # ── Migration 003: users.is_builtin ──────────────────────────────────────
+    user_cols = {c["name"] for c in inspector.get_columns("users")}
+    if "is_builtin" not in user_cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN is_builtin BOOLEAN DEFAULT 0 NOT NULL"))
+            conn.commit()
+        log.info("schema_migration", extra={"migration": "users.is_builtin added"})
+
+    # ── Migration 004: tasks.execution_mode ──────────────────────────────────
+    task_cols = {c["name"] for c in inspector.get_columns("tasks")}
+    if "execution_mode" not in task_cols:
+        with engine.connect() as conn:
+            conn.execute(
+                text("ALTER TABLE tasks ADD COLUMN execution_mode VARCHAR(32) DEFAULT 'sequential'")
+            )
+            conn.commit()
+        log.info("schema_migration", extra={"migration": "tasks.execution_mode added"})
+
+    # ── Migration 006: tasks — kind, gate, approval, run_condition ───────────
+    task_cols = {c["name"] for c in inspector.get_columns("tasks")}
+    new_task_cols = {
+        "kind":                    "VARCHAR(32) DEFAULT 'script'",
+        "gate_script":             "TEXT DEFAULT ''",
+        "gate_language":           "VARCHAR(32) DEFAULT 'bash'",
+        "approval_approvers":      "TEXT DEFAULT '[]'",
+        "approval_required_count": "INTEGER DEFAULT 0",
+        "approval_timeout":        "INTEGER DEFAULT 0",
+        "run_condition":           "VARCHAR(32) DEFAULT 'always'",
+    }
+    for col, col_def in new_task_cols.items():
+        if col not in task_cols:
+            with engine.connect() as conn:
+                conn.execute(text(f"ALTER TABLE tasks ADD COLUMN {col} {col_def}"))
+                conn.commit()
+            log.info("schema_migration", extra={"migration": f"tasks.{col} added"})
+
+    # ── Migration 007: stages — entry_gate, exit_gate, run_condition ─────────
+    stage_cols_all = {c["name"] for c in inspector.get_columns("stages")}
+    new_stage_cols = {
+        "entry_gate":    "TEXT DEFAULT '{}'",
+        "exit_gate":     "TEXT DEFAULT '{}'",
+        "run_condition": "VARCHAR(32) DEFAULT 'always'",
+    }
+    for col, col_def in new_stage_cols.items():
+        if col not in stage_cols_all:
+            with engine.connect() as conn:
+                conn.execute(text(f"ALTER TABLE stages ADD COLUMN {col} {col_def}"))
+                conn.commit()
+            log.info("schema_migration", extra={"migration": f"stages.{col} added"})
+
+    # ── Migration 008: approval_decisions table ───────────────────────────────
+    existing_tables = set(inspector.get_table_names())
+    if "approval_decisions" not in existing_tables:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE approval_decisions (
+                    id VARCHAR(64) PRIMARY KEY,
+                    task_run_id VARCHAR(64) NOT NULL REFERENCES task_runs(id),
+                    user_id VARCHAR(64) NOT NULL REFERENCES users(id),
+                    decision VARCHAR(16) NOT NULL,
+                    comment TEXT,
+                    decided_at DATETIME
+                )
+            """))
+            conn.commit()
+        log.info("schema_migration", extra={"migration": "approval_decisions table created"})
+
+    # ── Migration 009: feature_toggles table ─────────────────────────────────
+    existing_tables = set(inspector.get_table_names())
+    if "feature_toggles" not in existing_tables:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE feature_toggles (
+                    id VARCHAR(64) PRIMARY KEY,
+                    key VARCHAR(128) UNIQUE NOT NULL,
+                    label VARCHAR(256) NOT NULL,
+                    description TEXT,
+                    category VARCHAR(64) DEFAULT 'general',
+                    enabled BOOLEAN DEFAULT 0 NOT NULL,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """))
+            conn.commit()
+        log.info("schema_migration", extra={"migration": "feature_toggles table created"})
+
+    # ── Migration 005: users.persona (orphaned — nulled out, not dropped) ────
+    # The persona column is no longer used by the application.  SQLite <3.35
+    # does not support DROP COLUMN, so we leave the column in place but clear
+    # any stale values so they don't cause confusion if someone inspects the DB.
+    user_cols_now = {c["name"] for c in inspector.get_columns("users")}
+    if "persona" in user_cols_now:
+        with engine.connect() as conn:
+            conn.execute(text("UPDATE users SET persona = NULL WHERE persona IS NOT NULL"))
+            conn.commit()
+        log.info("schema_migration", extra={"migration": "users.persona nulled (deprecated)"})
+
+
+def _ensure_builtin_roles() -> None:
+    """Upsert the two built-in roles on every startup.
+
+    This makes fresh installs work without running seed_data.py.
+    Existing roles are updated to reflect the current permission set.
+    """
+    from app.models.auth import Role  # noqa: PLC0415
+    from app.services.id_service import resource_id  # noqa: PLC0415
+
+    _ALL_PERMS = [
+        "products:view","products:create","products:edit","products:delete",
+        "applications:view","applications:create","applications:edit","applications:delete",
+        "pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:execute","pipelines:run",
+        "releases:view","releases:create","releases:edit","releases:delete","releases:execute","releases:approve",
+        "tasks:view","tasks:create","tasks:edit","tasks:delete","tasks:execute",
+        "stages:view","stages:create","stages:edit","stages:delete","stages:execute",
+        "environments:view","environments:create","environments:edit","environments:delete",
+        "templates:view","templates:create","templates:edit","templates:delete",
+        "webhooks:view","webhooks:create","webhooks:edit","webhooks:delete",
+        "plugins:view","plugins:install","plugins:configure","plugins:delete",
+        "agent-pools:view","agent-pools:create","agent-pools:edit","agent-pools:delete",
+        "vault:view","vault:create","vault:reveal","vault:delete",
+        "compliance:view","compliance:edit","compliance:approve",
+        "app-dictionary:view","app-dictionary:edit",
+        "monitoring:view","monitoring:configure",
+        "users:view","users:create","users:edit","users:delete",
+        "groups:view","groups:create","groups:edit","groups:delete",
+        "roles:view","roles:create","roles:edit","roles:delete",
+        "permissions:view","permissions:grant","permissions:revoke","permissions:change",
+        "global-vars:view","global-vars:edit",
+    ]
+
+    _PRODUCT_ADMIN_PERMS = [
+        "products:view","products:create","products:edit","products:delete",
+        "applications:view","applications:create","applications:edit","applications:delete",
+        "pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:execute","pipelines:run",
+        "releases:view","releases:create","releases:edit","releases:delete","releases:execute","releases:approve",
+        "tasks:view","tasks:create","tasks:edit","tasks:delete","tasks:execute",
+        "stages:view","stages:create","stages:edit","stages:delete","stages:execute",
+        "environments:view","templates:view","templates:create","templates:edit",
+        "webhooks:view","webhooks:create","webhooks:edit",
+        "vault:view","compliance:view","compliance:edit",
+        "monitoring:view","global-vars:view",
+        "permissions:view","permissions:grant","permissions:revoke","permissions:change",
+        "users:view","groups:view","roles:view","roles:create","roles:edit",
+    ]
+
+    builtin_specs = [
+        {
+            "name": "system-administrator",
+            "permissions": _ALL_PERMS,
+            "description": "Built-in system administrator — full access to all resources and features",
+        },
+        {
+            "name": "product-admin",
+            "permissions": _PRODUCT_ADMIN_PERMS,
+            "description": "Built-in product super-user — full control over all product resources and member access",
+        },
+    ]
+
+    for spec in builtin_specs:
+        role = Role.query.filter_by(name=spec["name"]).first()
+        if role:
+            role.permissions = ",".join(spec["permissions"])
+            role.is_builtin = True
+        else:
+            role = Role(
+                id=resource_id("role"),
+                name=spec["name"],
+                permissions=",".join(spec["permissions"]),
+                description=spec["description"],
+                is_builtin=True,
+            )
+            db.session.add(role)
+
+    try:
+        db.session.commit()
+        log.info("builtin_roles_ensured")
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        log.warning("builtin_roles_upsert_failed")
+        return
+
+    # Ensure the built-in admin user has a system-administrator binding so that
+    # the ISO 27001 compliance check (A.5.15) can detect RBAC is active.
+    from app.models.auth import RoleBinding, User  # noqa: PLC0415
+
+    admin_user = User.query.filter_by(username="admin").first()
+    sys_admin_role = Role.query.filter_by(name="system-administrator").first()
+    if admin_user and sys_admin_role:
+        existing_binding = RoleBinding.query.filter_by(
+            user_id=admin_user.id,
+            role_id=sys_admin_role.id,
+            scope="organization",
+        ).first()
+        if not existing_binding:
+            binding = RoleBinding(
+                id=resource_id("rb"),
+                role_id=sys_admin_role.id,
+                user_id=admin_user.id,
+                scope="organization",
+            )
+            db.session.add(binding)
+            try:
+                db.session.commit()
+                log.info("admin_system_binding_created")
+            except Exception:  # noqa: BLE001
+                db.session.rollback()
+                log.warning("admin_system_binding_failed")

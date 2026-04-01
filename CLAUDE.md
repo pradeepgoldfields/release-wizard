@@ -80,6 +80,44 @@ python wsgi.py                      # dev server (Flask built-in)
 flask --app wsgi:app run --port 8080 --debug
 ```
 
+## Code Change Rules (Required for Every Change)
+
+Every code change must satisfy all four of the following, in addition to the dev workflow below:
+
+### 1. Unit tests are mandatory
+
+Every changed or new function/endpoint must have a corresponding unit test in `tests/unit/`. Tests must:
+- Cover the happy path and at least one error/edge case.
+- Not rely on external services — mock or stub where needed.
+- Pass without network access.
+
+Run after every change:
+```bash
+source venv/Scripts/activate
+pytest tests/unit/
+```
+
+### 2. Technical documentation must stay in sync
+
+After every code change, update `docs/technical-documentation.md`:
+- Add new endpoints to the relevant API Reference section (§5.x).
+- Update the Data Models section (§4) if a model is added or changed.
+- Update the Services section (§8) if service logic changes.
+- Update the Authentication & Authorization section (§6) if permissions or access rules change.
+
+### 3. Seed data must reflect the current model
+
+- If a new resource type is added, add representative seed records in `scripts/seed_data.py`.
+- If a field is added to an existing model, update the seed records for that model.
+- If a resource type is removed, remove its seed records.
+- After seeding, verify the app starts and the new resource is visible in the UI.
+
+### 4. Permission catalogue must be updated
+
+If a new resource type is added, add its permission group to `PERMISSION_CATALOG` in `app/services/authz_service.py`. The UI picks this up automatically at login — no JS changes needed.
+
+---
+
 ## Dev Change Workflow (Required After Every Code Change)
 
 After **every** code change you must: free the port, restart the server, and verify it is up.

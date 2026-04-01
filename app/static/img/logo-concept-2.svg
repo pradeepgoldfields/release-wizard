@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" width="240" height="60">
+  <defs>
+    <linearGradient id="tube-h" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#0ea5e9"/>
+      <stop offset="100%" style="stop-color:#6366f1"/>
+    </linearGradient>
+    <linearGradient id="tube-top" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#7dd3fc" stop-opacity="0.6"/>
+      <stop offset="100%" style="stop-color:#0ea5e9" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Horizontal pipe / tube — the conduit itself -->
+  <!-- Pipe body -->
+  <rect x="4" y="22" width="56" height="16" rx="8" fill="#0f172a"/>
+  <rect x="4" y="22" width="56" height="16" rx="8" fill="none" stroke="url(#tube-h)" stroke-width="2"/>
+  <!-- Pipe top sheen -->
+  <rect x="8" y="24" width="48" height="5" rx="2.5" fill="url(#tube-top)"/>
+
+  <!-- Particles flowing through the pipe (left to right) -->
+  <circle cx="16" cy="30" r="2.5" fill="#38bdf8" opacity="0.9"/>
+  <circle cx="28" cy="30" r="2.5" fill="#818cf8" opacity="0.9"/>
+  <circle cx="40" cy="30" r="2.5" fill="#38bdf8" opacity="0.9"/>
+  <!-- Motion trail -->
+  <line x1="10" y1="30" x2="50" y2="30" stroke="url(#tube-h)" stroke-width="1" opacity="0.3" stroke-dasharray="3 4"/>
+
+  <!-- Left entry arrow -->
+  <path d="M0,27 L5,30 L0,33" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Right exit arrow -->
+  <path d="M59,27 L64,30 L59,33" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Wordmark -->
+  <text x="76" y="37" font-family="'Segoe UI', system-ui, sans-serif" font-weight="700" font-size="26"
+        fill="#0f172a" letter-spacing="-0.5">conduit</text>
+</svg>

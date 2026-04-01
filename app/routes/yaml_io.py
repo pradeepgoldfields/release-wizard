@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json as _json
+
 import yaml
 from flask import Blueprint, Response, jsonify, request
 
@@ -18,6 +20,55 @@ yaml_bp = Blueprint("yaml_io", __name__, url_prefix="/api/v1")
 
 def _yaml_response(data: dict) -> Response:
     return Response(yaml.dump(data, allow_unicode=True, sort_keys=False), mimetype="text/yaml")
+
+
+def _task_dict(t: Task) -> dict:
+    """Serialize a Task to a full YAML-friendly dict."""
+    base: dict = {
+        "name": t.name,
+        "description": t.description or "",
+        "order": t.order,
+        "kind": t.kind or "script",
+        "task_type": t.task_type or "",
+        "run_language": t.run_language or "bash",
+        "execution_mode": t.execution_mode or "sequential",
+        "on_error": t.on_error or "fail",
+        "timeout": t.timeout or 300,
+        "is_required": bool(t.is_required),
+        "run_condition": t.run_condition or "always",
+        "run_code": t.run_code or "",
+    }
+    if t.kind == "gate":
+        base["gate_language"] = t.gate_language or "bash"
+        base["gate_script"] = t.gate_script or ""
+    elif t.kind == "approval":
+        base["approval_approvers"] = _json.loads(t.approval_approvers or "[]")
+        base["approval_required_count"] = t.approval_required_count or 0
+        base["approval_timeout"] = t.approval_timeout or 0
+    return base
+
+
+def _stage_dict(s: Stage) -> dict:
+    """Serialize a Stage to a full YAML-friendly dict."""
+    return {
+        "name": s.name,
+        "order": s.order,
+        "run_language": s.run_language or "bash",
+        "container_image": s.container_image or "",
+        "execution_mode": s.execution_mode or "sequential",
+        "run_condition": s.run_condition or "always",
+        "is_protected": bool(s.is_protected),
+        "accent_color": s.accent_color or "",
+        "sandbox": {
+            "cpu": s.sandbox_cpu or "500m",
+            "memory": s.sandbox_memory or "256Mi",
+            "timeout": s.sandbox_timeout or 60,
+            "network": bool(s.sandbox_network),
+        },
+        "entry_gate": _json.loads(s.entry_gate or "{}"),
+        "exit_gate": _json.loads(s.exit_gate or "{}"),
+        "tasks": [_task_dict(t) for t in s.tasks],
+    }
 
 
 # ── Product export ──────────────────────────────────────────────────────────
@@ -52,24 +103,7 @@ def export_product(product_id: str):
                     "kind": pl.kind,
                     "git_repo": pl.git_repo,
                     "git_branch": pl.git_branch,
-                    "stages": [
-                        {
-                            "name": s.name,
-                            "order": s.order,
-                            "tasks": [
-                                {
-                                    "name": t.name,
-                                    "run_language": t.run_language,
-                                    "execution_mode": t.execution_mode,
-                                    "on_error": t.on_error,
-                                    "timeout": t.timeout,
-                                    "run_code": t.run_code,
-                                }
-                                for t in s.tasks
-                            ],
-                        }
-                        for s in pl.stages
-                    ],
+                    "stages": [_stage_dict(s) for s in pl.stages],
                 }
                 for pl in pipelines
             ],
@@ -125,24 +159,7 @@ def export_pipeline(product_id: str, pipeline_id: str):
             "kind": pipeline.kind,
             "git_repo": pipeline.git_repo,
             "git_branch": pipeline.git_branch,
-            "stages": [
-                {
-                    "name": s.name,
-                    "order": s.order,
-                    "tasks": [
-                        {
-                            "name": t.name,
-                            "run_language": t.run_language,
-                            "execution_mode": t.execution_mode,
-                            "on_error": t.on_error,
-                            "timeout": t.timeout,
-                            "run_code": t.run_code,
-                        }
-                        for t in s.tasks
-                    ],
-                }
-                for s in pipeline.stages
-            ],
+            "stages": [_stage_dict(s) for s in pipeline.stages],
         },
     }
     return _yaml_response(data)
@@ -224,6 +241,57 @@ def import_environments():
     return jsonify({"created": created, "count": len(created)}), 201
 
 
+def _apply_task_spec(task: Task, t_spec: dict, fallback_order: int) -> None:
+    """Apply a parsed task YAML spec onto a Task ORM object (does not flush/commit)."""
+    task.order = t_spec.get("order", fallback_order)
+    task.description = t_spec.get("description", task.description) or None
+    task.kind = t_spec.get("kind", task.kind or "script")
+    task.task_type = t_spec.get("task_type", task.task_type) or None
+    task.run_language = t_spec.get("run_language", task.run_language or "bash")
+    task.run_code = t_spec.get("run_code", task.run_code) or ""
+    task.execution_mode = t_spec.get("execution_mode", task.execution_mode or "sequential")
+    task.on_error = t_spec.get("on_error", task.on_error or "fail")
+    task.timeout = int(t_spec.get("timeout", task.timeout or 300))
+    task.is_required = bool(t_spec.get("is_required", task.is_required if task.is_required is not None else True))
+    task.run_condition = t_spec.get("run_condition", task.run_condition or "always")
+    # Gate fields
+    task.gate_language = t_spec.get("gate_language", task.gate_language or "bash")
+    task.gate_script = t_spec.get("gate_script", task.gate_script) or ""
+    # Approval fields
+    if "approval_approvers" in t_spec:
+        raw = t_spec["approval_approvers"]
+        task.approval_approvers = _json.dumps(raw) if isinstance(raw, list) else (raw or "[]")
+    task.approval_required_count = int(t_spec.get("approval_required_count", task.approval_required_count or 0))
+    task.approval_timeout = int(t_spec.get("approval_timeout", task.approval_timeout or 0))
+
+
+def _apply_stage_spec(stage: Stage, s_spec: dict) -> None:
+    """Apply a parsed stage YAML spec onto a Stage ORM object (does not flush/commit)."""
+    stage.order = int(s_spec.get("order", stage.order or 0))
+    stage.run_language = s_spec.get("run_language", stage.run_language or "bash")
+    stage.container_image = s_spec.get("container_image", stage.container_image) or None
+    stage.execution_mode = s_spec.get("execution_mode", stage.execution_mode or "sequential")
+    stage.run_condition = s_spec.get("run_condition", stage.run_condition or "always")
+    if "is_protected" in s_spec:
+        stage.is_protected = bool(s_spec["is_protected"])
+    if "accent_color" in s_spec:
+        stage.accent_color = s_spec["accent_color"] or None
+    # Sandbox sub-object
+    sandbox = s_spec.get("sandbox")
+    if isinstance(sandbox, dict):
+        stage.sandbox_cpu = sandbox.get("cpu", stage.sandbox_cpu or "500m")
+        stage.sandbox_memory = sandbox.get("memory", stage.sandbox_memory or "256Mi")
+        stage.sandbox_timeout = int(sandbox.get("timeout", stage.sandbox_timeout or 60))
+        stage.sandbox_network = bool(sandbox.get("network", stage.sandbox_network or False))
+    # Gates
+    if "entry_gate" in s_spec:
+        raw = s_spec["entry_gate"]
+        stage.entry_gate = _json.dumps(raw) if isinstance(raw, dict) else (raw or "{}")
+    if "exit_gate" in s_spec:
+        raw = s_spec["exit_gate"]
+        stage.exit_gate = _json.dumps(raw) if isinstance(raw, dict) else (raw or "{}")
+
+
 @yaml_bp.post("/products/<product_id>/pipelines/<pipeline_id>/import")
 def import_pipeline(product_id: str, pipeline_id: str):
     """Replace a pipeline's stages + tasks from YAML (upsert by name).
@@ -254,15 +322,12 @@ def import_pipeline(product_id: str, pipeline_id: str):
         if not stage:
             stage = Stage(id=resource_id("stg"), pipeline_id=pipeline_id, name=s_name)
             db.session.add(stage)
-        stage.order = int(s_spec.get("order", stage.order or 0))
-        stage.run_language = s_spec.get("run_language", stage.run_language or "bash")
-        stage.execution_mode = s_spec.get("execution_mode", stage.execution_mode or "sequential")
+        _apply_stage_spec(stage, s_spec)
         db.session.flush()
         kept_stage_ids.append(stage.id)
 
-        task_specs = s_spec.get("tasks", [])
         kept_task_ids = []
-        for t_order, t_spec in enumerate(task_specs, start=1):
+        for t_order, t_spec in enumerate(s_spec.get("tasks", []), start=1):
             t_name = (t_spec.get("name") or "").strip()
             if not t_name:
                 continue
@@ -270,12 +335,7 @@ def import_pipeline(product_id: str, pipeline_id: str):
             if not task:
                 task = Task(id=resource_id("task"), stage_id=stage.id, name=t_name)
                 db.session.add(task)
-            task.order = t_spec.get("order", t_order)
-            task.run_language = t_spec.get("run_language", task.run_language or "bash")
-            task.run_code = t_spec.get("run_code", task.run_code)
-            task.on_error = t_spec.get("on_error", task.on_error or "fail")
-            task.timeout = int(t_spec.get("timeout", task.timeout or 300))
-            task.execution_mode = t_spec.get("execution_mode", task.execution_mode or "sequential")
+            _apply_task_spec(task, t_spec, t_order)
             db.session.flush()
             kept_task_ids.append(task.id)
 
@@ -292,7 +352,7 @@ def import_pipeline(product_id: str, pipeline_id: str):
     ).delete(synchronize_session=False)
 
     db.session.commit()
-    updated = Pipeline.query.get(pipeline_id)
+    updated = db.session.get(Pipeline, pipeline_id)
     return jsonify(updated.to_dict(include_stages=True))
 
 
@@ -361,9 +421,7 @@ def git_pull_pipeline(product_id: str, pipeline_id: str):
         if not stage:
             stage = Stage(id=resource_id("stg"), pipeline_id=pipeline_id, name=s_name)
             db.session.add(stage)
-        stage.order = int(s_spec.get("order", stage.order or 0))
-        stage.run_language = s_spec.get("run_language", stage.run_language or "bash")
-        stage.execution_mode = s_spec.get("execution_mode", stage.execution_mode or "sequential")
+        _apply_stage_spec(stage, s_spec)
         db.session.flush()
         kept_stage_ids.append(stage.id)
         kept_task_ids = []
@@ -375,12 +433,7 @@ def git_pull_pipeline(product_id: str, pipeline_id: str):
             if not task:
                 task = Task(id=resource_id("task"), stage_id=stage.id, name=t_name)
                 db.session.add(task)
-            task.order = t_spec.get("order", t_order)
-            task.run_language = t_spec.get("run_language", task.run_language or "bash")
-            task.run_code = t_spec.get("run_code", task.run_code)
-            task.on_error = t_spec.get("on_error", task.on_error or "fail")
-            task.timeout = int(t_spec.get("timeout", task.timeout or 300))
-            task.execution_mode = t_spec.get("execution_mode", task.execution_mode or "sequential")
+            _apply_task_spec(task, t_spec, t_order)
             db.session.flush()
             kept_task_ids.append(task.id)
         Task.query.filter(
@@ -410,26 +463,6 @@ def git_push_pipeline(product_id: str, pipeline_id: str):
     pipeline = Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     data = request.get_json(silent=True) or {}
 
-    stages_data = [
-        {
-            "name": s.name,
-            "order": s.order,
-            "run_language": s.run_language,
-            "execution_mode": s.execution_mode or "sequential",
-            "tasks": [
-                {
-                    "name": t.name,
-                    "run_language": t.run_language,
-                    "execution_mode": t.execution_mode,
-                    "on_error": t.on_error,
-                    "timeout": t.timeout,
-                    "run_code": t.run_code,
-                }
-                for t in s.tasks
-            ],
-        }
-        for s in pipeline.stages
-    ]
     definition = {
         "apiVersion": "conduit/v1",
         "kind": "Pipeline",
@@ -438,7 +471,7 @@ def git_push_pipeline(product_id: str, pipeline_id: str):
             "kind": pipeline.kind,
             "git_repo": pipeline.git_repo,
             "git_branch": pipeline.git_branch,
-            "stages": stages_data,
+            "stages": [_stage_dict(s) for s in pipeline.stages],
         },
     }
     yaml_text = yaml.dump(definition, allow_unicode=True, sort_keys=False)

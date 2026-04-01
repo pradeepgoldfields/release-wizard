@@ -1,4 +1,5 @@
 from app.models.application import ApplicationArtifact
+from app.models.feature_toggle import FeatureToggle
 from app.models.auth import Group, Role, RoleBinding, User, user_groups
 from app.models.compliance import AuditEvent, ComplianceRule
 from app.models.environment import Environment, product_environments
@@ -11,7 +12,7 @@ from app.models.property import ParameterValue, Property
 from app.models.release import Release, ReleaseApplicationGroup, release_pipelines
 from app.models.run import PipelineRun, ReleaseRun, StageRun
 from app.models.setting import PlatformSetting
-from app.models.task import AgentPool, Task, TaskRun
+from app.models.task import AgentPool, ApprovalDecision, Task, TaskRun
 from app.models.vault import VaultSecret
 from app.models.webhook import Webhook, WebhookDelivery
 
@@ -26,6 +27,7 @@ __all__ = [
     "Stage",
     "Task",
     "TaskRun",
+    "ApprovalDecision",
     "AgentPool",
     "Release",
     "ReleaseApplicationGroup",
@@ -48,4 +50,5 @@ __all__ = [
     "WebhookDelivery",
     "Property",
     "ParameterValue",
+    "FeatureToggle",
 ]

@@ -29,7 +29,7 @@ COPY --from=builder /install /usr/local
 
 # Copy application source
 COPY app/ app/
-COPY wsgi.py .
+COPY wsgi.py gunicorn.conf.py ./
 
 # UBI / OpenShift: non-root user required
 # UID 1001 is the default non-root user in UBI images
@@ -37,11 +37,6 @@ USER 1001
 
 EXPOSE 8080
 
-# Use gunicorn for production; workers tuned for containerised single-pod use
-CMD ["gunicorn", "wsgi:app", \
-     "--bind", "0.0.0.0:8080", \
-     "--workers", "2", \
-     "--threads", "4", \
-     "--timeout", "60", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+# gunicorn.conf.py drives all worker/timeout/logging settings.
+# Individual values can be overridden at runtime via GUNICORN_* env vars.
+CMD ["gunicorn", "wsgi:app", "--config", "gunicorn.conf.py"]

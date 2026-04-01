@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" width="240" height="60">
+  <defs>
+    <linearGradient id="gate-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#38bdf8"/>
+      <stop offset="100%" style="stop-color:#818cf8"/>
+    </linearGradient>
+    <linearGradient id="flow-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#38bdf8" stop-opacity="0"/>
+      <stop offset="50%" style="stop-color:#818cf8"/>
+      <stop offset="100%" style="stop-color:#38bdf8" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Gateway / portal shape — diamond with rounded corners, flows pass through -->
+  <!-- Outer diamond ring -->
+  <path d="M32,4 L54,22 L54,38 L32,56 L10,38 L10,22 Z"
+        fill="none" stroke="url(#gate-grad)" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- Inner subtle fill -->
+  <path d="M32,4 L54,22 L54,38 L32,56 L10,22 L10,38 Z"
+        fill="url(#gate-grad)" opacity="0.06"/>
+
+  <!-- Horizontal flow line through the centre -->
+  <line x1="0" y1="30" x2="64" y2="30" stroke="url(#flow-grad)" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Flow dots: entering, inside, exiting -->
+  <circle cx="6"  cy="30" r="2.5" fill="#38bdf8" opacity="0.5"/>
+  <circle cx="32" cy="30" r="4"   fill="url(#gate-grad)"/>
+  <circle cx="32" cy="30" r="1.8" fill="white" opacity="0.9"/>
+  <circle cx="58" cy="30" r="2.5" fill="#818cf8" opacity="0.5"/>
+
+  <!-- Small tick marks: things passing through -->
+  <line x1="18" y1="26" x2="18" y2="34" stroke="#38bdf8" stroke-width="1.5" opacity="0.4"/>
+  <line x1="46" y1="26" x2="46" y2="34" stroke="#818cf8" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Wordmark -->
+  <text x="76" y="37" font-family="'Segoe UI', system-ui, sans-serif" font-weight="700" font-size="26"
+        fill="#0f172a" letter-spacing="-0.5">conduit</text>
+</svg>

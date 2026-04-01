@@ -1,6 +1,8 @@
-"""Swagger UI and OpenAPI spec endpoints."""
+"""Swagger UI, OpenAPI spec, and technical documentation endpoints."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template_string
 
@@ -56,6 +58,26 @@ swagger_bp = Blueprint("swagger", __name__, url_prefix="/api/v1/docs")
 def swagger_ui():
     """Serve the Swagger UI with auto-JWT injection."""
     return render_template_string(_SWAGGER_HTML)
+
+
+@openapi_bp.get("/technical-doc")
+def get_technical_doc():
+    """Return the technical documentation markdown as plain text."""
+    doc_path = Path(__file__).parent.parent.parent / "docs" / "technical-documentation.md"
+    try:
+        return doc_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/markdown; charset=utf-8"}
+    except FileNotFoundError:
+        return jsonify({"error": "Documentation file not found"}), 404
+
+
+@openapi_bp.get("/admin-guide")
+def get_admin_guide():
+    """Return the system administrator guide markdown as plain text."""
+    doc_path = Path(__file__).parent.parent.parent / "docs" / "admin-guide.md"
+    try:
+        return doc_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/markdown; charset=utf-8"}
+    except FileNotFoundError:
+        return jsonify({"error": "Admin guide not found"}), 404
 
 
 @openapi_bp.get("/openapi.json")

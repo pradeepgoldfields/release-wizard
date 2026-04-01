@@ -1,6 +1,6 @@
 """User and Group management endpoints.
 
-Provides CRUD for Users (with persona assignment) and their role bindings.
+Provides CRUD for Users and their role bindings.
 All routes are under ``/api/v1/users`` and ``/api/v1/groups``.
 """
 
@@ -9,21 +9,45 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 
 import bcrypt
 from flask import Blueprint, jsonify, request
 
 from app.extensions import db
 from app.models.auth import Group, Role, RoleBinding, User
+from app.services.authz_service import PERMISSION_CATALOG
 from app.services.id_service import resource_id
 from app.services.user_service import (
     add_scoped_role,
     create_user,
     get_effective_permissions,
-    update_user_persona,
 )
 
 users_bp = Blueprint("users", __name__)
+
+# ── Password policy ───────────────────────────────────────────────────────────
+_PW_MIN_LEN = 8
+_PW_RULES = [
+    (re.compile(r"[A-Z]"), "at least one uppercase letter"),
+    (re.compile(r"[a-z]"), "at least one lowercase letter"),
+    (re.compile(r"\d"),    "at least one digit"),
+    (re.compile(r"[^A-Za-z0-9]"), "at least one special character"),
+]
+
+
+def _validate_password(password: str) -> str | None:
+    """Return an error message if the password fails policy, else None.
+
+    Policy: min 8 characters, uppercase, lowercase, digit, special character.
+    Passwords are stored as bcrypt hashes (cost factor 12) — never in plaintext.
+    """
+    if len(password) < _PW_MIN_LEN:
+        return f"Password must be at least {_PW_MIN_LEN} characters"
+    for pattern, desc in _PW_RULES:
+        if not pattern.search(password):
+            return f"Password must contain {desc}"
+    return None
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
@@ -38,10 +62,10 @@ def list_users():
 
 @users_bp.post("/api/v1/users")
 def create_user_endpoint():
-    """Create a new user with a persona.
+    """Create a new user.
 
     Required body fields: ``username``
-    Optional: ``email``, ``display_name``, ``persona``, ``ldap_dn``
+    Optional: ``email``, ``display_name``, ``ldap_dn``, ``password``
     """
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
@@ -52,17 +76,20 @@ def create_user_endpoint():
     if existing:
         return jsonify({"error": f"Username '{username}' already exists"}), 409
 
+    password = data.get("password")
+    if password:
+        err = _validate_password(password)
+        if err:
+            return jsonify({"error": err}), 400
+
     user = create_user(
         username=username,
         email=data.get("email"),
         display_name=data.get("display_name"),
-        persona=data.get("persona", "ReadOnly"),
         ldap_dn=data.get("ldap_dn"),
     )
-    # Optionally set a local password at creation time
-    password = data.get("password")
     if password:
-        user.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        user.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
         db.session.commit()
     return jsonify(user.to_dict()), 201
 
@@ -76,7 +103,7 @@ def get_user(user_id: str):
 
 @users_bp.patch("/api/v1/users/<user_id>")
 def update_user(user_id: str):
-    """Update mutable user fields (display_name, email, is_active, persona)."""
+    """Update mutable user fields (display_name, email, is_active)."""
     user = db.get_or_404(User, user_id)
     data = request.get_json(silent=True) or {}
 
@@ -86,10 +113,7 @@ def update_user(user_id: str):
         user.email = data["email"]
     if "is_active" in data:
         user.is_active = bool(data["is_active"])
-    if "persona" in data:
-        user = update_user_persona(user_id, data["persona"])
-    else:
-        db.session.commit()
+    db.session.commit()
 
     return jsonify(user.to_dict())
 
@@ -98,22 +122,39 @@ def update_user(user_id: str):
 def change_password(user_id: str):
     """Set or change a user's local password.
 
-    Required body: ``password`` (new password, min 6 chars)
+    Required body: ``password`` (new password — must meet password policy)
+    Optional body: ``current_password`` — required when the caller is changing
+    their own password (omit only when an admin resets another user's password).
+
+    Passwords are hashed with bcrypt (cost factor 12).
     """
     user = db.get_or_404(User, user_id)
     data = request.get_json(silent=True) or {}
     password = (data.get("password") or "").strip()
-    if len(password) < 6:
-        return jsonify({"error": "Password must be at least 6 characters"}), 400
-    user.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+    err = _validate_password(password)
+    if err:
+        return jsonify({"error": err}), 400
+
+    # If the caller provides current_password, verify it before accepting the change
+    current_password = data.get("current_password")
+    if current_password is not None:
+        if not user.password_hash:
+            return jsonify({"error": "No local password set on this account"}), 400
+        if not bcrypt.checkpw(current_password.encode(), user.password_hash.encode()):
+            return jsonify({"error": "Current password is incorrect"}), 403
+
+    user.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
     db.session.commit()
     return jsonify({"message": "Password updated"})
 
 
 @users_bp.delete("/api/v1/users/<user_id>")
 def delete_user(user_id: str):
-    """Permanently delete a user and all their role bindings."""
+    """Permanently delete a user and all their role bindings. Built-in users cannot be deleted."""
     user = db.get_or_404(User, user_id)
+    if user.is_builtin:
+        return jsonify({"error": f"User '{user.username}' is a built-in system user and cannot be deleted."}), 409
     db.session.delete(user)
     db.session.commit()
     return "", 204
@@ -125,7 +166,7 @@ def bulk_import_users():
 
     Accepts either:
       - ``application/json``: list of user objects
-      - ``text/csv``:  CSV with header row (username, email, display_name, persona, password)
+      - ``text/csv``:  CSV with header row (username, email, display_name, password)
 
     Returns a summary: ``{"created": N, "skipped": N, "errors": [...]}``
     """
@@ -187,7 +228,6 @@ def bulk_import_users():
                 email=(row.get("email") or "").strip() or None,
                 display_name=(row.get("display_name") or row.get("displayName") or "").strip()
                 or None,
-                persona=(row.get("persona") or "ReadOnly").strip(),
                 ldap_dn=(row.get("ldap_dn") or row.get("ldapDn") or "").strip() or None,
             )
             password = (row.get("password") or "").strip()
@@ -342,6 +382,73 @@ def remove_group_member(group_id: str, user_id: str):
     return "", 204
 
 
+# ── Group role bindings ───────────────────────────────────────────────────────
+
+
+@users_bp.get("/api/v1/groups/<group_id>/bindings")
+def list_group_bindings(group_id: str):
+    """List all role bindings for a group."""
+    db.get_or_404(Group, group_id)
+    bindings = RoleBinding.query.filter_by(group_id=group_id).all()
+    return jsonify([b.to_dict() for b in bindings])
+
+
+@users_bp.post("/api/v1/groups/<group_id>/bindings")
+def add_group_binding(group_id: str):
+    """Grant a group a scoped role binding.
+
+    Required body: ``role_id``, ``scope``
+    Optional: ``expires_at`` (ISO-8601 string for JIT access)
+    """
+    db.get_or_404(Group, group_id)
+    data = request.get_json(silent=True) or {}
+    role_id = (data.get("role_id") or "").strip()
+    scope = (data.get("scope") or "").strip()
+    if not role_id or not scope:
+        return jsonify({"error": "role_id and scope are required"}), 400
+    db.get_or_404(Role, role_id)
+
+    expires_at = None
+    if data.get("expires_at"):
+        from datetime import datetime  # noqa: PLC0415
+
+        expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+
+    binding = RoleBinding(
+        id=resource_id("rb"),
+        group_id=group_id,
+        role_id=role_id,
+        scope=scope,
+        expires_at=expires_at,
+    )
+    db.session.add(binding)
+    db.session.commit()
+    return jsonify(binding.to_dict()), 201
+
+
+@users_bp.delete("/api/v1/groups/<group_id>/bindings/<binding_id>")
+def remove_group_binding(group_id: str, binding_id: str):
+    """Remove a specific role binding from a group."""
+    binding = RoleBinding.query.filter_by(id=binding_id, group_id=group_id).first_or_404()
+    db.session.delete(binding)
+    db.session.commit()
+    return "", 204
+
+
+# ── Permission catalogue ──────────────────────────────────────────────────────
+
+
+@users_bp.get("/api/v1/permissions/catalog")
+def get_permission_catalog():
+    """Return the full permission catalogue grouped by resource.
+
+    The frontend uses this to dynamically build the Role Permissions matrix.
+    Adding a new group to PERMISSION_CATALOG in authz_service.py automatically
+    makes it appear in the UI without any JS changes.
+    """
+    return jsonify(PERMISSION_CATALOG)
+
+
 # ── Roles ─────────────────────────────────────────────────────────────────────
 
 
@@ -380,14 +487,17 @@ def create_role():
 
 @users_bp.patch("/api/v1/roles/<role_id>")
 def update_role(role_id: str):
-    """Update a role's name, permissions, or description."""
+    """Update a role's name, permissions, or description.
+
+    Built-in roles cannot be renamed or deleted, but their permissions can be updated.
+    """
     role = db.get_or_404(Role, role_id)
     data = request.get_json(silent=True) or {}
-    if "name" in data:
+    if "name" in data and not role.is_builtin:
         role.name = (data["name"] or "").strip() or role.name
     if "permissions" in data and isinstance(data["permissions"], list):
         role.permissions = ",".join(data["permissions"])
-    if "description" in data:
+    if "description" in data and not role.is_builtin:
         role.description = data["description"] or None
     db.session.commit()
     return jsonify(role.to_dict())
@@ -395,8 +505,10 @@ def update_role(role_id: str):
 
 @users_bp.delete("/api/v1/roles/<role_id>")
 def delete_role(role_id: str):
-    """Delete a role. Fails if active bindings reference it."""
+    """Delete a custom role. Built-in roles cannot be deleted."""
     role = db.get_or_404(Role, role_id)
+    if role.is_builtin:
+        return jsonify({"error": f"Role '{role.name}' is a built-in role and cannot be deleted."}), 403
     db.session.delete(role)
     db.session.commit()
     return "", 204

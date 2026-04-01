@@ -20,7 +20,6 @@ from app.services.user_service import (
     add_scoped_role,
     create_user,
     get_effective_permissions,
-    update_user_persona,
 )
 
 __all__ = [
@@ -44,7 +43,6 @@ __all__ = [
     "start_release_run",
     "update_run_status",
     "create_user",
-    "update_user_persona",
     "add_scoped_role",
     "get_effective_permissions",
 ]

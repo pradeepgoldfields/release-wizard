@@ -34,8 +34,12 @@ def _current_username() -> str:
 
 def _require_admin():
     user = getattr(g, "current_user", None)
-    if not user or getattr(user, "persona", None) != "PlatformAdmin":
-        return jsonify({"error": "Admin required"}), 403
+    if not user:
+        return jsonify({"error": "Authentication required"}), 401
+    from app.services.authz_service import get_permissions_for_user
+    perms = get_permissions_for_user(user.id, "organization")
+    if "webhooks:create" not in perms and "webhooks:edit" not in perms and "webhooks:delete" not in perms:
+        return jsonify({"error": "Insufficient permissions"}), 403
     return None
 
 

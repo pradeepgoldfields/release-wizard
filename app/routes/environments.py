@@ -7,7 +7,9 @@ from flask import Blueprint, jsonify, request
 from app.extensions import db
 from app.models.environment import Environment
 from app.models.product import Product
+from app.routes._authz import current_user_id, require_product_access
 from app.services import cache_service
+from app.services.authz_service import get_permissions_for_user
 from app.services.id_service import resource_id
 
 environments_bp = Blueprint("environments", __name__, url_prefix="/api/v1")
@@ -20,7 +22,13 @@ _CACHE_KEY = "environments:list"
 
 @environments_bp.get("/environments")
 def list_environments():
-    """Return all environments ordered by order then name."""
+    """Return all environments ordered by order then name. Requires environments:view."""
+    uid = current_user_id()
+    if uid is None:
+        return jsonify({"error": "Authentication required"}), 401
+    perms = get_permissions_for_user(uid, "organization")
+    if "environments:view" not in perms:
+        return jsonify({"error": "Access denied", "code": "FORBIDDEN"}), 403
     cached = cache_service.get(_CACHE_KEY)
     if cached is not None:
         return jsonify(cached)
@@ -32,11 +40,17 @@ def list_environments():
 
 @environments_bp.post("/environments")
 def create_environment():
-    """Create a new top-level environment.
+    """Create a new top-level environment. Requires environments:create.
 
     Required body: ``name``
     Optional: ``env_type``, ``order``, ``description``
     """
+    uid = current_user_id()
+    if uid is None:
+        return jsonify({"error": "Authentication required"}), 401
+    perms = get_permissions_for_user(uid, "organization")
+    if "environments:create" not in perms:
+        return jsonify({"error": "Access denied", "code": "FORBIDDEN"}), 403
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -56,14 +70,26 @@ def create_environment():
 
 @environments_bp.get("/environments/<env_id>")
 def get_environment(env_id: str):
-    """Return a single environment by ID."""
+    """Return a single environment by ID. Requires environments:view."""
+    uid = current_user_id()
+    if uid is None:
+        return jsonify({"error": "Authentication required"}), 401
+    perms = get_permissions_for_user(uid, "organization")
+    if "environments:view" not in perms:
+        return jsonify({"error": "Access denied", "code": "FORBIDDEN"}), 403
     env = db.get_or_404(Environment, env_id)
     return jsonify(env.to_dict())
 
 
 @environments_bp.put("/environments/<env_id>")
 def update_environment(env_id: str):
-    """Update an environment's name, type, order, or description."""
+    """Update an environment's name, type, order, or description. Requires environments:edit."""
+    uid = current_user_id()
+    if uid is None:
+        return jsonify({"error": "Authentication required"}), 401
+    perms = get_permissions_for_user(uid, "organization")
+    if "environments:edit" not in perms:
+        return jsonify({"error": "Access denied", "code": "FORBIDDEN"}), 403
     env = db.get_or_404(Environment, env_id)
     data = request.get_json(silent=True) or {}
     if "name" in data:
@@ -81,7 +107,13 @@ def update_environment(env_id: str):
 
 @environments_bp.delete("/environments/<env_id>")
 def delete_environment(env_id: str):
-    """Delete an environment."""
+    """Delete an environment. Requires environments:delete."""
+    uid = current_user_id()
+    if uid is None:
+        return jsonify({"error": "Authentication required"}), 401
+    perms = get_permissions_for_user(uid, "organization")
+    if "environments:delete" not in perms:
+        return jsonify({"error": "Access denied", "code": "FORBIDDEN"}), 403
     env = db.get_or_404(Environment, env_id)
     db.session.delete(env)
     db.session.commit()
@@ -94,7 +126,11 @@ def delete_environment(env_id: str):
 
 @environments_bp.get("/products/<product_id>/environments")
 def list_product_environments(product_id: str):
-    """Return all environments attached to a product."""
+    """Return all environments attached to a product. Requires environments:view."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "environments:view")
+    if err:
+        return err
     product = db.get_or_404(Product, product_id)
     envs = sorted(product.environments, key=lambda e: (e.order, e.name))
     return jsonify([e.to_dict() for e in envs])
@@ -102,10 +138,14 @@ def list_product_environments(product_id: str):
 
 @environments_bp.post("/products/<product_id>/environments")
 def attach_environment(product_id: str):
-    """Attach an existing environment to a product.
+    """Attach an existing environment to a product. Requires environments:edit.
 
     Required body: ``environment_id``
     """
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "environments:edit")
+    if err:
+        return err
     product = db.get_or_404(Product, product_id)
     data = request.get_json(silent=True) or {}
     env_id = (data.get("environment_id") or "").strip()
@@ -120,7 +160,11 @@ def attach_environment(product_id: str):
 
 @environments_bp.delete("/products/<product_id>/environments/<env_id>")
 def detach_environment(product_id: str, env_id: str):
-    """Detach an environment from a product (does not delete the environment)."""
+    """Detach an environment from a product. Requires environments:edit."""
+    uid = current_user_id()
+    err = require_product_access(uid, product_id, "environments:edit")
+    if err:
+        return err
     product = db.get_or_404(Product, product_id)
     env = db.get_or_404(Environment, env_id)
     if env in product.environments:
