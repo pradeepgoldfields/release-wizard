@@ -1,258 +1,330 @@
-"""Renders audit reports as PDF.
+"""Renders audit reports as PDF using ReportLab.
 
-Uses fpdf2 (pure Python, works on Windows and in the UBI container).
-WeasyPrint is kept as an optional fallback for HTML-based release reports
-and requires GTK/Pango (available in the UBI container only).
+ReportLab is pure Python, supports full Unicode, and works on Windows
+and inside the UBI container without native libraries.
 """
 
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 
 from flask import current_app, render_template
 
-
-# ── Confidence badge colours ──────────────────────────────────────────────────
+# ── Colour palette ────────────────────────────────────────────────────────────
 
 _CONF_COLOR = {
-    "confirmed": (22, 163, 74),    # green
-    "partial":   (234, 88, 12),    # orange
-    "manual":    (124, 58, 237),   # purple
-    "not_met":   (220, 38, 38),    # red
+    "confirmed": (22 / 255, 163 / 255, 74 / 255),
+    "partial": (234 / 255, 88 / 255, 12 / 255),
+    "manual": (124 / 255, 58 / 255, 237 / 255),
+    "not_met": (220 / 255, 38 / 255, 38 / 255),
 }
 _CONF_LABEL = {
     "confirmed": "CONFIRMED",
-    "partial":   "PARTIAL",
-    "manual":    "MANUAL REVIEW",
-    "not_met":   "NOT MET",
+    "partial": "PARTIAL",
+    "manual": "MANUAL REVIEW",
+    "not_met": "NOT MET",
 }
 
+# ── Helper: RGB tuple for ReportLab (0–1 range) ───────────────────────────────
 
-# ── fpdf2 audit PDF ───────────────────────────────────────────────────────────
+_HEADER_BG = (26 / 255, 58 / 255, 92 / 255)
+_HEADER_FG = (1.0, 1.0, 1.0)
+_GROUP_BG = (236 / 255, 240 / 255, 248 / 255)
+_GROUP_FG = (26 / 255, 58 / 255, 92 / 255)
+_META_FG = (80 / 255, 80 / 255, 80 / 255)
+_BODY_FG = (30 / 255, 30 / 255, 30 / 255)
+_LIGHT_FG = (110 / 255, 110 / 255, 110 / 255)
+_DIM_FG = (130 / 255, 130 / 255, 130 / 255)
+_EV_FG = (60 / 255, 60 / 255, 60 / 255)
+_TASK_FG = (80 / 255, 80 / 255, 80 / 255)
+_LOG_FG = (120 / 255, 120 / 255, 120 / 255)
+_DIVIDER = (220 / 255, 220 / 255, 220 / 255)
+_NONE_FG = (170 / 255, 170 / 255, 170 / 255)
+_WHITE = (1.0, 1.0, 1.0)
+
+
+# ── Main export function ──────────────────────────────────────────────────────
+
 
 def export_audit_report_pdf(report: dict) -> bytes:
-    """Render an ISAE/ACF audit report dict to PDF bytes using fpdf2.
+    """Render an ISAE/ACF audit report dict to PDF bytes using ReportLab.
 
     Works on Windows and inside the UBI container — no native libs required.
     """
-    from fpdf import FPDF
+    from reportlab.lib import colors  # noqa: PLC0415
+    from reportlab.lib.enums import TA_CENTER  # noqa: PLC0415
+    from reportlab.lib.pagesizes import A4  # noqa: PLC0415
+    from reportlab.lib.styles import ParagraphStyle  # noqa: PLC0415
+    from reportlab.lib.units import mm  # noqa: PLC0415
+    from reportlab.platypus import (  # noqa: PLC0415
+        HRFlowable,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
 
-    framework    = report.get("framework", "Audit")
-    pipeline     = report.get("pipeline_name", "—")
-    run_id       = report.get("run_id", "—")
-    run_status   = report.get("run_status", "—")
+    framework = report.get("framework", "Audit")
+    pipeline = report.get("pipeline_name", "—")
+    run_id = report.get("run_id", "—")
+    run_status = report.get("run_status", "—")
     generated_at = report.get("generated_at", datetime.now(UTC).isoformat())
-    overall      = report.get("overall_rating", "")
-    summary      = report.get("summary", {})
+    overall = report.get("overall_rating", "")
+    summary = report.get("summary", {})
 
-    # ── Normalise groups ──────────────────────────────────────────────────────
-    # ISAE returns "categories" dict; ACF returns "domains" dict.
+    # Normalise groups (ISAE: "categories", ACF: "domains", fallback: "controls")
     groups: list[dict] = []
     if report.get("categories"):
         for key, cat in report["categories"].items():
-            groups.append({
-                "group_name": cat.get("label") or key,
-                "controls": cat.get("controls", []),
-            })
+            groups.append(
+                {"group_name": cat.get("label") or key, "controls": cat.get("controls", [])}
+            )
     elif report.get("domains"):
         for domain_name, dom in report["domains"].items():
-            groups.append({
-                "group_name": domain_name,
-                "controls": dom.get("controls", []),
-            })
+            groups.append({"group_name": domain_name, "controls": dom.get("controls", [])})
     else:
         controls = report.get("controls", [])
         if controls:
             groups = [{"group_name": "Controls", "controls": controls}]
 
-    # ── Build PDF ─────────────────────────────────────────────────────────────
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.set_margins(15, 15, 15)
-    pdf.add_page()
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=15 * mm,
+        bottomMargin=15 * mm,
+    )
 
-    # Header bar
-    pdf.set_fill_color(26, 58, 92)
-    pdf.rect(0, 0, 210, 28, style="F")
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_y(8)
-    pdf.cell(0, 8, "Compliance Audit Report", ln=True, align="C")
-    pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 5, framework, ln=True, align="C")
-    pdf.set_y(32)
+    # ── Styles ────────────────────────────────────────────────────────────────
+    def _style(name, **kw) -> ParagraphStyle:
+        defaults = dict(
+            fontName="Helvetica", fontSize=9, leading=12, textColor=colors.black, spaceAfter=2
+        )
+        defaults.update(kw)
+        return ParagraphStyle(name, **defaults)
 
-    # Meta row
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(80, 80, 80)
-    pdf.cell(0, 5, f"Pipeline: {pipeline}   |   Run: {run_id}   |   Status: {run_status}   |   Overall: {overall}", ln=True)
-    pdf.set_font("Helvetica", "I", 8)
-    pdf.cell(0, 5, f"Generated: {generated_at}", ln=True)
-    pdf.ln(4)
+    s_title = _style(
+        "title", fontName="Helvetica-Bold", fontSize=16, textColor=colors.white, alignment=TA_CENTER
+    )
+    s_sub = _style("sub", fontSize=9, textColor=colors.white, alignment=TA_CENTER)
+    s_meta = _style("meta", fontSize=8, textColor=colors.Color(*_META_FG))
+    s_gen = _style(
+        "gen", fontName="Helvetica-Oblique", fontSize=7, textColor=colors.Color(*_META_FG)
+    )
+    s_group = _style(
+        "group", fontName="Helvetica-Bold", fontSize=10, textColor=colors.Color(*_GROUP_FG)
+    )
+    s_ctrl_id = _style(
+        "ctrl_id", fontName="Helvetica-Bold", fontSize=9, textColor=colors.Color(*_BODY_FG)
+    )
+    s_ctrl_title = _style(
+        "ctrl_title", fontName="Helvetica-Bold", fontSize=9, textColor=colors.Color(*_BODY_FG)
+    )
+    s_desc = _style("desc", fontSize=8, textColor=colors.Color(*_LIGHT_FG))
+    s_dim = _style(
+        "dim", fontName="Helvetica-Oblique", fontSize=7, textColor=colors.Color(*_DIM_FG)
+    )
+    s_ev = _style("ev", fontSize=8, textColor=colors.Color(*_EV_FG))
+    s_task = _style("task", fontSize=8, textColor=colors.Color(*_TASK_FG))
+    s_log = _style("log", fontName="Courier", fontSize=7, textColor=colors.Color(*_LOG_FG))
+    s_none = _style(
+        "none", fontName="Helvetica-Oblique", fontSize=8, textColor=colors.Color(*_NONE_FG)
+    )
 
-    # Summary scorecard
-    total     = summary.get("total", 0)
+    story = []
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    header_data = [[Paragraph("Compliance Audit Report", s_title)], [Paragraph(framework, s_sub)]]
+    header_table = Table(header_data, colWidths=[180 * mm])
+    header_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.Color(*_HEADER_BG)),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(header_table)
+    story.append(Spacer(1, 4 * mm))
+
+    # ── Meta line ─────────────────────────────────────────────────────────────
+    story.append(
+        Paragraph(
+            f"Pipeline: {pipeline} &nbsp; | &nbsp; Run: {run_id} &nbsp; | &nbsp; Status: {run_status} &nbsp; | &nbsp; Overall: {overall}",
+            s_meta,
+        )
+    )
+    story.append(Paragraph(f"Generated: {generated_at}", s_gen))
+    story.append(Spacer(1, 4 * mm))
+
+    # ── Scorecard ─────────────────────────────────────────────────────────────
+    total = summary.get("total", 0)
     confirmed = summary.get("confirmed", 0)
-    partial   = summary.get("partial", 0)
-    not_met   = summary.get("not_met", 0)
-    manual    = summary.get("manual", 0)
+    partial = summary.get("partial", 0)
+    not_met = summary.get("not_met", 0)
+    manual = summary.get("manual", 0)
 
-    _scorecard(pdf, [
-        ("Total Controls", str(total),     (26, 58, 92)),
-        ("Confirmed",      str(confirmed),  (22, 163, 74)),
-        ("Partial",        str(partial),    (234, 88, 12)),
-        ("Not Met",        str(not_met),    (220, 38, 38)),
-        ("Manual Review",  str(manual),     (124, 58, 237)),
-    ])
-    pdf.ln(6)
+    scorecard_items = [
+        ("Total Controls", str(total), _HEADER_BG),
+        ("Confirmed", str(confirmed), (22 / 255, 163 / 255, 74 / 255)),
+        ("Partial", str(partial), (234 / 255, 88 / 255, 12 / 255)),
+        ("Not Met", str(not_met), (220 / 255, 38 / 255, 38 / 255)),
+        ("Manual Review", str(manual), (124 / 255, 58 / 255, 237 / 255)),
+    ]
+    _s_val = _style(
+        "sc_val",
+        fontName="Helvetica-Bold",
+        fontSize=14,
+        textColor=colors.white,
+        alignment=TA_CENTER,
+    )
+    _s_lbl = _style("sc_lbl", fontSize=7, textColor=colors.white, alignment=TA_CENTER)
 
-    # Control groups
+    sc_cells = [
+        [Paragraph(v, _s_val) for _, v, _ in scorecard_items],
+        [Paragraph(lbl, _s_lbl) for lbl, _, _ in scorecard_items],
+    ]
+    col_w = 180 * mm / len(scorecard_items)
+    sc_table = Table(sc_cells, colWidths=[col_w] * len(scorecard_items))
+    sc_styles = [
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+    ]
+    for col, (_, _, rgb) in enumerate(scorecard_items):
+        sc_styles.append(("BACKGROUND", (col, 0), (col, -1), colors.Color(*rgb)))
+    sc_table.setStyle(TableStyle(sc_styles))
+    story.append(sc_table)
+    story.append(Spacer(1, 6 * mm))
+
+    # ── Control groups ────────────────────────────────────────────────────────
     for group in groups:
         group_name = group.get("group_name", "")
-        controls   = group.get("controls", [])
+        controls = group.get("controls", [])
         if not controls:
             continue
 
-        # Group header
-        pdf.set_fill_color(236, 240, 248)
-        pdf.set_text_color(26, 58, 92)
-        pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 7, f"  {group_name}", ln=True, fill=True)
-        pdf.ln(2)
+        # Group header band
+        gh_table = Table([[Paragraph(f"  {group_name}", s_group)]], colWidths=[180 * mm])
+        gh_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.Color(*_GROUP_BG)),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
+        story.append(gh_table)
+        story.append(Spacer(1, 2 * mm))
 
         for ctrl in controls:
-            _render_control(pdf, ctrl)
+            _render_control_rl(
+                story, ctrl, s_ctrl_id, s_ctrl_title, s_desc, s_dim, s_ev, s_task, s_log, s_none
+            )
 
-        pdf.ln(3)
+        story.append(Spacer(1, 3 * mm))
 
-    # Footer
-    pdf.set_font("Helvetica", "I", 7)
-    pdf.set_text_color(180, 180, 180)
-    pdf.cell(0, 6, f"Conduit  |  {generated_at}  |  {framework}", ln=True, align="C")
+    # ── Footer ────────────────────────────────────────────────────────────────
+    s_footer = _style(
+        "footer",
+        fontName="Helvetica-Oblique",
+        fontSize=7,
+        textColor=colors.Color(*_NONE_FG),
+        alignment=TA_CENTER,
+    )
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.Color(*_DIVIDER)))
+    story.append(Paragraph(f"Conduit  |  {generated_at}  |  {framework}", s_footer))
 
-    return bytes(pdf.output())
+    doc.build(story)
+    return buf.getvalue()
 
 
 # ── Control renderer ──────────────────────────────────────────────────────────
 
-def _render_control(pdf, ctrl: dict) -> None:
-    ctrl_id    = ctrl.get("id", "")
-    title      = ctrl.get("title", "")
-    desc       = ctrl.get("description", "")
+
+def _render_control_rl(
+    story, ctrl: dict, s_id, s_title, s_desc, s_dim, s_ev, s_task, s_log, s_none
+) -> None:
+    from reportlab.lib import colors  # noqa: PLC0415
+    from reportlab.lib.enums import TA_CENTER  # noqa: PLC0415
+    from reportlab.lib.styles import ParagraphStyle  # noqa: PLC0415
+    from reportlab.lib.units import mm  # noqa: PLC0415
+    from reportlab.platypus import HRFlowable, Paragraph, Table, TableStyle  # noqa: PLC0415
+
+    ctrl_id = ctrl.get("id", "")
+    title = ctrl.get("title", "")
+    desc = ctrl.get("description", "")
     confidence = ctrl.get("confidence", "not_met")
-    dim_score  = ctrl.get("dim_score", 0)
-    evidences  = ctrl.get("evidences", [])   # list of human-readable strings
-    artifacts  = ctrl.get("artifacts", [])   # list of structured task dicts
+    dim_score = ctrl.get("dim_score", 0)
+    evidences = ctrl.get("evidences", [])
+    artifacts = ctrl.get("artifacts", [])
 
-    r, g, b    = _CONF_COLOR.get(confidence, (150, 150, 150))
-    badge      = _CONF_LABEL.get(confidence, confidence.upper())
+    rgb = _CONF_COLOR.get(confidence, (0.6, 0.6, 0.6))
+    badge = _CONF_LABEL.get(confidence, confidence.upper())
 
-    # Control title line
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(30, 30, 30)
-    id_w = 22
-    pdf.cell(id_w, 6, ctrl_id, ln=False)
+    # Title row: [ID | Title | Badge]
+    _s_badge = ParagraphStyle(
+        "badge", fontName="Helvetica-Bold", fontSize=7, textColor=colors.white, alignment=TA_CENTER
+    )
+    title_row = Table(
+        [[Paragraph(ctrl_id, s_id), Paragraph(title[:100], s_title), Paragraph(badge, _s_badge)]],
+        colWidths=[22 * mm, 130 * mm, 28 * mm],
+    )
+    title_row.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (2, 0), (2, 0), colors.Color(*rgb)),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
+    story.append(title_row)
 
-    # Title — remaining width minus badge width
-    badge_w = 38
-    title_w = 180 - id_w - badge_w
-    title_text = title[:72] + ("…" if len(title) > 72 else "")
-    pdf.cell(title_w, 6, title_text, ln=False)
-
-    # Confidence badge (right-aligned)
-    pdf.set_fill_color(r, g, b)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.cell(badge_w, 6, badge, ln=True, fill=True, align="C")
-
-    # Description (light grey, wrapped manually)
     if desc:
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(110, 110, 110)
-        desc_short = desc[:180] + ("…" if len(desc) > 180 else "")
-        pdf.multi_cell(0, 4, desc_short)
+        story.append(Paragraph(desc[:220] + ("..." if len(desc) > 220 else ""), s_desc))
 
-    # Maturity score indicator
     if dim_score:
-        pdf.set_font("Helvetica", "I", 7)
-        pdf.set_text_color(130, 130, 130)
-        pdf.cell(0, 4, f"  Maturity dimension score: {dim_score}/3", ln=True)
+        story.append(Paragraph(f"Maturity dimension score: {dim_score}/3", s_dim))
 
-    # Evidence lines (strings from _score_control)
-    if evidences:
-        for ev in evidences[:4]:
-            pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(60, 60, 60)
-            line = f"  • {ev}"
-            if len(line) > 120:
-                line = line[:117] + "…"
-            pdf.cell(0, 5, line, ln=True)
+    for ev in evidences[:4]:
+        story.append(Paragraph(f"  \u2022 {ev[:120]}", s_ev))
 
-    # Artifact task details
-    if artifacts:
-        for art in artifacts[:3]:
-            task_name  = art.get("task_name", "")
-            stage_name = art.get("stage_name", "")
-            status     = art.get("status", "")
-            task_type  = art.get("task_type", "")
-            icon = "✓" if status in ("Succeeded", "Warning") else "✗"
-
-            pdf.set_font("Helvetica", "", 8)
-            pdf.set_text_color(80, 80, 80)
-            task_line = f"    {icon} {task_name}  [{stage_name} · {task_type} · {status}]"
-            if len(task_line) > 120:
-                task_line = task_line[:117] + "…"
-            pdf.cell(0, 5, task_line, ln=True)
-
-            # Log snippets
-            for snip in art.get("log_snippets", [])[:2]:
-                pdf.set_font("Courier", "", 7)
-                pdf.set_text_color(120, 120, 120)
-                snip_line = f"        {snip.strip()}"
-                if len(snip_line) > 130:
-                    snip_line = snip_line[:127] + "…"
-                pdf.cell(0, 4, snip_line, ln=True)
+    for art in artifacts[:3]:
+        task_name = art.get("task_name", "")
+        stage_name = art.get("stage_name", "")
+        status = art.get("status", "")
+        task_type = art.get("task_type", "")
+        icon = "\u2713" if status in ("Succeeded", "Warning") else "\u2717"
+        story.append(
+            Paragraph(
+                f"    {icon} {task_name}  [{stage_name} \u00b7 {task_type} \u00b7 {status}]", s_task
+            )
+        )
+        for snip in art.get("log_snippets", [])[:2]:
+            story.append(Paragraph(f"        {snip.strip()[:100]}", s_log))
 
     if not evidences and not artifacts:
-        pdf.set_font("Helvetica", "I", 8)
-        pdf.set_text_color(170, 170, 170)
-        pdf.cell(0, 5, "  No evidence found in this pipeline run", ln=True)
+        story.append(Paragraph("  No evidence found in this pipeline run", s_none))
 
-    # Divider
-    pdf.set_draw_color(220, 220, 220)
-    pdf.line(15, pdf.get_y() + 1, 195, pdf.get_y() + 1)
-    pdf.ln(4)
-
-
-# ── Scorecard ─────────────────────────────────────────────────────────────────
-
-def _scorecard(pdf, items: list[tuple]) -> None:
-    """Render a row of stat boxes: [(label, value, (r,g,b)), ...]"""
-    n    = len(items)
-    w    = 180 // n
-    x0   = pdf.get_x()
-    y0   = pdf.get_y()
-
-    for label, value, color in items:
-        r, g, b = color
-        # Box background
-        pdf.set_fill_color(r, g, b)
-        pdf.rect(pdf.get_x(), y0, w - 2, 18, style="F")
-        # Value
-        pdf.set_xy(pdf.get_x(), y0 + 1)
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.set_text_color(255, 255, 255)
-        pdf.cell(w - 2, 8, value, ln=False, align="C")
-        # Label
-        pdf.set_xy(pdf.get_x() - (w - 2), y0 + 10)
-        pdf.set_font("Helvetica", "", 7)
-        pdf.cell(w - 2, 5, label, ln=False, align="C")
-        pdf.set_xy(pdf.get_x(), y0)
-
-    pdf.set_y(y0 + 20)
-    pdf.set_text_color(30, 30, 30)
+    story.append(
+        HRFlowable(width="100%", thickness=0.3, color=colors.Color(*_DIVIDER), spaceAfter=3 * mm)
+    )
 
 
 # ── WeasyPrint release report PDF (container only) ────────────────────────────
+
 
 def export_release_report_pdf(report: dict) -> bytes:
     """Render a release audit report to PDF using WeasyPrint (UBI container only).
@@ -278,7 +350,7 @@ def save_audit_pdf(release_id: str, pdf_bytes: bytes) -> str:
     storage_path.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    filename  = f"{release_id}_{timestamp}.pdf"
+    filename = f"{release_id}_{timestamp}.pdf"
     file_path = storage_path / filename
 
     file_path.write_bytes(pdf_bytes)

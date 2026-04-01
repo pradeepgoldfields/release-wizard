@@ -256,6 +256,7 @@ def import_pipeline(product_id: str, pipeline_id: str):
             db.session.add(stage)
         stage.order = int(s_spec.get("order", stage.order or 0))
         stage.run_language = s_spec.get("run_language", stage.run_language or "bash")
+        stage.execution_mode = s_spec.get("execution_mode", stage.execution_mode or "sequential")
         db.session.flush()
         kept_stage_ids.append(stage.id)
 
@@ -274,7 +275,7 @@ def import_pipeline(product_id: str, pipeline_id: str):
             task.run_code = t_spec.get("run_code", task.run_code)
             task.on_error = t_spec.get("on_error", task.on_error or "fail")
             task.timeout = int(t_spec.get("timeout", task.timeout or 300))
-            task.execution_mode = t_spec.get("execution_mode", task.execution_mode or "local")
+            task.execution_mode = t_spec.get("execution_mode", task.execution_mode or "sequential")
             db.session.flush()
             kept_task_ids.append(task.id)
 
@@ -362,6 +363,7 @@ def git_pull_pipeline(product_id: str, pipeline_id: str):
             db.session.add(stage)
         stage.order = int(s_spec.get("order", stage.order or 0))
         stage.run_language = s_spec.get("run_language", stage.run_language or "bash")
+        stage.execution_mode = s_spec.get("execution_mode", stage.execution_mode or "sequential")
         db.session.flush()
         kept_stage_ids.append(stage.id)
         kept_task_ids = []
@@ -378,7 +380,7 @@ def git_pull_pipeline(product_id: str, pipeline_id: str):
             task.run_code = t_spec.get("run_code", task.run_code)
             task.on_error = t_spec.get("on_error", task.on_error or "fail")
             task.timeout = int(t_spec.get("timeout", task.timeout or 300))
-            task.execution_mode = t_spec.get("execution_mode", task.execution_mode or "local")
+            task.execution_mode = t_spec.get("execution_mode", task.execution_mode or "sequential")
             db.session.flush()
             kept_task_ids.append(task.id)
         Task.query.filter(
@@ -413,6 +415,7 @@ def git_push_pipeline(product_id: str, pipeline_id: str):
             "name": s.name,
             "order": s.order,
             "run_language": s.run_language,
+            "execution_mode": s.execution_mode or "sequential",
             "tasks": [
                 {
                     "name": t.name,

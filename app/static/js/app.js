@@ -545,10 +545,15 @@ router.register("dashboard", async () => {
         : `<div class="table-wrap"><table>
           <thead><tr><th>Name</th><th>Description</th><th>Actions</th></tr></thead>
           <tbody>${products.slice(0,5).map(p => `
-            <tr>
-              <td><a href="#products/${p.id}">${p.name}</a></td>
+            <tr style="cursor:pointer" class="clickable-row"
+              onclick="navigate('products/${p.id}')"
+              onmouseenter="this.style.background='var(--primary-light)'"
+              onmouseleave="this.style.background=''">
+              <td><strong>${p.name}</strong></td>
               <td style="color:var(--gray-600)">${p.description || "—"}</td>
-              <td><button class="btn btn-secondary btn-sm" onclick="navigate('products/${p.id}')">Open</button></td>
+              <td onclick="event.stopPropagation()">
+                <button class="btn btn-secondary btn-sm" onclick="navigate('products/${p.id}')">Open</button>
+              </td>
             </tr>`).join("")}
           </tbody></table></div>`
       }
@@ -570,14 +575,16 @@ router.register("products", async () => {
       ? `<div class="card"><div class="empty-state"><div class="empty-icon">📦</div><p>No products yet.</p></div></div>`
       : `<div class="grid grid-3">
         ${products.map(p => `
-          <div class="card">
+          <div class="card" style="cursor:pointer;transition:box-shadow .15s,transform .1s"
+            onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,.12)';this.style.transform='translateY(-1px)'"
+            onmouseleave="this.style.boxShadow='';this.style.transform=''"
+            onclick="navigate('products/${p.id}')">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-              <span style="font-size:16px;font-weight:600;cursor:pointer" onclick="navigate('products/${p.id}')">${p.name}</span>
+              <span style="font-size:16px;font-weight:600">${p.name}</span>
               <span class="badge badge-blue">Product</span>
             </div>
             <div style="color:var(--gray-600);font-size:13px;margin-bottom:12px">${p.description || "No description"}</div>
-            <div style="display:flex;gap:6px;margin-top:8px">
-              <button class="btn btn-secondary btn-sm" onclick="navigate('products/${p.id}')">Open</button>
+            <div style="display:flex;gap:6px;margin-top:8px" onclick="event.stopPropagation()">
               <button class="btn btn-secondary btn-sm" onclick="showEditProduct('${p.id}','${p.name.replace(/'/g,"\\'")}','${(p.description||"").replace(/'/g,"\\'")}')">Edit</button>
               <button class="btn btn-danger btn-sm" onclick="deleteProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">Delete</button>
             </div>
@@ -648,6 +655,7 @@ router.register("products/:id", async (hash, parts) => {
       <button class="tab-btn active" onclick="switchTab(this,'tab-releases')">Releases (${releases.length})</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-apps')">Applications & Pipelines (${apps.length})</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-envs')">Environments (${envs.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-rbac');loadRbacMatrix('product:${product.id}')">RBAC</button>
     </div>
 
     <!-- Releases -->
@@ -660,12 +668,15 @@ router.register("products/:id", async (hash, parts) => {
         : `<div class="table-wrap"><table>
           <thead><tr><th>Name</th><th>Version</th><th>Pipelines</th><th>Created</th><th>Actions</th></tr></thead>
           <tbody>${releases.map(r => `
-            <tr>
-              <td><a href="#products/${productId}/releases/${r.id}">${r.name}</a></td>
+            <tr style="cursor:pointer" class="clickable-row"
+              onclick="navigate('products/${productId}/releases/${r.id}')"
+              onmouseenter="this.style.background='var(--primary-light)'"
+              onmouseleave="this.style.background=''">
+              <td><strong>${r.name}</strong></td>
               <td>${r.version || "—"}</td>
               <td>${(r.pipelines||[]).length}</td>
               <td style="color:var(--gray-400)">${fmtDate(r.created_at)}</td>
-              <td>
+              <td onclick="event.stopPropagation()">
                 ${pageMenu("rl-"+r.id, [
                   {label: "👁 View Release", onclick: `navigate('products/${productId}/releases/${r.id}')` },
                   {label: "✏ Edit", onclick: `showEditRelease('${productId}','${r.id}','${r.name.replace(/'/g,"\\'")}','${r.version||""}','${(r.description||"").replace(/'/g,"\\'")}')` },
@@ -713,7 +724,7 @@ router.register("products/:id", async (hash, parts) => {
                 onclick="toggleAppCard('app-body-${a.id}','app-chev-${a.id}')">
                 <span id="app-chev-${a.id}" style="font-size:12px;color:var(--gray-400);transition:transform .15s;display:inline-block">▶</span>
                 <div style="flex:1">
-                  <span style="font-weight:600;font-size:14px">${a.name}</span>
+                  <a href="#products/${productId}/applications/${a.id}" onclick="navigate('products/${productId}/applications/${a.id}');event.stopPropagation();return false;" style="font-weight:600;font-size:14px;color:inherit;text-decoration:none">${a.name}</a>
                   <span class="badge badge-blue" style="margin-left:8px">${a.artifact_type}</span>
                   ${a.repository_url ? `<span style="font-size:11.5px;color:var(--gray-400);margin-left:8px">${a.repository_url}</span>` : ""}
                   <span style="font-size:12px;color:var(--gray-400);margin-left:8px">${appPipelines.length} pipeline(s)</span>
@@ -732,12 +743,16 @@ router.register("products/:id", async (hash, parts) => {
                 ${appPipelines.length === 0
                   ? `<div style="font-size:12px;color:var(--gray-400);padding:4px 0">No pipelines — click "+ Pipeline" to add one.</div>`
                   : `<div class="table-wrap"><table style="font-size:13px">
-                      <thead><tr><th>Pipeline</th><th>Kind</th><th>Actions</th></tr></thead>
+                      <thead><tr><th>Pipeline</th><th>Kind</th><th>Compliance</th><th>Actions</th></tr></thead>
                       <tbody>${appPipelines.map(pl => `
-                        <tr>
-                          <td><a href="#products/${productId}/pipelines/${pl.id}">${pl.name}</a></td>
+                        <tr style="cursor:pointer" class="clickable-row"
+                          onclick="navigate('products/${productId}/pipelines/${pl.id}')"
+                          onmouseenter="this.style.background='var(--primary-light)'"
+                          onmouseleave="this.style.background=''">
+                          <td><strong>${pl.name}</strong></td>
                           <td><span class="badge badge-${pl.kind}">${pl.kind.toUpperCase()}</span></td>
-                          <td>
+                          <td><span class="badge badge-${(pl.compliance_rating||'').toLowerCase()}">${pl.compliance_rating||'—'}</span></td>
+                          <td onclick="event.stopPropagation()">
                             ${pageMenu("plr-"+pl.id, [
                               {label: "👁 View Pipeline", onclick: `navigate('products/${productId}/pipelines/${pl.id}')` },
                               {divider: true},
@@ -751,6 +766,13 @@ router.register("products/:id", async (hash, parts) => {
             </div>`;
           }).join("")
       }
+    </div>
+
+    <!-- RBAC -->
+    <div id="tab-rbac" class="tab-panel">
+      <div id="rbac-matrix-${product.id}" style="min-height:60px">
+        <div class="empty-state"><div class="empty-icon">🔐</div><p>Click the RBAC tab to load the permission matrix.</p></div>
+      </div>
     </div>
   `);
 });
@@ -773,6 +795,142 @@ function switchTab(btn, tabId) {
   const parent = btn.closest(".tabs").parentElement;
   parent.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
   document.getElementById(tabId)?.classList.add("active");
+}
+
+// ── RBAC permission matrix ────────────────────────────────────────────────────
+
+// ── RBAC permission matrix ────────────────────────────────────────────────────
+// Rows = principals (users + groups), Columns = roles.
+// Each cell has a checkbox; clicking it toggles the binding at this scope.
+
+async function loadRbacMatrix(scope) {
+  const resourceId = scope.split(":")[1] || scope;
+  const el = document.getElementById(`rbac-matrix-${resourceId}`);
+  if (!el) return;
+  el.innerHTML = `<div style="color:var(--gray-400);padding:12px">Loading…</div>`;
+  try {
+    const [bindings, roles, users, groups] = await Promise.all([
+      api.getScopeBindings(scope),
+      api.getRoles().catch(() => []),
+      api.getUsers().catch(() => []),
+      api.getGroups().catch(() => []),
+    ]);
+    el.innerHTML = _renderRbacMatrix(scope, bindings, roles, users, groups);
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red-500);padding:12px">Failed to load RBAC: ${e.message}</div>`;
+  }
+}
+
+function _renderRbacMatrix(scope, bindings, roles, users, groups) {
+  if (!roles.length) return `<div style="padding:12px;color:var(--gray-400)">No roles defined. <a href="#admin/roles">Create roles</a> first.</div>`;
+
+  // Build lookup: "user:uid:roleId" or "group:gid:roleId" → bindingId
+  const bindingMap = {};
+  for (const b of bindings) {
+    const key = b.user_id ? `user:${b.user_id}:${b.role_id}` : `group:${b.group_id}:${b.role_id}`;
+    bindingMap[key] = b.id;
+  }
+
+  // Build principals list: groups first, then users (like Jenkins)
+  const principals = [
+    ...groups.map(g => ({ type: "group", id: g.id, label: g.name, sub: `${g.member_count} members` })),
+    ...users.map(u => ({ type: "user", id: u.id, label: u.display_name || u.username, sub: u.username })),
+  ];
+
+  if (!principals.length) return `<div style="padding:12px;color:var(--gray-400)">No users or groups in the system.</div>`;
+
+  // Column headers — role name + tooltip of permissions
+  const roleCols = roles.map(r =>
+    `<th style="text-align:center;min-width:100px;vertical-align:bottom;padding:6px 4px">
+      <div style="font-size:11.5px;font-weight:600;color:var(--gray-700)">${r.name}</div>
+      <div style="font-size:10px;color:var(--gray-400);margin-top:2px">${r.permissions.join(" · ")}</div>
+    </th>`
+  ).join("");
+
+  // Rows
+  const rows = principals.map(p => {
+    const typeIcon = p.type === "group"
+      ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--primary-light);color:var(--primary);font-size:11px;font-weight:700;margin-right:8px">G</span>`
+      : `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;margin-right:8px">U</span>`;
+
+    const cells = roles.map(r => {
+      const key = `${p.type}:${p.id}:${r.id}`;
+      const bindingId = bindingMap[key] || null;
+      const checked = bindingId ? "checked" : "";
+      const cbId = `rbac-cb-${p.type}-${p.id}-${r.id}`.replace(/[^a-zA-Z0-9-]/g, "-");
+      return `<td style="text-align:center;padding:8px 4px">
+        <label style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center">
+          <input type="checkbox" id="${cbId}" ${checked}
+            style="width:18px;height:18px;cursor:pointer;accent-color:var(--primary)"
+            onchange="toggleRbacBinding(this,'${scope}','${p.type}','${p.id}','${r.id}','${bindingId || ""}')">
+        </label>
+      </td>`;
+    }).join("");
+
+    return `<tr style="border-bottom:1px solid var(--gray-100)">
+      <td style="padding:8px 12px;white-space:nowrap">
+        <div style="display:flex;align-items:center">
+          ${typeIcon}
+          <div>
+            <div style="font-weight:600;font-size:13px">${p.label}</div>
+            <div style="font-size:11px;color:var(--gray-400)">${p.sub}</div>
+          </div>
+        </div>
+      </td>
+      ${cells}
+    </tr>`;
+  }).join("");
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--gray-700)">Permission Matrix</div>
+        <div style="font-size:11.5px;color:var(--gray-400)">Scope: <code>${scope}</code> — check a cell to grant, uncheck to revoke</div>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="border-collapse:collapse;width:100%;min-width:400px">
+        <thead>
+          <tr style="background:var(--gray-50);border-bottom:2px solid var(--gray-200)">
+            <th style="text-align:left;padding:8px 12px;font-size:12px;color:var(--gray-600);font-weight:600;min-width:180px">Principal</th>
+            ${roleCols}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function toggleRbacBinding(checkbox, scope, pType, pId, roleId, existingBindingId) {
+  // Disable checkbox during the async call to prevent double-clicks
+  checkbox.disabled = true;
+  try {
+    if (checkbox.checked) {
+      // Grant: create binding
+      const body = { scope, role_id: roleId };
+      if (pType === "user") body.user_id = pId;
+      else body.group_id = pId;
+      const created = await api.createScopeBinding(body);
+      // Update the onchange attribute with the new binding id so uncheck can delete it
+      checkbox.setAttribute("onchange",
+        `toggleRbacBinding(this,'${scope}','${pType}','${pId}','${roleId}','${created.id}')`);
+      toast("Access granted", "success");
+    } else {
+      // Revoke: delete binding
+      if (!existingBindingId) { checkbox.checked = false; return; }
+      await api.deleteScopeBinding(existingBindingId);
+      checkbox.setAttribute("onchange",
+        `toggleRbacBinding(this,'${scope}','${pType}','${pId}','${roleId}','')`);
+      toast("Access revoked", "success");
+    }
+  } catch (e) {
+    // Revert the checkbox visual state on error
+    checkbox.checked = !checkbox.checked;
+    toast(e.message, "error");
+  } finally {
+    checkbox.disabled = false;
+  }
 }
 
 async function deleteProduct(id, name) {
@@ -1219,6 +1377,104 @@ function pipelineContextTabs(productId, pipelineId, activeTab) {
 
 // ── Pipeline detail ────────────────────────────────────────────────────────
 let _pipelineVisualStages = [];
+// ── Application detail ────────────────────────────────────────────────────────
+
+router.register("products/:pid/applications/:id", async (hash, parts) => {
+  const [, productId,, appId] = parts;
+  setBreadcrumb({ label: "Products", hash: "products" }, { label: "Loading…" });
+  setContent(loading());
+
+  const [product, app, pipelines, maturity] = await Promise.all([
+    api.getProduct(productId),
+    api.getApplication(productId, appId),
+    api.getPipelines(productId).catch(() => []),
+    api.getApplicationMaturity(appId).catch(() => null),
+  ]);
+
+  setBreadcrumb(
+    { label: "Products", hash: "products" },
+    { label: product.name, hash: `products/${productId}` },
+    { label: app.name }
+  );
+
+  const appPipelines = pipelines.filter(pl => pl.application_id === appId);
+  const compliance = app.compliance_rating || "—";
+  const maturityScore = maturity?.overall_score ?? null;
+
+  setContent(`
+    <div class="page-header">
+      <div>
+        <h1>${app.name}</h1>
+        <div class="sub">
+          <span class="badge badge-blue">${app.artifact_type}</span>
+          ${app.repository_url ? `<span style="margin-left:8px;color:var(--gray-400)">${app.repository_url}</span>` : ""}
+          ${app.build_version ? `<span style="margin-left:8px;color:var(--gray-400)">v${app.build_version}</span>` : ""}
+        </div>
+      </div>
+      ${pageMenu("app-detail-${appId}", [
+        {label: "✏ Edit Application", onclick: `showEditApp('${productId}','${appId}','${app.name.replace(/'/g,"\\'")}','${app.artifact_type}','${(app.repository_url||"").replace(/'/g,"\\'")}')` },
+        {divider: true},
+        {label: "🗑 Delete Application", onclick: `deleteApp('${productId}','${appId}','${app.name.replace(/'/g,"\\'")}')`, danger: true},
+      ])}
+    </div>
+
+    <!-- Summary cards -->
+    <div class="grid grid-3" style="margin-bottom:20px">
+      <div class="card" style="text-align:center">
+        <div style="font-size:28px;font-weight:700;color:var(--primary)">${appPipelines.length}</div>
+        <div style="font-size:12px;color:var(--gray-500)">Pipelines</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div style="font-size:28px;font-weight:700"><span class="badge badge-${compliance.toLowerCase()}">${compliance}</span></div>
+        <div style="font-size:12px;color:var(--gray-500)">Compliance Rating</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div style="font-size:28px;font-weight:700;color:var(--primary)">${maturityScore !== null ? maturityScore + "/5" : "—"}</div>
+        <div style="font-size:12px;color:var(--gray-500)">Maturity Score</div>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab(this,'tab-app-pipelines')">Pipelines (${appPipelines.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-app-rbac');loadRbacMatrix('application:${appId}')">RBAC</button>
+    </div>
+
+    <!-- Pipelines -->
+    <div id="tab-app-pipelines" class="tab-panel active">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <button class="btn btn-primary btn-sm" onclick="showCreatePipelineForApp('${productId}','${appId}')">+ New Pipeline</button>
+      </div>
+      ${appPipelines.length === 0
+        ? `<div class="empty-state"><div class="empty-icon">🔧</div><p>No pipelines yet.</p></div>`
+        : `<div class="table-wrap"><table>
+            <thead><tr><th>Pipeline</th><th>Kind</th><th>Compliance</th><th>Actions</th></tr></thead>
+            <tbody>${appPipelines.map(pl => `
+              <tr class="clickable-row" onclick="navigate('products/${productId}/pipelines/${pl.id}')"
+                onmouseenter="this.style.background='var(--primary-light)'" onmouseleave="this.style.background=''">
+                <td><strong>${pl.name}</strong></td>
+                <td><span class="badge badge-${pl.kind}">${pl.kind.toUpperCase()}</span></td>
+                <td><span class="badge badge-${(pl.compliance_rating||'').toLowerCase()}">${pl.compliance_rating||'—'}</span></td>
+                <td onclick="event.stopPropagation()">
+                  ${pageMenu("plr2-"+pl.id, [
+                    {label: "👁 View Pipeline", onclick: `navigate('products/${productId}/pipelines/${pl.id}')` },
+                    {divider: true},
+                    {label: "🗑 Delete", onclick: `deletePipeline('${productId}','${pl.id}','${pl.name.replace(/'/g,"\\'")}')`, danger: true},
+                  ])}
+                </td>
+              </tr>`).join("")}
+            </tbody></table></div>`
+      }
+    </div>
+
+    <!-- RBAC -->
+    <div id="tab-app-rbac" class="tab-panel">
+      <div id="rbac-matrix-${appId}" style="min-height:60px">
+        <div class="empty-state"><div class="empty-icon">🔐</div><p>Click the RBAC tab to load the permission matrix.</p></div>
+      </div>
+    </div>
+  `);
+});
+
 let _plEditorProductId = null;
 let _plEditorPipelineId = null;
 let _plYamlDebounce = null;
@@ -1254,11 +1510,12 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
           <span id="stage-arrow-${s.id}" style="font-size:12px;color:var(--gray-500);transition:transform .15s">▼</span>
           <strong style="font-size:14px;flex:1">#${s.order} ${s.name}</strong>
           ${s.container_image ? `<code style="font-size:11px;color:var(--gray-500)">${s.container_image}</code>` : ""}
+          ${s.execution_mode === "parallel" ? `<span class="badge badge-blue" title="Runs in parallel with adjacent parallel stages">⇉ parallel</span>` : ""}
           ${s.is_protected ? `<span class="badge badge-blue">🔒</span>` : ""}
           <div onclick="event.stopPropagation()">
             ${pageMenu("stg-"+s.id, [
               {label: "＋ Add Task", onclick: `showCreateTask('${productId}','${pipelineId}','${s.id}')`},
-              {label: "✏ Edit Stage", onclick: `showEditStage('${productId}','${pipelineId}','${s.id}','${s.name.replace(/'/g,"\\'")}','${s.run_language||"bash"}','${s.container_image||""}',${s.order},${s.is_protected},'${s.accent_color||""}')`},
+              {label: "✏ Edit Stage", onclick: `showEditStage('${productId}','${pipelineId}','${s.id}','${s.name.replace(/'/g,"\\'")}','${s.run_language||"bash"}','${s.container_image||""}',${s.order},${s.is_protected},'${s.accent_color||""}','${s.execution_mode||"sequential"}')`},
               {label: "🎨 Change Color", onclick: `showStageColorPicker('${productId}','${pipelineId}','${s.id}','${s.name.replace(/'/g,"\\'")}','${s.accent_color||""}')`},
               {label: "📄 View YAML", onclick: `showStageYaml('${productId}','${pipelineId}','${s.id}','${s.name.replace(/'/g,"\\'")}')` },
               {divider: true},
@@ -1775,8 +2032,9 @@ router.register("products/:pid/pipelines/:id/runs", async (hash, parts) => {
         : `<div class="table-wrap"><table id="runs-table">
           <thead><tr><th>Run ID</th><th>Status</th><th>Progress</th><th>Commit</th><th>Artifact</th><th>Triggered By</th><th>Started</th><th>Duration</th></tr></thead>
           <tbody>${runs.map(r => `
-            <tr data-status="${r.status||""}" data-triggered="${r.triggered_by||""}" data-started="${r.started_at||""}">
-              <td><a href="#pipeline-runs/${r.id}" onclick="navigate('pipeline-runs/${r.id}');return false;"><code style="font-size:11.5px">${r.id}</code></a></td>
+            <tr class="clickable-row" data-status="${r.status||""}" data-triggered="${r.triggered_by||""}" data-started="${r.started_at||""}"
+              onclick="navigate('pipeline-runs/${r.id}')">
+              <td><code style="font-size:11.5px">${r.id}</code></td>
               <td>${statusBadge(r.status)}</td>
               <td>${completionBar(r.completion_percentage)}</td>
               <td><code style="font-size:11.5px">${(r.commit_sha||"").slice(0,8)||"—"}</code></td>
@@ -2220,7 +2478,7 @@ router.register("products/:pid/releases/:id", async (hash, parts) => {
           <thead><tr><th>Run ID</th><th>Status</th><th>Started</th><th>Finished</th></tr></thead>
           <tbody>${runs.map(r => `
             <tr>
-              <td><code style="font-size:11.5px">${r.id}</code></td>
+              <td><a href="#release-runs/${r.id}" onclick="navigate('release-runs/${r.id}');return false;"><code style="font-size:11.5px">${r.id}</code></a></td>
               <td>${statusBadge(r.status)}</td>
               <td style="color:var(--gray-400)">${fmtDate(r.started_at)}</td>
               <td style="color:var(--gray-400)">${fmtDate(r.finished_at)}</td>
@@ -2482,7 +2740,7 @@ router.register("templates", async () => {
           <h2 style="font-size:14px;font-weight:700;color:var(--gray-700);margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em">${cat}</h2>
           <div class="grid grid-3" style="gap:14px">
             ${items.map(t => `
-              <div class="card" style="padding:18px;cursor:default">
+              <div class="card" style="padding:18px;cursor:pointer" onclick="navigate('templates/${t.id}')">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
                   <div style="font-size:24px">🗂️</div>
                   ${kindBadge(t.kind)}
@@ -2496,9 +2754,9 @@ router.register("templates", async () => {
                   <span>${t.stage_count||0} stage(s) · ${t.task_count||0} task(s)</span>
                   <span>by ${t.created_by||"system"}</span>
                 </div>
-                <div style="display:flex;gap:6px">
+                <div style="display:flex;gap:6px" onclick="event.stopPropagation()">
                   <button class="btn btn-primary btn-sm" style="flex:1" onclick="showUseTeplateModal('${t.id}','${t.name.replace(/'/g,"\\'")}')">Use Template</button>
-                  <button class="btn btn-secondary btn-sm" onclick="showEditTemplateModal('${t.id}')">Edit</button>
+                  <button class="btn btn-secondary btn-sm" onclick="navigate('templates/${t.id}')">Edit</button>
                   <button class="btn btn-danger btn-sm" onclick="deleteTemplate('${t.id}','${t.name.replace(/'/g,"\\'")}')">Del</button>
                 </div>
               </div>`).join("")}
@@ -2617,6 +2875,229 @@ async function deleteTemplate(id, name) {
   await request("DELETE", `/pipeline-templates/${id}`);
   showToast("Template deleted", "success");
   navigate("templates");
+}
+
+// ── Template detail (YAML + visual editor, no run button) ─────────────────
+let _tmplEditorId = null;
+let _tmplYamlDebounce = null;
+
+router.register("templates/:id", async (hash, parts) => {
+  const tmplId = parts[1];
+  _tmplEditorId = tmplId;
+  setBreadcrumb({ label: "Templates", hash: "templates" }, { label: "Loading…" });
+  setContent(loading());
+
+  const t = await request("GET", `/pipeline-templates/${tmplId}`).catch(() => null);
+  if (!t) { setContent(`<div class="card"><div class="empty-state"><p>Template not found.</p></div></div>`); return; }
+
+  setBreadcrumb({ label: "Templates", hash: "templates" }, { label: t.name });
+
+  const stages = t.stages || [];
+  _pipelineVisualStages = stages.map((s, i) => ({
+    ...s,
+    id: s.id || `tmpl-s-${i}`,
+    tasks: (s.tasks || []).map((tk, j) => ({ ...tk, id: tk.id || `tmpl-t-${i}-${j}` })),
+  }));
+
+  const kindBadge = k => `<span style="background:${k==="cd"?"#ede9fe":"#dbeafe"};color:${k==="cd"?"#7c3aed":"#1d4ed8"};padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;text-transform:uppercase">${k||"CI"}</span>`;
+
+  const stagesHtml = stages.length === 0
+    ? `<div class="empty-state"><div class="empty-icon">📋</div><p>No stages yet. Switch to YAML view to add stages.</p></div>`
+    : stages.map((s, idx) => {
+        const _ac = s.accent_color || STAGE_GRADIENTS[idx % STAGE_GRADIENTS.length].color;
+        return `
+        <div id="tmpl-stage-block-${idx}" style="border:1px solid var(--gray-200);border-left:4px solid ${_ac};border-radius:8px;margin-bottom:10px;background:#fff">
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer"
+            onclick="toggleTmplStageBlock(${idx})">
+            <span id="tmpl-stage-arrow-${idx}" style="font-size:12px;color:var(--gray-500);transition:transform .15s">▼</span>
+            <strong style="font-size:14px;flex:1">#${s.order || idx+1} ${s.name}</strong>
+            ${s.container_image ? `<code style="font-size:11px;color:var(--gray-500)">${s.container_image}</code>` : ""}
+            ${s.execution_mode === "parallel" ? `<span class="badge badge-blue" title="Runs in parallel with adjacent parallel stages">⇉ parallel</span>` : ""}
+          </div>
+          <div id="tmpl-stage-body-${idx}" style="padding:0 12px 12px">
+            ${(s.tasks||[]).length === 0
+              ? `<div style="color:var(--gray-500);font-size:13px;padding:4px 0 2px">No tasks in this stage.</div>`
+              : `<table style="margin:0;width:100%">
+                  <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Timeout</th><th>Mode</th><th>Required</th></tr></thead>
+                  <tbody>${(s.tasks||[]).map(tk => `
+                    <tr>
+                      <td style="color:var(--gray-400)">${tk.order||""}</td>
+                      <td><strong>${tk.name}</strong>${tk.description?`<br><small style="color:var(--gray-500)">${tk.description}</small>`:""}</td>
+                      <td>${_taskTypeBadges(tk.task_type)}</td>
+                      <td>${tk.timeout||300}s</td>
+                      <td><span class="badge ${tk.execution_mode==="parallel"?"badge-blue":"badge-silver"}">${tk.execution_mode||"sequential"}</span></td>
+                      <td>${tk.is_required?'<span class="badge badge-success">Yes</span>':'<span class="badge badge-silver">No</span>'}</td>
+                    </tr>`).join("")}
+                  </tbody>
+                </table>`
+            }
+          </div>
+        </div>`;
+      }).join("");
+
+  setContent(`
+    <div class="page-header">
+      <div>
+        <h1>${t.name}</h1>
+        <div class="sub">
+          ${kindBadge(t.kind)}
+          ${t.category ? `<span style="margin-left:8px;font-size:12px;color:var(--gray-500)">${t.category}</span>` : ""}
+          ${(t.tags||[]).map(tag=>`<span style="background:var(--gray-100);color:var(--gray-600);font-size:11px;padding:1px 8px;border-radius:8px;margin-left:4px">${tag}</span>`).join("")}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn-primary btn-sm" onclick="showUseTeplateModal('${t.id}','${t.name.replace(/'/g,"\\'")}')">▶ Use Template</button>
+        ${pageMenu("tmpl-"+t.id, [
+          {label: "✎ Edit YAML", onclick: `toggleTmplMode('yaml','${t.id}')`},
+          {label: "⬇ Download YAML", onclick: `exportYaml('/api/v1/pipeline-templates/${t.id}/export','${t.name.replace(/'/g,"\\'")} template.yaml')`},
+          {label: "✏ Edit Metadata", onclick: `showEditTemplateModal('${t.id}')`},
+          {divider: true},
+          {label: "🗑 Delete Template", onclick: `deleteTemplate('${t.id}','${t.name.replace(/'/g,"\\'")}')`, danger: true},
+        ])}
+      </div>
+    </div>
+
+    <!-- Normal mode -->
+    <div id="tmpl-normal-mode">
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h2>Template Flow</h2>
+          <span style="font-size:12px;color:var(--gray-400)">Visual overview of stages and tasks</span>
+        </div>
+        <div style="overflow-x:auto;min-height:${stages.length?"160px":"60px"};background:var(--gray-50);border-radius:6px;padding:12px">
+          <svg id="tmpl-visual-svg-normal" style="display:block"></svg>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h2>Details</h2></div>
+        <div class="detail-grid">
+          <div class="detail-row"><span class="detail-label">ID</span><code style="font-size:12px">${t.id}</code></div>
+          <div class="detail-row"><span class="detail-label">Kind</span><span class="detail-value">${(t.kind||"ci").toUpperCase()}</span></div>
+          <div class="detail-row"><span class="detail-label">Category</span><span class="detail-value">${t.category||"—"}</span></div>
+          <div class="detail-row"><span class="detail-label">Created by</span><span class="detail-value">${t.created_by||"—"}</span></div>
+          ${t.description ? `<div class="detail-row" style="grid-column:1/-1"><span class="detail-label">Description</span><span class="detail-value">${t.description}</span></div>` : ""}
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h2>Stages (${stages.length})</h2>
+          <button class="btn btn-secondary btn-sm" onclick="toggleTmplMode('yaml','${t.id}')">✎ Edit in YAML</button>
+        </div>
+        ${stagesHtml}
+      </div>
+    </div>
+
+    <!-- Split-screen YAML + Visual mode -->
+    <div id="tmpl-yaml-mode" style="display:none">
+      <div style="display:flex;gap:0;height:calc(100vh - 180px);min-height:500px">
+        <div style="flex:0 0 45%;display:flex;flex-direction:column;border:1px solid var(--gray-200);border-radius:8px 0 0 8px;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--gray-50);border-bottom:1px solid var(--gray-200)">
+            <span style="font-size:12px;font-weight:600;color:var(--gray-600)">YAML Editor</span>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-secondary btn-sm" onclick="loadTemplateYaml('${t.id}')">↺ Reload</button>
+              <button class="btn btn-primary btn-sm" onclick="saveTemplateYaml('${t.id}')">💾 Save</button>
+            </div>
+          </div>
+          <textarea id="tmpl-yaml-editor" spellcheck="false"
+            oninput="onTmplYamlInput()"
+            style="flex:1;width:100%;font-family:monospace;font-size:13px;padding:12px;border:none;resize:none;background:#fff;color:var(--gray-800);line-height:1.5;outline:none"
+            placeholder="Loading YAML…"></textarea>
+          <div id="tmpl-yaml-status" style="padding:4px 12px;font-size:12px;background:var(--gray-50);border-top:1px solid var(--gray-200)"></div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;border:1px solid var(--gray-200);border-left:none;border-radius:0 8px 8px 0;overflow:hidden">
+          <div style="padding:8px 12px;background:var(--gray-50);border-bottom:1px solid var(--gray-200)">
+            <span style="font-size:12px;font-weight:600;color:var(--gray-600)">Visual Preview</span>
+          </div>
+          <div style="flex:1;overflow:auto;padding:12px;background:#f8fafc">
+            <svg id="tmpl-visual-svg-yaml" style="display:block"></svg>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="toggleTmplMode('normal','${t.id}')">← Back to Normal View</button>
+      </div>
+    </div>
+  `);
+
+  renderPipelineVisual(tmplId, "tmpl-visual-svg-normal");
+  loadTemplateYaml(tmplId);
+});
+
+function toggleTmplStageBlock(idx) {
+  const body = document.getElementById("tmpl-stage-body-" + idx);
+  const arrow = document.getElementById("tmpl-stage-arrow-" + idx);
+  if (!body) return;
+  const collapsed = body.style.display === "none";
+  body.style.display = collapsed ? "" : "none";
+  if (arrow) arrow.style.transform = collapsed ? "" : "rotate(-90deg)";
+}
+
+function toggleTmplMode(mode, tmplId) {
+  const normal = document.getElementById("tmpl-normal-mode");
+  const yaml   = document.getElementById("tmpl-yaml-mode");
+  if (!normal) return;
+  normal.style.display = mode === "normal" ? "" : "none";
+  yaml.style.display   = mode === "yaml"   ? "" : "none";
+  if (mode === "yaml") {
+    renderPipelineVisual(tmplId, "tmpl-visual-svg-yaml");
+  }
+}
+
+function onTmplYamlInput() {
+  clearTimeout(_tmplYamlDebounce);
+  _tmplYamlDebounce = setTimeout(() => {
+    renderPipelineVisual(_tmplEditorId, "tmpl-visual-svg-yaml");
+  }, 800);
+}
+
+async function loadTemplateYaml(tmplId) {
+  const ta = document.getElementById("tmpl-yaml-editor");
+  const st = document.getElementById("tmpl-yaml-status");
+  if (!ta) return;
+  ta.value = "# Loading…";
+  try {
+    const headers = {};
+    const token = auth.getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`/api/v1/pipeline-templates/${tmplId}/export`, { headers });
+    if (!res.ok) throw new Error("Failed to load YAML");
+    ta.value = await res.text();
+    if (st) st.innerHTML = `<span style="color:var(--gray-400)">Loaded at ${new Date().toLocaleTimeString()}</span>`;
+  } catch (e) {
+    ta.value = "# Error loading YAML: " + e.message;
+  }
+}
+
+async function saveTemplateYaml(tmplId) {
+  const ta = document.getElementById("tmpl-yaml-editor");
+  const st = document.getElementById("tmpl-yaml-status");
+  if (!ta) return;
+  const yamlText = ta.value.trim();
+  if (!yamlText) return;
+  if (st) st.innerHTML = `<span style="color:var(--gray-400)">Saving…</span>`;
+  try {
+    const headers = { "Content-Type": "text/yaml" };
+    const token = auth.getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`/api/v1/pipeline-templates/${tmplId}/import`, {
+      method: "POST", headers, body: yamlText,
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Save failed");
+    if (st) st.innerHTML = `<span style="color:var(--success)">✓ Saved at ${new Date().toLocaleTimeString()}</span>`;
+    toast("Template saved", "success");
+    // Refresh visual with updated stages
+    _pipelineVisualStages = (json.stages || []).map((s, i) => ({
+      ...s, id: s.id || `tmpl-s-${i}`,
+      tasks: (s.tasks||[]).map((tk,j) => ({...tk, id: tk.id||`tmpl-t-${i}-${j}`})),
+    }));
+    renderPipelineVisual(tmplId, "tmpl-visual-svg-yaml");
+  } catch (e) {
+    if (st) st.innerHTML = `<span style="color:var(--danger)">✗ ${e.message}</span>`;
+    toast(e.message, "error");
+  }
 }
 
 // ── Environments list (top-level) ─────────────────────────────────────────
@@ -3913,6 +4394,148 @@ async function _sendWebhookTest(webhookId) {
 router.register("admin", (hash, parts) => navigate("admin/users"));
 
 // ── User Management (Users / Groups / Roles) ──────────────────────────────
+// ── Admin RBAC page helpers ───────────────────────────────────────────────────
+
+function _renderAdminRbacPicker() {
+  return `
+    <div style="padding:16px">
+      <div style="font-size:13px;color:var(--gray-600);margin-bottom:16px">
+        Select a resource scope to view and edit its permission matrix.
+        Permissions are inherited: <em>organization</em> bindings apply everywhere;
+        product/environment bindings apply to that resource only.
+      </div>
+
+      <!-- Scope type selector -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+        <button class="btn btn-secondary btn-sm rbac-scope-type active" id="scopetype-system"
+          onclick="_selectRbacScopeType('system')">System (organization)</button>
+        <button class="btn btn-secondary btn-sm rbac-scope-type" id="scopetype-product"
+          onclick="_selectRbacScopeType('product')">Products</button>
+        <button class="btn btn-secondary btn-sm rbac-scope-type" id="scopetype-environment"
+          onclick="_selectRbacScopeType('environment')">Environments</button>
+      </div>
+
+      <!-- Resource picker (hidden for system) -->
+      <div id="rbac-resource-picker" style="display:none;margin-bottom:16px">
+        <select id="rbac-resource-select" class="form-control" style="max-width:380px"
+          onchange="_loadAdminRbacMatrix()">
+          <option value="">— Select a resource —</option>
+        </select>
+      </div>
+
+      <!-- Matrix area -->
+      <div id="admin-rbac-matrix">
+        <div style="color:var(--gray-400);font-size:13px;padding:8px 0">Loading…</div>
+      </div>
+    </div>`;
+}
+
+// Called after the RBAC tab panel is rendered into the DOM
+async function _initAdminRbacPicker() {
+  // Default: system/organization scope — load immediately
+  window._rbacScopeType = "system";
+  window._rbacResources = {};
+  // Pre-fetch products + environments for the pickers
+  const [products, envs] = await Promise.all([
+    api.getProducts().catch(() => []),
+    api.getEnvironments().catch(() => []),
+  ]);
+  window._rbacResources = {
+    product: (products.items || products || []).map(p => ({ id: p.id, label: p.name })),
+    environment: (envs || []).map(e => ({ id: e.id, label: e.name })),
+  };
+  _loadAdminRbacMatrix();
+}
+
+function _selectRbacScopeType(type) {
+  window._rbacScopeType = type;
+  document.querySelectorAll(".rbac-scope-type").forEach(b => b.classList.remove("active", "btn-primary"));
+  document.querySelectorAll(".rbac-scope-type").forEach(b => b.classList.add("btn-secondary"));
+  const btn = document.getElementById(`scopetype-${type}`);
+  if (btn) { btn.classList.remove("btn-secondary"); btn.classList.add("btn-primary"); }
+
+  const picker = document.getElementById("rbac-resource-picker");
+  const sel    = document.getElementById("rbac-resource-select");
+  if (type === "system") {
+    if (picker) picker.style.display = "none";
+    _loadAdminRbacMatrix();
+  } else {
+    if (picker) picker.style.display = "block";
+    const resources = (window._rbacResources || {})[type] || [];
+    if (sel) {
+      sel.innerHTML = `<option value="">— Select a ${type} —</option>` +
+        resources.map(r => `<option value="${type}:${r.id}">${r.label}</option>`).join("");
+    }
+    // Clear matrix until a resource is chosen
+    const mx = document.getElementById("admin-rbac-matrix");
+    if (mx) mx.innerHTML = `<div style="color:var(--gray-400);font-size:13px;padding:8px 0">Select a ${type} above to load its permission matrix.</div>`;
+  }
+}
+
+async function _loadAdminRbacMatrix() {
+  const type = window._rbacScopeType || "system";
+  let scope = "organization";
+  if (type !== "system") {
+    const sel = document.getElementById("rbac-resource-select");
+    scope = sel?.value || "";
+    if (!scope) return;
+  }
+
+  const mx = document.getElementById("admin-rbac-matrix");
+  if (!mx) return;
+  mx.innerHTML = `<div style="color:var(--gray-400);font-size:13px;padding:8px 0">Loading…</div>`;
+
+  try {
+    const [bindings, roles, users, groups] = await Promise.all([
+      api.getScopeBindings(scope),
+      api.getRoles().catch(() => []),
+      api.getUsers().catch(() => []),
+      api.getGroups().catch(() => []),
+    ]);
+    // Re-use the existing matrix renderer but target admin-rbac-matrix
+    // Temporarily set id so _renderRbacMatrix target works
+    const resourceId = scope.split(":")[1] || scope;
+    mx.id = `rbac-matrix-${resourceId}`;
+    mx.innerHTML = _renderRbacMatrix(scope, bindings, roles, users, groups);
+    // Restore id so reloads still work
+    mx.id = "admin-rbac-matrix";
+    // Patch all toggleRbacBinding calls in this matrix to refresh admin view
+    mx.querySelectorAll("input[type=checkbox]").forEach(cb => {
+      const orig = cb.getAttribute("onchange") || "";
+      cb.setAttribute("onchange", orig.replace(/toggleRbacBinding\(/, "_adminToggleRbacBinding("));
+    });
+  } catch (e) {
+    mx.innerHTML = `<div style="color:var(--red-500);padding:8px 0">Failed to load: ${e.message}</div>`;
+  }
+}
+
+async function _adminToggleRbacBinding(checkbox, scope, pType, pId, roleId, existingBindingId) {
+  // Same logic as toggleRbacBinding but refreshes admin matrix instead of product/app matrix
+  checkbox.disabled = true;
+  try {
+    if (checkbox.checked) {
+      const body = { scope, role_id: roleId };
+      if (pType === "user") body.user_id = pId;
+      else body.group_id = pId;
+      const created = await api.createScopeBinding(body);
+      checkbox.setAttribute("onchange",
+        `_adminToggleRbacBinding(this,'${scope}','${pType}','${pId}','${roleId}','${created.id}')`);
+      toast("Access granted", "success");
+    } else {
+      if (!existingBindingId) { checkbox.checked = false; return; }
+      await api.deleteScopeBinding(existingBindingId);
+      checkbox.setAttribute("onchange",
+        `_adminToggleRbacBinding(this,'${scope}','${pType}','${pId}','${roleId}','')`);
+      toast("Access revoked", "success");
+    }
+  } catch (e) {
+    checkbox.checked = !checkbox.checked;
+    toast(e.message, "error");
+  } finally {
+    checkbox.disabled = false;
+  }
+}
+
 async function _renderAdminUsers(subTab) {
   setBreadcrumb({ label: "Administration", hash: "admin/users" }, { label: "User Management" });
   setContent(loading());
@@ -4025,6 +4648,18 @@ router.register("admin/users-roles",  () => _renderAdminUsers("roles"));
 // legacy routes kept for back-compat
 router.register("admin/groups",  () => _renderAdminUsers("groups"));
 router.register("admin/roles",   () => _renderAdminUsers("roles"));
+
+router.register("admin/rbac", async () => {
+  setBreadcrumb({ label: "Administration", hash: "admin/users" }, { label: "Permissions" });
+  setContent(`
+    <div class="page-header">
+      <div><h1>Permissions</h1><div class="sub">Role bindings by resource scope — system, products and environments</div></div>
+    </div>
+    <div class="card" id="admin-rbac-card">
+      ${_renderAdminRbacPicker()}
+    </div>`);
+  _initAdminRbacPicker();
+});
 
 // ── Key Management (API Keys + Vault) ─────────────────────────────────────
 router.register("admin/keys", async () => {
@@ -4313,10 +4948,30 @@ router.register("admin/system", async () => {
       </div>
     </div>`;
 
+  const dbHtml = `
+    <div class="card" style="margin-bottom:20px" id="db-card">
+      <div class="card-header">
+        <div>
+          <h2>Database</h2>
+          <div style="font-size:12px;color:var(--gray-500);margin-top:2px">Connection info and health check</div>
+        </div>
+      </div>
+      <div style="padding:0 16px 16px">
+        <div id="db-info-area" style="margin-bottom:16px">
+          <div style="color:var(--gray-400);font-size:13px">Loading…</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="btn btn-secondary btn-sm" onclick="testDbConnection()">Test Connection</button>
+          <span id="db-test-result" style="font-size:13px"></span>
+        </div>
+      </div>
+    </div>`;
+
   setContent(`
     <div class="page-header">
-      <div><h1>System</h1><div class="sub">LDAP integration, task runner, agent pools, plugins and webhooks</div></div>
+      <div><h1>System</h1><div class="sub">Database, LDAP integration, task runner, agent pools, plugins and webhooks</div></div>
     </div>
+    ${dbHtml}
     ${runnerHtml}
     ${ldapHtml}
     ${agentsHtml}
@@ -4324,6 +4979,28 @@ router.register("admin/system", async () => {
     ${webhooksHtml}`);
 
   loadLdapConfig();
+  // Load database info
+  api.getDatabaseInfo().then(info => {
+    const el = document.getElementById("db-info-area");
+    if (!el) return;
+    const poolRows = Object.entries(info.pool).map(([k, v]) =>
+      `<div class="detail-row"><span class="detail-label">${k}</span><code style="font-size:12px">${v}</code></div>`
+    ).join("");
+    el.innerHTML = `
+      <div class="detail-grid" style="margin-bottom:12px">
+        <div class="detail-row"><span class="detail-label">Type</span><strong>${info.db_type}</strong></div>
+        <div class="detail-row"><span class="detail-label">Connection URI</span><code style="font-size:12px;word-break:break-all">${info.uri_masked}</code></div>
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--gray-500);margin-bottom:6px">CONNECTION POOL</div>
+      <div class="detail-grid">${poolRows}</div>
+      <div style="margin-top:10px;font-size:12px;color:var(--gray-400)">
+        To switch databases set <code>DATABASE_URL</code> in your Kubernetes ConfigMap/Secret and restart.
+        Supported schemes: <code>sqlite</code> · <code>postgresql</code> · <code>oracle+cx_oracle</code> · <code>mysql</code>
+      </div>`;
+  }).catch(() => {
+    const el = document.getElementById("db-info-area");
+    if (el) el.innerHTML = `<div style="color:var(--red-500)">Failed to load database info.</div>`;
+  });
   // Load current runner settings into form
   api.getSettings().then(settings => {
     const runnerSetting = settings.find(s => s.key === "TASK_RUNNER");
@@ -5130,6 +5807,12 @@ function showCreateStage(productId, pipelineId) {
        </select>
      </div>
      <div class="form-group"><label>Container Image</label><input id="sf-img" class="form-control" placeholder="e.g. ubuntu:22.04 (optional)"></div>
+     <div class="form-group"><label>Execution Mode</label>
+       <select id="sf-mode" class="form-control">
+         <option value="sequential">Sequential (runs after previous stage)</option>
+         <option value="parallel">Parallel (runs alongside adjacent parallel stages)</option>
+       </select>
+     </div>
      <div class="form-group"><label>Order</label><input id="sf-order" class="form-control" type="number" value="0"></div>
      <div class="form-group"><label>Protected</label>
        <select id="sf-prot" class="form-control">
@@ -5146,6 +5829,7 @@ function showCreateStage(productId, pipelineId) {
           name,
           run_language: el("sf-lang").value,
           container_image: el("sf-img").value.trim() || null,
+          execution_mode: el("sf-mode").value,
           order: parseInt(el("sf-order").value) || 0,
           is_protected: el("sf-prot").value === "true",
           accent_color: document.getElementById("sf-color").value || null,
@@ -5157,7 +5841,8 @@ function showCreateStage(productId, pipelineId) {
   );
 }
 
-function showEditStage(productId, pipelineId, stageId, name, runLang, containerImg, order, isProtected, accentColor) {
+function showEditStage(productId, pipelineId, stageId, name, runLang, containerImg, order, isProtected, accentColor, execMode) {
+  execMode = execMode || "sequential";
   openModal("Edit Stage",
     `<div class="form-group"><label>Name *</label><input id="es2-name" class="form-control" value="${name}"></div>
      <div class="form-group"><label>Language</label>
@@ -5167,6 +5852,12 @@ function showEditStage(productId, pipelineId, stageId, name, runLang, containerI
        </select>
      </div>
      <div class="form-group"><label>Container Image</label><input id="es2-img" class="form-control" value="${containerImg}"></div>
+     <div class="form-group"><label>Execution Mode</label>
+       <select id="es2-mode" class="form-control">
+         <option value="sequential"${execMode==="sequential"?" selected":""}>Sequential (runs after previous stage)</option>
+         <option value="parallel"${execMode==="parallel"?" selected":""}>Parallel (runs alongside adjacent parallel stages)</option>
+       </select>
+     </div>
      <div class="form-group"><label>Order</label><input id="es2-order" class="form-control" type="number" value="${order}"></div>
      <div class="form-group"><label>Protected</label>
        <select id="es2-prot" class="form-control">
@@ -5183,6 +5874,7 @@ function showEditStage(productId, pipelineId, stageId, name, runLang, containerI
           name: n,
           run_language: el("es2-lang").value,
           container_image: el("es2-img").value.trim() || null,
+          execution_mode: el("es2-mode").value,
           order: parseInt(el("es2-order").value) || 0,
           is_protected: el("es2-prot").value === "true",
           accent_color: document.getElementById("es2-color").value || null,
@@ -5316,6 +6008,21 @@ async function testRunnerSettings() {
     }
   } catch (e) {
     if (el_) el_.innerHTML = `<span style="color:#dc2626">✗ ${e.message}</span>`;
+  }
+}
+
+async function testDbConnection() {
+  const el = document.getElementById("db-test-result");
+  if (el) el.innerHTML = `<span style="color:var(--gray-500)">Testing…</span>`;
+  try {
+    const res = await api.testDatabase();
+    if (el) {
+      el.innerHTML = res.ok
+        ? `<span style="color:#059669">✓ ${res.message}</span>`
+        : `<span style="color:#dc2626">✗ ${res.message}</span>`;
+    }
+  } catch (e) {
+    if (el) el.innerHTML = `<span style="color:#dc2626">✗ ${e.message}</span>`;
   }
 }
 
@@ -6516,6 +7223,100 @@ router.register("pipeline-runs/:id", async (hash, parts) => {
         const updated = await api.getPipelineRun(runId).catch(() => null);
         if (!updated) return;
         setContent(_renderPipelineRun(updated, productId, pipelineId));
+        if (TERMINAL.has(updated.status)) { clearInterval(_pollTimer); _pollTimer = null; }
+      }, 2000);
+    }
+  }
+
+  await fetchAndRender();
+});
+
+// ── Release run detail ────────────────────────────────────────────────────
+function _renderReleaseRun(run) {
+  const pipelineRuns = (run.pipeline_runs || []);
+  const scoreHtml = run.compliance_score != null
+    ? `<span style="margin-left:12px;font-size:13px;color:var(--gray-500)">Compliance: <strong>${Math.round(run.compliance_score * 100)}%</strong>${run.compliance_rating ? ` (${run.compliance_rating})` : ""}</span>`
+    : "";
+
+  const prRows = pipelineRuns.length === 0
+    ? `<tr><td colspan="5" style="text-align:center;color:var(--gray-400);padding:20px">No pipeline runs recorded.</td></tr>`
+    : pipelineRuns.map(pr => `
+      <tr>
+        <td><a href="#pipeline-runs/${pr.id}" onclick="navigate('pipeline-runs/${pr.id}');return false;"><code style="font-size:11.5px">${pr.id}</code></a></td>
+        <td style="font-size:12px;color:var(--gray-500)">${pr.pipeline_name || pr.pipeline_id || "—"}</td>
+        <td>${statusBadge(pr.status)}</td>
+        <td>${completionBar(pr.completion_percentage)}</td>
+        <td style="color:var(--gray-400);font-size:12px">${fmtDate(pr.started_at)}</td>
+      </tr>`).join("");
+
+  return `
+    <div class="page-header" data-rrun="${run.id}">
+      <div>
+        <h1>Release Run</h1>
+        <div class="sub"><code>${run.id}</code> ${statusBadge(run.status)}${scoreHtml}</div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h2>Details</h2></div>
+      <div style="padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">
+        <div><span style="color:var(--gray-500)">Release</span><br><code style="font-size:12px">${run.release_id}</code></div>
+        <div><span style="color:var(--gray-500)">Triggered by</span><br>${run.triggered_by || "—"}</div>
+        <div><span style="color:var(--gray-500)">Started</span><br>${fmtDate(run.started_at) || "—"}</div>
+        <div><span style="color:var(--gray-500)">Finished</span><br>${fmtDate(run.finished_at) || "—"}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h2>Pipeline Runs</h2></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Run ID</th><th>Pipeline</th><th>Status</th><th>Progress</th><th>Started</th></tr></thead>
+          <tbody>${prRows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+router.register("release-runs/:id", async (hash, parts) => {
+  const runId = parts[1];
+  setBreadcrumb({ label: "Release Run" });
+  setContent(loading());
+
+  async function fetchAndRender() {
+    const run = await api.getReleaseRun(runId).catch(() => null);
+    if (!run) { setContent(`<div class="card"><div class="empty-state"><p>Run not found.</p></div></div>`); return; }
+
+    // Enrich breadcrumb from first pipeline run's product_id
+    const productId = (run.pipeline_runs || [])[0]?.product_id || null;
+    try {
+      if (productId) {
+        const [product, release] = await Promise.all([
+          api.getProduct(productId).catch(() => null),
+          // releases endpoint needs product_id — use the list and find by id
+          api.getReleases(productId).catch(() => []),
+        ]);
+        const rel = Array.isArray(release) ? release.find(r => r.id === run.release_id) : null;
+        const pName = product?.name || "Product";
+        const relName = rel?.name || "Release";
+        setBreadcrumb(
+          { label: "Products", hash: "products" },
+          { label: pName, hash: `products/${productId}` },
+          { label: relName, hash: `products/${productId}/releases/${run.release_id}` },
+          { label: "Run" }
+        );
+      }
+    } catch { /* leave simple breadcrumb */ }
+
+    setContent(_renderReleaseRun(run));
+
+    if (!TERMINAL.has(run.status)) {
+      _pollTimer = setInterval(async () => {
+        if (!document.querySelector(`[data-rrun="${runId}"]`) && !document.querySelector(".page-header")) {
+          clearInterval(_pollTimer); _pollTimer = null; return;
+        }
+        const updated = await api.getReleaseRun(runId).catch(() => null);
+        if (!updated) return;
+        setContent(_renderReleaseRun(updated));
         if (TERMINAL.has(updated.status)) { clearInterval(_pollTimer); _pollTimer = null; }
       }, 2000);
     }

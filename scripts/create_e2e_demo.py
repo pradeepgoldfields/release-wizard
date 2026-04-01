@@ -4,7 +4,12 @@ Run from the repo root (venv activated):
     python scripts/create_e2e_demo.py
 
 Creates:
-  - Pipeline  "conduit-e2e-demo"  (3 stages, 6 tasks — all real commands)
+  - Pipeline  "conduit-e2e-demo"  (5 stages, 8 tasks — all real commands)
+    Stage 1  prepare   (sequential) — preflight-checks, parse-webhook
+    Stage 2  test      (sequential) — run-tests, coverage-report
+    Stage 3  security  (parallel)   — dependency-scan          ← runs in parallel
+    Stage 4  sast      (parallel)   — static-analysis          ← runs in parallel with stage 3
+    Stage 5  release   (sequential) — verify-api, completion-report
   - Webhook   "E2E Demo Webhook"  (known token for easy curl trigger)
 
 Then prints a ready-to-paste curl command to fire the webhook.
@@ -287,7 +292,113 @@ print(json.dumps(out))
 PYEOF
 """
 
-STAGE_3_TASK_1_VERIFY_API = r"""#!/usr/bin/env bash
+STAGE_3_TASK_1_DEPENDENCY_SCAN = r"""#!/usr/bin/env bash
+
+echo "--- Stage: ${CDT_STAGE_NAME}  Task: ${CDT_TASK_NAME} ---"
+echo "  Run ID: ${CDT_PIPELINE_RUN_ID}"
+echo ""
+echo "==> [dependency-scan] Checking for known vulnerable packages"
+echo "    (runs in PARALLEL alongside static-analysis)"
+echo ""
+
+python3 - <<'PYEOF'
+import io, os, sys, json, time
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+# Simulate a dependency-scan that takes ~2 seconds
+time.sleep(2)
+
+packages = [
+    ("flask",           "3.1.0",  None),
+    ("sqlalchemy",      "2.0.40", None),
+    ("gunicorn",        "23.0.0", None),
+    ("pyjwt",           "2.10.1", None),
+    ("fpdf2",           "2.8.3",  None),
+    ("python-dotenv",   "1.0.1",  None),
+]
+
+print(f"  Scanned {len(packages)} packages")
+print(f"  {'Package':<25} {'Version':<12} Status")
+print("  " + "-" * 50)
+for name, ver, cve in packages:
+    status = f"CVE: {cve}" if cve else "OK"
+    flag = "[VULN]" if cve else "[ok]  "
+    print(f"  {flag} {name:<25} {ver:<12} {status}")
+print()
+
+vulns = [p for p in packages if p[2]]
+if vulns:
+    print(f"FAIL: {len(vulns)} vulnerable package(s) found", file=sys.stderr)
+    sys.exit(1)
+
+print("[pass] No known vulnerabilities found")
+out = {
+    "status": "ok",
+    "task": os.environ.get("CDT_TASK_NAME"),
+    "stage": os.environ.get("CDT_STAGE_NAME"),
+    "packages_scanned": len(packages),
+    "vulnerabilities": len(vulns),
+    "parallel_demo": True,
+}
+print(json.dumps(out))
+PYEOF
+
+echo "[done] Dependency scan completed"
+"""
+
+STAGE_4_TASK_1_SAST = r"""#!/usr/bin/env bash
+
+echo "--- Stage: ${CDT_STAGE_NAME}  Task: ${CDT_TASK_NAME} ---"
+echo "  Run ID: ${CDT_PIPELINE_RUN_ID}"
+echo ""
+echo "==> [static-analysis] Running SAST checks"
+echo "    (runs in PARALLEL alongside dependency-scan)"
+echo ""
+
+python3 - <<'PYEOF'
+import io, os, sys, json, time
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+# Simulate SAST that takes ~3 seconds
+time.sleep(3)
+
+checks = [
+    ("SQL Injection",           "app/routes",      0),
+    ("XSS / HTML injection",    "app/templates",   0),
+    ("Hardcoded secrets",       "app/config.py",   0),
+    ("Insecure deserialization","app/services",    0),
+    ("Path traversal",          "app/utils.py",    0),
+    ("LDAP injection",          "app/routes/auth", 0),
+]
+
+print(f"  {'Check':<35} {'Scope':<25} Findings")
+print("  " + "-" * 65)
+for name, scope, count in checks:
+    flag = "[FAIL]" if count else "[ok]  "
+    print(f"  {flag} {name:<35} {scope:<25} {count}")
+print()
+
+total_issues = sum(c for _, _, c in checks)
+if total_issues:
+    print(f"FAIL: {total_issues} SAST issue(s) found", file=sys.stderr)
+    sys.exit(1)
+
+print("[pass] SAST analysis clean — no issues found")
+out = {
+    "status": "ok",
+    "task": os.environ.get("CDT_TASK_NAME"),
+    "stage": os.environ.get("CDT_STAGE_NAME"),
+    "checks_run": len(checks),
+    "issues_found": total_issues,
+    "parallel_demo": True,
+}
+print(json.dumps(out))
+PYEOF
+
+echo "[done] SAST analysis completed"
+"""
+
+STAGE_5_TASK_1_VERIFY_API = r"""#!/usr/bin/env bash
 
 echo "--- Stage: ${CDT_STAGE_NAME}  Task: ${CDT_TASK_NAME} ---"
 echo "  Run ID: ${CDT_PIPELINE_RUN_ID}"
@@ -343,7 +454,7 @@ print(json.dumps(out))
 PYEOF
 """
 
-STAGE_3_TASK_2_REPORT = r"""#!/usr/bin/env bash
+STAGE_5_TASK_2_REPORT = r"""#!/usr/bin/env bash
 
 echo "--- Stage: ${CDT_STAGE_NAME}  Task: ${CDT_TASK_NAME} ---"
 echo "  Run ID: ${CDT_PIPELINE_RUN_ID}"
@@ -373,7 +484,7 @@ print("  Branch     :", branch)
 print("  Commit     :", commit)
 print("  Triggered  :", triggered)
 print("  Completed  :", now[:19])
-print("  Stages     : prepare -> test -> release")
+print("  Stages     : prepare -> test -> [security ‖ sast] -> release")
 print()
 
 # Echo back every CDT variable so they're visible in logs
@@ -407,8 +518,8 @@ report = {
     "triggered_by":       triggered,
     "completed_at":       now,
     "status":             "Succeeded",
-    "stages_run":         3,
-    "tasks_run":          6,
+    "stages_run":         5,
+    "tasks_run":          8,
     "context_variables":  len(cdt_vars),
     "resolved_properties": len(props),
     "webhook_fields":     list(webhook.keys()),
@@ -431,6 +542,7 @@ def main() -> None:
         # ── Pipeline ──────────────────────────────────────────────────────────
         # Attach to first available application so it appears in the UI
         from app.models.application import ApplicationArtifact  # noqa: PLC0415
+
         app_obj = ApplicationArtifact.query.filter_by(product_id=product.id).first()
 
         pipeline = Pipeline.query.filter_by(name="conduit-e2e-demo").first()
@@ -455,32 +567,54 @@ def main() -> None:
             print(f"Pipeline already exists: conduit-e2e-demo ({pipeline.id})")
 
         # ── Stages + Tasks ────────────────────────────────────────────────────
+        # Stages 3 + 4 have execution_mode="parallel" — they run concurrently.
         stage_defs = [
             {
                 "name": "prepare",
                 "order": 0,
+                "execution_mode": "sequential",
                 "accent_color": "#3b82f6",
                 "tasks": [
-                    ("preflight-checks",  "bash",   STAGE_1_TASK_1_PREFLIGHT,  "fail"),
-                    ("parse-webhook",     "bash",   STAGE_1_TASK_2_PARSE_PAYLOAD, "warn"),
+                    ("preflight-checks", "bash", STAGE_1_TASK_1_PREFLIGHT, "fail"),
+                    ("parse-webhook", "bash", STAGE_1_TASK_2_PARSE_PAYLOAD, "warn"),
                 ],
             },
             {
                 "name": "test",
                 "order": 1,
+                "execution_mode": "sequential",
                 "accent_color": "#10b981",
                 "tasks": [
-                    ("run-tests",         "bash",   STAGE_2_TASK_1_RUN_TESTS,  "fail"),
-                    ("coverage-report",   "bash",   STAGE_2_TASK_2_COVERAGE,   "warn"),
+                    ("run-tests", "bash", STAGE_2_TASK_1_RUN_TESTS, "fail"),
+                    ("coverage-report", "bash", STAGE_2_TASK_2_COVERAGE, "warn"),
+                ],
+            },
+            {
+                "name": "security",
+                "order": 2,
+                "execution_mode": "parallel",
+                "accent_color": "#8b5cf6",
+                "tasks": [
+                    ("dependency-scan", "bash", STAGE_3_TASK_1_DEPENDENCY_SCAN, "fail"),
+                ],
+            },
+            {
+                "name": "sast",
+                "order": 3,
+                "execution_mode": "parallel",
+                "accent_color": "#ec4899",
+                "tasks": [
+                    ("static-analysis", "bash", STAGE_4_TASK_1_SAST, "fail"),
                 ],
             },
             {
                 "name": "release",
-                "order": 2,
+                "order": 4,
+                "execution_mode": "sequential",
                 "accent_color": "#f59e0b",
                 "tasks": [
-                    ("verify-api",        "bash",   STAGE_3_TASK_1_VERIFY_API, "warn"),
-                    ("completion-report", "bash",   STAGE_3_TASK_2_REPORT,     "fail"),
+                    ("verify-api", "bash", STAGE_5_TASK_1_VERIFY_API, "warn"),
+                    ("completion-report", "bash", STAGE_5_TASK_2_REPORT, "fail"),
                 ],
             },
         ]
@@ -496,12 +630,15 @@ def main() -> None:
                     order=sdef["order"],
                     run_language="bash",
                     accent_color=sdef["accent_color"],
+                    execution_mode=sdef.get("execution_mode", "sequential"),
                 )
                 db.session.add(stage)
                 db.session.flush()
                 stages_created += 1
                 print(f"  Created stage: {sdef['name']}")
             else:
+                # Update execution_mode in case the script is re-run
+                stage.execution_mode = sdef.get("execution_mode", "sequential")
                 print(f"  Stage already exists: {sdef['name']}")
 
             for task_order, (task_name, lang, code, on_error) in enumerate(sdef["tasks"]):
@@ -533,62 +670,188 @@ def main() -> None:
         # Re-query stages/tasks so we have current IDs after the commit
         pipeline_obj = Pipeline.query.filter_by(name="conduit-e2e-demo").first()
         prepare_stage = Stage.query.filter_by(pipeline_id=pipeline_obj.id, name="prepare").first()
-        test_stage    = Stage.query.filter_by(pipeline_id=pipeline_obj.id, name="test").first()
+        test_stage = Stage.query.filter_by(pipeline_id=pipeline_obj.id, name="test").first()
         release_stage = Stage.query.filter_by(pipeline_id=pipeline_obj.id, name="release").first()
 
-        preflight_task   = Task.query.filter_by(stage_id=prepare_stage.id, name="preflight-checks").first() if prepare_stage else None
-        coverage_task    = Task.query.filter_by(stage_id=test_stage.id,    name="coverage-report").first()  if test_stage    else None
-        report_task      = Task.query.filter_by(stage_id=release_stage.id, name="completion-report").first() if release_stage else None
+        preflight_task = (
+            Task.query.filter_by(stage_id=prepare_stage.id, name="preflight-checks").first()
+            if prepare_stage
+            else None
+        )
+        coverage_task = (
+            Task.query.filter_by(stage_id=test_stage.id, name="coverage-report").first()
+            if test_stage
+            else None
+        )
+        report_task = (
+            Task.query.filter_by(stage_id=release_stage.id, name="completion-report").first()
+            if release_stage
+            else None
+        )
 
-        def set_property(owner_type, owner_id, name, value, value_type="string", description=None, is_required=False):
-            existing = Property.query.filter_by(owner_type=owner_type, owner_id=owner_id, name=name).first()
+        def set_property(
+            owner_type,
+            owner_id,
+            name,
+            value,
+            value_type="string",
+            description=None,
+            is_required=False,
+        ):
+            existing = Property.query.filter_by(
+                owner_type=owner_type, owner_id=owner_id, name=name
+            ).first()
             if existing:
-                existing.value       = value
-                existing.value_type  = value_type
+                existing.value = value
+                existing.value_type = value_type
                 existing.description = description
                 existing.is_required = is_required
             else:
-                db.session.add(Property(
-                    id=resource_id("prop"),
-                    owner_type=owner_type,
-                    owner_id=owner_id,
-                    name=name,
-                    value=value,
-                    value_type=value_type,
-                    description=description,
-                    is_required=is_required,
-                ))
+                db.session.add(
+                    Property(
+                        id=resource_id("prop"),
+                        owner_type=owner_type,
+                        owner_id=owner_id,
+                        name=name,
+                        value=value,
+                        value_type=value_type,
+                        description=description,
+                        is_required=is_required,
+                    )
+                )
 
         # Pipeline-level properties (inherited by all stages and tasks)
-        set_property("pipeline", pipeline_obj.id, "IMAGE_REPO",     "registry.acme.io/conduit",  "string",  "Container image registry path",          True)
-        set_property("pipeline", pipeline_obj.id, "IMAGE_TAG",      "latest",                    "string",  "Image tag to build and push")
-        set_property("pipeline", pipeline_obj.id, "COVERAGE_MIN",   "80",                        "number",  "Minimum required coverage percentage",   True)
-        set_property("pipeline", pipeline_obj.id, "NOTIFY_ON_FAIL", "true",                      "boolean", "Send notification when pipeline fails")
+        set_property(
+            "pipeline",
+            pipeline_obj.id,
+            "IMAGE_REPO",
+            "registry.acme.io/conduit",
+            "string",
+            "Container image registry path",
+            True,
+        )
+        set_property(
+            "pipeline",
+            pipeline_obj.id,
+            "IMAGE_TAG",
+            "latest",
+            "string",
+            "Image tag to build and push",
+        )
+        set_property(
+            "pipeline",
+            pipeline_obj.id,
+            "COVERAGE_MIN",
+            "80",
+            "number",
+            "Minimum required coverage percentage",
+            True,
+        )
+        set_property(
+            "pipeline",
+            pipeline_obj.id,
+            "NOTIFY_ON_FAIL",
+            "true",
+            "boolean",
+            "Send notification when pipeline fails",
+        )
 
         # Stage-level properties (override pipeline defaults for that stage)
         if test_stage:
-            set_property("stage", test_stage.id, "COVERAGE_MIN",  "85",   "number", "Stricter minimum for the test stage")
-            set_property("stage", test_stage.id, "TEST_PARALLEL", "true", "boolean","Run test cases in parallel")
+            set_property(
+                "stage",
+                test_stage.id,
+                "COVERAGE_MIN",
+                "85",
+                "number",
+                "Stricter minimum for the test stage",
+            )
+            set_property(
+                "stage",
+                test_stage.id,
+                "TEST_PARALLEL",
+                "true",
+                "boolean",
+                "Run test cases in parallel",
+            )
 
         if release_stage:
-            set_property("stage", release_stage.id, "DEPLOY_ENV",    "staging", "string", "Target environment for this release stage")
-            set_property("stage", release_stage.id, "DEPLOY_REGION", "eu-west-1","string", "Cloud region to deploy to")
+            set_property(
+                "stage",
+                release_stage.id,
+                "DEPLOY_ENV",
+                "staging",
+                "string",
+                "Target environment for this release stage",
+            )
+            set_property(
+                "stage",
+                release_stage.id,
+                "DEPLOY_REGION",
+                "eu-west-1",
+                "string",
+                "Cloud region to deploy to",
+            )
 
         # Task-level properties (most specific — override stage and pipeline)
         if preflight_task:
-            set_property("task", preflight_task.id, "TIMEOUT",          "30",             "number", "Max seconds for preflight checks")
-            set_property("task", preflight_task.id, "HEALTHCHECK_URL",  "http://localhost:8080/healthz", "string", "URL to verify Conduit is reachable")
+            set_property(
+                "task",
+                preflight_task.id,
+                "TIMEOUT",
+                "30",
+                "number",
+                "Max seconds for preflight checks",
+            )
+            set_property(
+                "task",
+                preflight_task.id,
+                "HEALTHCHECK_URL",
+                "http://localhost:8080/healthz",
+                "string",
+                "URL to verify Conduit is reachable",
+            )
 
         if coverage_task:
-            set_property("task", coverage_task.id, "COVERAGE_MIN", "82", "number", "Task-specific coverage floor (overrides stage)")
-            set_property("task", coverage_task.id, "FAIL_FAST",    "false", "boolean", "Abort on first failing module")
+            set_property(
+                "task",
+                coverage_task.id,
+                "COVERAGE_MIN",
+                "82",
+                "number",
+                "Task-specific coverage floor (overrides stage)",
+            )
+            set_property(
+                "task",
+                coverage_task.id,
+                "FAIL_FAST",
+                "false",
+                "boolean",
+                "Abort on first failing module",
+            )
 
         if report_task:
-            set_property("task", report_task.id, "REPORT_FORMAT", "json",  "string", "Output format: json or text")
-            set_property("task", report_task.id, "INCLUDE_PROPS", "true",  "boolean","Include resolved properties in report output")
+            set_property(
+                "task",
+                report_task.id,
+                "REPORT_FORMAT",
+                "json",
+                "string",
+                "Output format: json or text",
+            )
+            set_property(
+                "task",
+                report_task.id,
+                "INCLUDE_PROPS",
+                "true",
+                "boolean",
+                "Include resolved properties in report output",
+            )
 
         db.session.commit()
-        print("Properties seeded: pipeline(4), test-stage(2), release-stage(2), preflight-task(2), coverage-task(2), report-task(2)")
+        print(
+            "Properties seeded: pipeline(4), test-stage(2), release-stage(2), preflight-task(2), coverage-task(2), report-task(2)"
+        )
 
         # ── Webhook ───────────────────────────────────────────────────────────
         webhook = Webhook.query.filter_by(name="E2E Demo Webhook").first()
@@ -625,11 +888,11 @@ def main() -> None:
         print()
         print("  Trigger with curl:")
         print()
-        print(f'  curl -s -X POST http://localhost:8080/api/v1/webhooks/{webhook.id}/trigger \\')
+        print(f"  curl -s -X POST http://localhost:8080/api/v1/webhooks/{webhook.id}/trigger \\")
         print(f'    -H "X-Webhook-Token: {DEMO_WEBHOOK_TOKEN}" \\')
-        print( '    -H "Content-Type: application/json" \\')
-        print( '    -d \'{"ref":"refs/heads/main","after":"abc1234","pusher":{"name":"you"}}\' \\')
-        print( '    | python3 -m json.tool')
+        print('    -H "Content-Type: application/json" \\')
+        print('    -d \'{"ref":"refs/heads/main","after":"abc1234","pusher":{"name":"you"}}\' \\')
+        print("    | python3 -m json.tool")
         print()
         print("  Then open Conduit UI > Products > Acme Platform > pipeline 'conduit-e2e-demo'")
         print("  and click the latest run to watch the stages execute live.")

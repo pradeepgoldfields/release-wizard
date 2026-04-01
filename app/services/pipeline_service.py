@@ -53,6 +53,7 @@ def create_pipeline(
             run_language=stage_data.get("run_language"),
             run_code=stage_data.get("run_code"),
             run_file=stage_data.get("run_file"),
+            execution_mode=stage_data.get("execution_mode", "sequential"),
             input_schema=json.dumps(stage_data.get("input_schema", {})),
             output_schema=json.dumps(stage_data.get("output_schema", {})),
         )

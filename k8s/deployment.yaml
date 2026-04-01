@@ -13,42 +13,74 @@ spec:
     metadata:
       labels:
         app: conduit
+      annotations:
+        # Force pod restart when ConfigMap changes (hash injected by CI)
+        checksum/config: "placeholder"
     spec:
+      # Allow in-flight requests to complete before pod is terminated
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
+        fsGroup: 1001
       containers:
       - name: conduit
         image: your-registry.example.com/conduit:latest   # replaced by CI
         ports:
         - containerPort: 8080
+          name: http
         envFrom:
         - configMapRef:
             name: conduit-config
         env:
         - name: LOG_LEVEL
           value: "INFO"
+        # Tune Gunicorn workers via env — overrides gunicorn.conf.py defaults
+        - name: GUNICORN_WORKERS
+          value: "2"
+        - name: GUNICORN_THREADS
+          value: "4"
+        - name: GUNICORN_GRACEFUL_TIMEOUT
+          value: "30"
         resources:
           requests:
-            cpu: "100m"
-            memory: "128Mi"
+            cpu: "200m"
+            memory: "256Mi"
           limits:
-            cpu: "500m"
-            memory: "512Mi"
+            cpu: "1000m"
+            memory: "768Mi"
         livenessProbe:
           httpGet:
             path: /healthz
             port: 8080
-          initialDelaySeconds: 10
-          periodSeconds: 15
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          failureThreshold: 3
+          timeoutSeconds: 5
         readinessProbe:
           httpGet:
             path: /readyz
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 10
+          failureThreshold: 3
+          timeoutSeconds: 3
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          # Allow up to 60 s for the first startup (migrations, seeding)
+          failureThreshold: 12
+          periodSeconds: 5
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
             drop: ["ALL"]
           readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      # /tmp writable scratch space — required by WeasyPrint + audit PDF export
+      - name: tmp
+        emptyDir: {}

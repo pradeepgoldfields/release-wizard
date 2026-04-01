@@ -407,3 +407,98 @@ def get_role(role_id: str):
     """Return a single role by ID."""
     role = db.get_or_404(Role, role_id)
     return jsonify(role.to_dict())
+
+
+# ── Scope-level RBAC matrix ───────────────────────────────────────────────────
+
+
+@users_bp.get("/api/v1/rbac/bindings")
+def list_scope_bindings():
+    """Return all role bindings for a given resource scope.
+
+    Query param: ``scope`` (required) — e.g. ``product:prod_xxx``
+
+    Each binding is enriched with resolved ``user`` / ``group`` and ``role``
+    objects so the frontend can render the permission matrix without extra calls.
+    """
+    scope = request.args.get("scope", "").strip()
+    if not scope:
+        return jsonify({"error": "scope query parameter is required"}), 400
+
+    bindings = RoleBinding.query.filter_by(scope=scope).all()
+
+    def _enrich(b: RoleBinding) -> dict:
+        d = b.to_dict()
+        if b.role:
+            d["role"] = b.role.to_dict()
+        if b.user:
+            d["user"] = b.user.to_dict()
+        if b.group:
+            d["group"] = b.group.to_dict()
+        return d
+
+    return jsonify([_enrich(b) for b in bindings])
+
+
+@users_bp.post("/api/v1/rbac/bindings")
+def create_scope_binding():
+    """Create a role binding for a user or group at a resource scope.
+
+    Required body: ``role_id``, ``scope``
+    One of: ``user_id`` or ``group_id``
+    Optional: ``expires_at`` (ISO 8601)
+    """
+    data = request.get_json(silent=True) or {}
+    role_id = (data.get("role_id") or "").strip()
+    scope = (data.get("scope") or "").strip()
+    user_id = (data.get("user_id") or "").strip() or None
+    group_id = (data.get("group_id") or "").strip() or None
+
+    if not role_id:
+        return jsonify({"error": "role_id is required"}), 400
+    if not scope:
+        return jsonify({"error": "scope is required"}), 400
+    if not user_id and not group_id:
+        return jsonify({"error": "user_id or group_id is required"}), 400
+
+    # Validate referenced objects exist
+    db.get_or_404(Role, role_id)
+    if user_id:
+        db.get_or_404(User, user_id)
+    if group_id:
+        db.get_or_404(Group, group_id)
+
+    expires_at = None
+    if data.get("expires_at"):
+        from datetime import datetime
+
+        expires_at = datetime.fromisoformat(data["expires_at"])
+
+    binding = RoleBinding(
+        id=resource_id("rb"),
+        role_id=role_id,
+        user_id=user_id,
+        group_id=group_id,
+        scope=scope,
+        expires_at=expires_at,
+    )
+    db.session.add(binding)
+    db.session.commit()
+
+    d = binding.to_dict()
+    if binding.role:
+        d["role"] = binding.role.to_dict()
+    if binding.user:
+        d["user"] = binding.user.to_dict()
+    if binding.group:
+        d["group"] = binding.group.to_dict()
+    return jsonify(d), 201
+
+
+@users_bp.delete("/api/v1/rbac/bindings/<binding_id>")
+def delete_scope_binding(binding_id: str):
+    """Remove a role binding by ID (any scope)."""
+    binding = db.get_or_404(RoleBinding, binding_id)
+    db.session.delete(binding)
+    db.session.commit()
+    return "", 204

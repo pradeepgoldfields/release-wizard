@@ -165,6 +165,7 @@ def _run_script_k8s(language: str, code: str, timeout: int, task_run_id: str) ->
 def _detect_container_runtime() -> str | None:
     """Return 'docker' or 'podman' if available on PATH, else None."""
     import shutil
+
     for rt in ("docker", "podman"):
         if shutil.which(rt):
             return rt
@@ -188,7 +189,10 @@ def _run_script_container(
     """
     rt = runtime or _detect_container_runtime()
     if not rt:
-        return 1, "[error] No container runtime found (docker/podman not on PATH). Falling back unavailable.\n"
+        return (
+            1,
+            "[error] No container runtime found (docker/podman not on PATH). Falling back unavailable.\n",
+        )
 
     img = image or os.getenv("TASK_RUNNER_IMAGE", "python:3.12-slim")
     suffix = ".sh" if language == "bash" else ".py"
@@ -204,16 +208,25 @@ def _run_script_container(
     host_path = str(script_path)
     if sys.platform == "win32":
         import re
-        host_path = re.sub(r"^([A-Za-z]):\\", lambda m: f"/{m.group(1).lower()}/", host_path).replace("\\", "/")
+
+        host_path = re.sub(
+            r"^([A-Za-z]):\\", lambda m: f"/{m.group(1).lower()}/", host_path
+        ).replace("\\", "/")
 
     container_script = f"/tmp/task{suffix}"
 
     cmd = [
-        rt, "run", "--rm",
-        "--name", f"conduit-task-{task_run_id}",
-        "--memory", "512m",
-        "--cpus", "1",
-        "-v", f"{host_path}:{container_script}:ro",
+        rt,
+        "run",
+        "--rm",
+        "--name",
+        f"conduit-task-{task_run_id}",
+        "--memory",
+        "512m",
+        "--cpus",
+        "1",
+        "-v",
+        f"{host_path}:{container_script}:ro",
     ]
 
     # Inject env vars
@@ -242,8 +255,7 @@ def _run_script_container(
         return result.returncode, logs
     except subprocess.TimeoutExpired:
         # Kill the container
-        subprocess.run([rt, "kill", f"conduit-task-{task_run_id}"],
-                       capture_output=True, timeout=10)
+        subprocess.run([rt, "kill", f"conduit-task-{task_run_id}"], capture_output=True, timeout=10)
         return 124, f"[error] Container timed out after {timeout}s\n"
     except FileNotFoundError:
         return 127, f"[error] Container runtime '{rt}' not found on PATH\n"
@@ -342,6 +354,7 @@ def run_task_async(  # noqa: PLR0913
 
             # Resolve runner preference from platform settings
             from app.models.setting import PlatformSetting  # noqa: PLC0415
+
             runner_setting = PlatformSetting.query.get("TASK_RUNNER")
             runner_type = (runner_setting.value if runner_setting else None) or "subprocess"
             image_setting = PlatformSetting.query.get("TASK_RUNNER_IMAGE")
@@ -353,8 +366,12 @@ def run_task_async(  # noqa: PLR0913
             elif runner_type in ("docker", "podman"):
                 log.info("Executing task %s via %s container", task_run_id, runner_type)
                 return_code, logs = _run_script_container(
-                    language, code, timeout, task_run_id,
-                    runtime=runner_type, image=runner_image,
+                    language,
+                    code,
+                    timeout,
+                    task_run_id,
+                    runtime=runner_type,
+                    image=runner_image,
                 )
             else:
                 return_code, logs = _run_script_subprocess(language, code, timeout)

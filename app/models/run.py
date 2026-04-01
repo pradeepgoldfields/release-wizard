@@ -178,6 +178,7 @@ class PipelineRun(db.Model):
         data: dict[str, Any] = {
             "id": self.id,
             "pipeline_id": self.pipeline_id,
+            "pipeline_name": self.pipeline.name if self.pipeline else None,
             "product_id": self.pipeline.product_id if self.pipeline else None,
             "release_run_id": self.release_run_id,
             "status": self.status,

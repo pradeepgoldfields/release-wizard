@@ -14,13 +14,13 @@ metrics_bp = Blueprint("metrics", __name__)
 
 # ── Prometheus metric definitions ─────────────────────────────────────────────
 
-from prometheus_client import (
+from prometheus_client import (  # noqa: E402
     CONTENT_TYPE_LATEST,
+    REGISTRY,
     Counter,
     Gauge,
     Histogram,
     generate_latest,
-    REGISTRY,
 )
 
 # Pipeline execution metrics
@@ -97,7 +97,6 @@ http_request_duration_seconds = Histogram(
 def _refresh_platform_gauges() -> None:
     """Re-sample platform-level gauges from the DB on each /metrics scrape."""
     try:
-        from app.extensions import db
         from app.models.auth import User
         from app.models.pipeline import Pipeline
         from app.models.product import Product
@@ -110,12 +109,8 @@ def _refresh_platform_gauges() -> None:
         users_total.set(User.query.count())
 
         # Active runs
-        active_pipeline_runs.set(
-            PipelineRun.query.filter_by(status="Running").count()
-        )
-        active_release_runs.set(
-            ReleaseRun.query.filter_by(status="Running").count()
-        )
+        active_pipeline_runs.set(PipelineRun.query.filter_by(status="Running").count())
+        active_release_runs.set(ReleaseRun.query.filter_by(status="Running").count())
 
         # Compliance scores
         pipelines = Pipeline.query.all()
@@ -133,6 +128,7 @@ def _refresh_platform_gauges() -> None:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @metrics_bp.get("/metrics")
 def prometheus_metrics():
     """Prometheus scrape endpoint — returns metrics in text exposition format."""
@@ -146,16 +142,18 @@ def metrics_stats():
     _refresh_platform_gauges()
 
     try:
+        # Recent run stats (last 24h)
+        from datetime import UTC, datetime, timedelta
+
+        from sqlalchemy import func
+
         from app.extensions import db
+        from app.models.auth import User
         from app.models.pipeline import Pipeline
         from app.models.product import Product
         from app.models.release import Release
         from app.models.run import PipelineRun, ReleaseRun
-        from app.models.auth import User
-        from sqlalchemy import func
 
-        # Recent run stats (last 24h)
-        from datetime import UTC, datetime, timedelta
         since = datetime.now(UTC) - timedelta(hours=24)
 
         run_counts = (
@@ -168,8 +166,9 @@ def metrics_stats():
 
         # Average run duration (last 50 completed runs)
         completed = (
-            PipelineRun.query
-            .filter(PipelineRun.finished_at.isnot(None), PipelineRun.started_at.isnot(None))
+            PipelineRun.query.filter(
+                PipelineRun.finished_at.isnot(None), PipelineRun.started_at.isnot(None)
+            )
             .order_by(PipelineRun.started_at.desc())
             .limit(50)
             .all()
@@ -184,35 +183,37 @@ def metrics_stats():
         pipelines = Pipeline.query.all()
         scores = [p.compliance_score for p in pipelines if p.compliance_score is not None]
 
-        return jsonify({
-            "platform": {
-                "products": Product.query.count(),
-                "pipelines": Pipeline.query.count(),
-                "releases": Release.query.count(),
-                "users": User.query.count(),
-            },
-            "runs_last_24h": {
-                "total": sum(run_by_status.values()),
-                "succeeded": run_by_status.get("Succeeded", 0),
-                "failed": run_by_status.get("Failed", 0),
-                "running": run_by_status.get("Running", 0),
-                "cancelled": run_by_status.get("Cancelled", 0),
-                "warning": run_by_status.get("Warning", 0),
-            },
-            "active_runs": {
-                "pipeline": PipelineRun.query.filter_by(status="Running").count(),
-                "release": ReleaseRun.query.filter_by(status="Running").count(),
-            },
-            "compliance": {
-                "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
-                "compliant_pipelines": sum(1 for s in scores if s >= 80),
-                "total_pipelines": len(scores),
-            },
-            "performance": {
-                "avg_run_duration_s": avg_duration,
-                "sample_size": len(durations),
-            },
-        })
+        return jsonify(
+            {
+                "platform": {
+                    "products": Product.query.count(),
+                    "pipelines": Pipeline.query.count(),
+                    "releases": Release.query.count(),
+                    "users": User.query.count(),
+                },
+                "runs_last_24h": {
+                    "total": sum(run_by_status.values()),
+                    "succeeded": run_by_status.get("Succeeded", 0),
+                    "failed": run_by_status.get("Failed", 0),
+                    "running": run_by_status.get("Running", 0),
+                    "cancelled": run_by_status.get("Cancelled", 0),
+                    "warning": run_by_status.get("Warning", 0),
+                },
+                "active_runs": {
+                    "pipeline": PipelineRun.query.filter_by(status="Running").count(),
+                    "release": ReleaseRun.query.filter_by(status="Running").count(),
+                },
+                "compliance": {
+                    "avg_score": round(sum(scores) / len(scores), 1) if scores else 0,
+                    "compliant_pipelines": sum(1 for s in scores if s >= 80),
+                    "total_pipelines": len(scores),
+                },
+                "performance": {
+                    "avg_run_duration_s": avg_duration,
+                    "sample_size": len(durations),
+                },
+            }
+        )
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
@@ -268,9 +269,9 @@ _ALERT_RULES = [
 def metrics_alerts():
     """Return alert rule definitions with current firing status evaluated from DB."""
     try:
-        from app.extensions import db
-        from app.models.run import PipelineRun
         from datetime import UTC, datetime, timedelta
+
+        from app.models.run import PipelineRun
 
         since_1h = datetime.now(UTC) - timedelta(hours=1)
         total_1h = PipelineRun.query.filter(PipelineRun.started_at >= since_1h).count()
@@ -280,6 +281,7 @@ def metrics_alerts():
         active = PipelineRun.query.filter_by(status="Running").count()
 
         from app.models.pipeline import Pipeline
+
         pipelines = Pipeline.query.all()
         scores = [p.compliance_score for p in pipelines if p.compliance_score is not None]
         avg_score = sum(scores) / len(scores) if scores else 100
@@ -290,10 +292,12 @@ def metrics_alerts():
                 return total_1h > 0 and (failed_1h / total_1h) > 0.2
             if rule_name == "LongRunningPipeline":
                 from app.models.run import PipelineRun as _PR
+
                 threshold = datetime.now(UTC) - timedelta(minutes=30)
-                return _PR.query.filter(
-                    _PR.status == "Running", _PR.started_at <= threshold
-                ).count() > 0
+                return (
+                    _PR.query.filter(_PR.status == "Running", _PR.started_at <= threshold).count()
+                    > 0
+                )
             if rule_name == "NoRecentRuns":
                 since_24h = datetime.now(UTC) - timedelta(hours=24)
                 return PipelineRun.query.filter(PipelineRun.started_at >= since_24h).count() == 0
@@ -315,10 +319,12 @@ def metrics_alerts():
 
 # ── Monitoring stack management ───────────────────────────────────────────────
 
+
 @metrics_bp.get("/api/v1/metrics/stack/status")
 def stack_status():
     """Return running status of Prometheus/Alertmanager/Grafana containers."""
     from app.services.monitoring_stack_service import get_stack_status
+
     return jsonify(get_stack_status())
 
 
@@ -326,6 +332,7 @@ def stack_status():
 def stack_start():
     """Write config files and start the monitoring stack via docker-compose."""
     from app.services.monitoring_stack_service import start_stack
+
     result = start_stack()
     return jsonify(result), (200 if result.get("ok") else 500)
 
@@ -334,5 +341,6 @@ def stack_start():
 def stack_stop():
     """Stop the monitoring stack containers."""
     from app.services.monitoring_stack_service import stop_stack
+
     result = stop_stack()
     return jsonify(result), (200 if result.get("ok") else 500)

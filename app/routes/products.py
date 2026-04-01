@@ -14,6 +14,7 @@ from app.models.application import ApplicationArtifact
 from app.models.product import Product
 from app.services import cache_service
 from app.services.product_service import create_application, create_product
+from app.utils import paginate
 
 products_bp = Blueprint("products", __name__, url_prefix="/api/v1/products")
 
@@ -22,14 +23,25 @@ _CACHE_KEY = "products:list"
 
 @products_bp.get("")
 def list_products():
-    """Return all products ordered by name."""
-    cached = cache_service.get(_CACHE_KEY)
-    if cached is not None:
-        return jsonify(cached)
-    products = Product.query.order_by(Product.name).all()
-    data = [p.to_dict() for p in products]
-    cache_service.set(_CACHE_KEY, data, ttl=30)
-    return jsonify(data)
+    """Return products ordered by name.
+
+    Query params: ``limit`` (default 50, max 200), ``offset`` (default 0).
+    Unpaginated callers (no params) are served from the Redis cache.
+    """
+    # Serve from cache only when no pagination params are present
+    if "limit" not in request.args and "offset" not in request.args:
+        cached = cache_service.get(_CACHE_KEY)
+        if cached is not None:
+            return jsonify(cached)
+
+    query = Product.query.order_by(Product.name)
+    items, meta = paginate(query)
+    data = [p.to_dict() for p in items]
+
+    if "limit" not in request.args and "offset" not in request.args:
+        cache_service.set(_CACHE_KEY, data, ttl=30)
+
+    return jsonify({"items": data, "meta": meta})
 
 
 @products_bp.post("")
@@ -116,6 +128,14 @@ def create_application_endpoint(product_id: str):
         description=data.get("description"),
     )
     return jsonify(artifact.to_dict()), 201
+
+
+@products_bp.get("/<product_id>/applications/<app_id>")
+def get_application(product_id: str, app_id: str):
+    """Return a single application artifact."""
+    db.get_or_404(Product, product_id)
+    artifact = db.get_or_404(ApplicationArtifact, app_id)
+    return jsonify(artifact.to_dict())
 
 
 @products_bp.put("/<product_id>/applications/<app_id>")

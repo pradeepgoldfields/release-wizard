@@ -18,6 +18,20 @@ class Config:
     SQLALCHEMY_DATABASE_URI: str = os.getenv("DATABASE_URL", "sqlite:///conduit.db")
     SQLALCHEMY_TRACK_MODIFICATIONS: bool = False
 
+    # Connection pool — only applied for server-based databases (PostgreSQL, Oracle).
+    # SQLite uses StaticPool and rejects pool_size/max_overflow/pool_timeout.
+    SQLALCHEMY_ENGINE_OPTIONS: dict = (
+        {}
+        if os.getenv("DATABASE_URL", "sqlite:///conduit.db").startswith("sqlite")
+        else {
+            "pool_size": int(os.getenv("DB_POOL_SIZE", 5)),
+            "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", 10)),
+            "pool_timeout": int(os.getenv("DB_POOL_TIMEOUT", 30)),
+            "pool_recycle": int(os.getenv("DB_POOL_RECYCLE", 1800)),
+            "pool_pre_ping": True,
+        }
+    )
+
     # JWT authentication
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-me-in-production")
     JWT_EXPIRY_HOURS: int = int(os.getenv("JWT_EXPIRY_HOURS", 8))

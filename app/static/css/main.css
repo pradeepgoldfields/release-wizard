@@ -255,6 +255,8 @@ tbody td {
 }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover td { background: var(--gray-50); }
+tbody tr.clickable-row:hover td { background: var(--primary-light); }
+tbody tr.clickable-row { cursor: pointer; }
 
 /* ── Badges ──────────────────────────────────────────────────────────────── */
 .badge {

@@ -40,8 +40,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Control Environment",
         "title": "Commitment to integrity and ethical values",
         "description": "The entity demonstrates a commitment to integrity and ethical values. "
-                       "In CI/CD: pipelines enforce policy gates, require approval for production deploys, "
-                       "and maintain an immutable audit trail.",
+        "In CI/CD: pipelines enforce policy gates, require approval for production deploys, "
+        "and maintain an immutable audit trail.",
         "task_types": ["security-gate"],
         "dimension_keys": ["security_gates", "compliance_as_code"],
         "evidence_keywords": ["approve", "gate", "policy", "compliance", "required"],
@@ -53,8 +53,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Control Environment",
         "title": "Board oversight of internal controls",
         "description": "The board of directors demonstrates independence from management and exercises "
-                       "oversight of internal control. In CI/CD: release approvals, separation of trigger "
-                       "from deployment, role-based pipeline access.",
+        "oversight of internal control. In CI/CD: release approvals, separation of trigger "
+        "from deployment, role-based pipeline access.",
         "task_types": ["security-gate", "compliance-check"],
         "dimension_keys": ["security_gates"],
         "evidence_keywords": ["approval", "authorize", "sign-off", "rbac"],
@@ -66,8 +66,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Control Environment",
         "title": "Organizational structure and authority",
         "description": "Reporting lines, authority and responsibilities are defined. "
-                       "In CI/CD: pipeline ownership via product/team assignment, RBAC role bindings, "
-                       "audit log of who triggered each run.",
+        "In CI/CD: pipeline ownership via product/team assignment, RBAC role bindings, "
+        "audit log of who triggered each run.",
         "task_types": [],
         "dimension_keys": [],
         "evidence_keywords": ["rbac", "role", "owner", "triggered_by"],
@@ -80,8 +80,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Communication & Information",
         "title": "Information to support internal control objectives",
         "description": "The entity obtains or generates relevant, quality information to support "
-                       "the functioning of internal controls. In CI/CD: structured task output JSON, "
-                       "SBOM generation, artifact metadata.",
+        "the functioning of internal controls. In CI/CD: structured task output JSON, "
+        "SBOM generation, artifact metadata.",
         "task_types": ["supply-chain"],
         "dimension_keys": ["supply_chain", "artifact_management"],
         "evidence_keywords": ["sbom", "output_json", "artifact", "report"],
@@ -93,8 +93,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Communication & Information",
         "title": "Internal communication of control information",
         "description": "The entity internally communicates information necessary to support the "
-                       "functioning of internal controls. In CI/CD: notifications, structured run logs, "
-                       "Prometheus alerting, audit trail.",
+        "functioning of internal controls. In CI/CD: notifications, structured run logs, "
+        "Prometheus alerting, audit trail.",
         "task_types": ["notify", "observability"],
         "dimension_keys": ["observability"],
         "evidence_keywords": ["notify", "alert", "slack", "pagerduty", "webhook", "log"],
@@ -107,7 +107,7 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Risk Assessment",
         "title": "Identification and analysis of risk",
         "description": "The entity identifies and analyzes risk to achieve its objectives. "
-                       "In CI/CD: SAST, SCA, DAST, secret scanning provide automated risk identification.",
+        "In CI/CD: SAST, SCA, DAST, secret scanning provide automated risk identification.",
         "task_types": ["sast", "sca", "dast", "secret-scan"],
         "dimension_keys": ["sast", "sca", "dast", "secret_scanning"],
         "evidence_keywords": ["sast", "sca", "dast", "sonar", "snyk", "trivy", "gitleaks"],
@@ -119,7 +119,7 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Risk Assessment",
         "title": "Consideration of fraud in risk assessment",
         "description": "The entity considers the potential for fraud in assessing risks. "
-                       "In CI/CD: secret scanning, dependency confusion prevention, supply chain security.",
+        "In CI/CD: secret scanning, dependency confusion prevention, supply chain security.",
         "task_types": ["secret-scan", "supply-chain"],
         "dimension_keys": ["secret_scanning", "supply_chain"],
         "evidence_keywords": ["secret", "gitleaks", "trufflehog", "cosign", "supply-chain"],
@@ -132,8 +132,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Monitoring Activities",
         "title": "Ongoing and separate evaluations",
         "description": "The entity selects, develops, and performs ongoing and/or separate evaluations "
-                       "to ascertain whether components of internal control are present and functioning. "
-                       "In CI/CD: automated test suites, code coverage, compliance scoring.",
+        "to ascertain whether components of internal control are present and functioning. "
+        "In CI/CD: automated test suites, code coverage, compliance scoring.",
         "task_types": ["unit-test", "integration-test", "code-coverage"],
         "dimension_keys": ["unit_testing", "integration_testing", "code_coverage"],
         "evidence_keywords": ["test", "coverage", "pytest", "jest", "integration"],
@@ -145,8 +145,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Monitoring Activities",
         "title": "Evaluation and communication of deficiencies",
         "description": "The entity evaluates and communicates internal control deficiencies in a timely "
-                       "manner to those responsible for corrective action. In CI/CD: failed pipeline "
-                       "notifications, alert rules firing, DevSecOps maturity gap reporting.",
+        "manner to those responsible for corrective action. In CI/CD: failed pipeline "
+        "notifications, alert rules firing, DevSecOps maturity gap reporting.",
         "task_types": ["notify"],
         "dimension_keys": ["observability"],
         "evidence_keywords": ["notify", "failure", "alert", "deficiency"],
@@ -159,8 +159,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Control Activities",
         "title": "Selection and development of control activities",
         "description": "The entity selects and develops control activities that contribute to the "
-                       "mitigation of risks. In CI/CD: required tasks (is_required=true), "
-                       "on_error=fail gates, compliance rules.",
+        "mitigation of risks. In CI/CD: required tasks (is_required=true), "
+        "on_error=fail gates, compliance rules.",
         "task_types": ["security-gate", "compliance-check"],
         "dimension_keys": ["security_gates", "compliance_as_code"],
         "evidence_keywords": ["required", "gate", "policy", "fail", "compliance"],
@@ -172,7 +172,7 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Control Activities",
         "title": "Selection of technology control activities",
         "description": "The entity selects and develops general control activities over technology. "
-                       "In CI/CD: IaC scanning, container scanning, image signing.",
+        "In CI/CD: IaC scanning, container scanning, image signing.",
         "task_types": ["iac-scan", "container-scan", "supply-chain"],
         "dimension_keys": ["iac_security", "container_security", "supply_chain"],
         "evidence_keywords": ["terraform", "checkov", "trivy", "cosign", "iac"],
@@ -184,8 +184,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Control Activities",
         "title": "Deployment of policies and procedures",
         "description": "The entity deploys control activities through policies that establish what "
-                       "is expected. In CI/CD: pipeline-as-code enforces repeatable, auditable processes; "
-                       "version-controlled pipeline definitions.",
+        "is expected. In CI/CD: pipeline-as-code enforces repeatable, auditable processes; "
+        "version-controlled pipeline definitions.",
         "task_types": ["build", "release"],
         "dimension_keys": ["release_practices", "artifact_management"],
         "evidence_keywords": ["version", "tag", "changelog", "semver", "artifact"],
@@ -198,8 +198,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Logical & Physical Access",
         "title": "Access controls to meet objectives",
         "description": "The entity implements logical access security controls over protected information "
-                       "assets to prevent security threats. In CI/CD: secret management, vault integration, "
-                       "no hardcoded credentials in pipeline scripts.",
+        "assets to prevent security threats. In CI/CD: secret management, vault integration, "
+        "no hardcoded credentials in pipeline scripts.",
         "task_types": ["secret-scan"],
         "dimension_keys": ["secret_scanning"],
         "evidence_keywords": ["vault", "secret", "credential", "no hardcoded", "gitleaks"],
@@ -211,7 +211,7 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Logical & Physical Access",
         "title": "Access control over third-party access",
         "description": "The entity authorizes, modifies, or removes access to data. In CI/CD: "
-                       "webhook tokens, RBAC role bindings, API key management.",
+        "webhook tokens, RBAC role bindings, API key management.",
         "task_types": [],
         "dimension_keys": ["security_gates"],
         "evidence_keywords": ["rbac", "token", "api-key", "role", "permission"],
@@ -224,7 +224,7 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "System Operations",
         "title": "Detect and monitor for vulnerabilities",
         "description": "The entity uses detection and monitoring procedures to identify changes to "
-                       "configurations and vulnerabilities. In CI/CD: DAST, SCA, vulnerability management.",
+        "configurations and vulnerabilities. In CI/CD: DAST, SCA, vulnerability management.",
         "task_types": ["dast", "sca", "vuln-management"],
         "dimension_keys": ["dast", "sca", "vulnerability_management"],
         "evidence_keywords": ["dast", "vulnerability", "cve", "trivy", "grype", "scan"],
@@ -236,7 +236,7 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "System Operations",
         "title": "Monitor system components for anomalous behaviour",
         "description": "The entity monitors system components and the operation of those components "
-                       "for anomalies. In CI/CD: observability stack, Prometheus alerting, structured logging.",
+        "for anomalies. In CI/CD: observability stack, Prometheus alerting, structured logging.",
         "task_types": ["observability"],
         "dimension_keys": ["observability"],
         "evidence_keywords": ["prometheus", "grafana", "alert", "monitoring", "log", "trace"],
@@ -248,7 +248,7 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "System Operations",
         "title": "Respond to identified security incidents",
         "description": "The entity responds to identified security incidents by executing a defined incident "
-                       "response program. In CI/CD: pipeline failure notifications, alert routing.",
+        "response program. In CI/CD: pipeline failure notifications, alert routing.",
         "task_types": ["notify"],
         "dimension_keys": ["observability"],
         "evidence_keywords": ["incident", "pagerduty", "notify", "alert", "remediate"],
@@ -261,10 +261,15 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Change Management",
         "title": "Authorise, design and implement changes",
         "description": "The entity authorises, designs, develops or acquires, configures, documents, "
-                       "tests, approves and implements changes. In CI/CD: the pipeline itself IS the "
-                       "change management process — every deploy is tested, gated and logged.",
+        "tests, approves and implements changes. In CI/CD: the pipeline itself IS the "
+        "change management process — every deploy is tested, gated and logged.",
         "task_types": ["unit-test", "integration-test", "security-gate", "deploy"],
-        "dimension_keys": ["unit_testing", "integration_testing", "security_gates", "environment_promotion"],
+        "dimension_keys": [
+            "unit_testing",
+            "integration_testing",
+            "security_gates",
+            "environment_promotion",
+        ],
         "evidence_keywords": ["test", "gate", "approve", "deploy", "smoke"],
         "weight": 4,
     },
@@ -275,8 +280,8 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Risk Mitigation",
         "title": "Risk mitigation activities",
         "description": "The entity identifies, selects and develops risk mitigation activities for risks "
-                       "arising from potential business disruptions. In CI/CD: canary deployments, "
-                       "smoke tests, rollback capability.",
+        "arising from potential business disruptions. In CI/CD: canary deployments, "
+        "smoke tests, rollback capability.",
         "task_types": ["smoke-test", "deploy"],
         "dimension_keys": ["smoke_testing", "environment_promotion"],
         "evidence_keywords": ["smoke", "canary", "rollback", "blue-green", "healthcheck"],
@@ -288,7 +293,7 @@ SOC2_CRITERIA: list[dict] = [
         "category_label": "Risk Mitigation",
         "title": "Vendor and business partner risk assessment",
         "description": "The entity assesses and manages risks associated with vendors and business partners. "
-                       "In CI/CD: SCA, SBOM, supply chain security, dependency pinning.",
+        "In CI/CD: SCA, SBOM, supply chain security, dependency pinning.",
         "task_types": ["sca", "supply-chain"],
         "dimension_keys": ["sca", "supply_chain"],
         "evidence_keywords": ["sbom", "dependency", "supply-chain", "sca", "audit"],
@@ -306,8 +311,8 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Governance",
         "title": "Security governance and accountability",
         "description": "Security governance structures are in place with clear accountability. "
-                       "Pipeline evidence: RBAC role bindings, audit trail, approval gates, "
-                       "release sign-off process.",
+        "Pipeline evidence: RBAC role bindings, audit trail, approval gates, "
+        "release sign-off process.",
         "task_types": ["security-gate", "compliance-check"],
         "dimension_keys": ["security_gates", "compliance_as_code"],
         "evidence_keywords": ["approval", "governance", "sign-off", "rbac", "policy"],
@@ -318,7 +323,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Governance",
         "title": "Risk management",
         "description": "Risks are identified, assessed and treated. Pipeline evidence: SAST, SCA, "
-                       "DAST, vulnerability management tasks in pipeline.",
+        "DAST, vulnerability management tasks in pipeline.",
         "task_types": ["sast", "sca", "dast", "vuln-management"],
         "dimension_keys": ["sast", "sca", "dast", "vulnerability_management"],
         "evidence_keywords": ["risk", "vulnerability", "scan", "assess"],
@@ -329,8 +334,8 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Processes",
         "title": "Change and release management",
         "description": "Changes are controlled, tested and approved before deployment. "
-                       "Pipeline evidence: the pipeline itself — every run creates an immutable, "
-                       "tested, gated change record.",
+        "Pipeline evidence: the pipeline itself — every run creates an immutable, "
+        "tested, gated change record.",
         "task_types": ["unit-test", "integration-test", "deploy"],
         "dimension_keys": ["unit_testing", "integration_testing", "environment_promotion"],
         "evidence_keywords": ["test", "deploy", "gate", "promote", "release"],
@@ -341,7 +346,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Processes",
         "title": "Vulnerability and patch management",
         "description": "Vulnerabilities are identified, prioritised and remediated within SLA. "
-                       "Pipeline evidence: SCA dependency scanning, container scanning, CVE checking.",
+        "Pipeline evidence: SCA dependency scanning, container scanning, CVE checking.",
         "task_types": ["sca", "container-scan", "vuln-management"],
         "dimension_keys": ["sca", "container_security", "vulnerability_management"],
         "evidence_keywords": ["patch", "cve", "vulnerability", "dependency", "trivy"],
@@ -352,7 +357,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Processes",
         "title": "Incident detection and response",
         "description": "Security incidents are detected and responded to in a timely manner. "
-                       "Pipeline evidence: observability tasks, alerting, failure notifications.",
+        "Pipeline evidence: observability tasks, alerting, failure notifications.",
         "task_types": ["notify", "observability"],
         "dimension_keys": ["observability"],
         "evidence_keywords": ["incident", "alert", "notify", "pagerduty", "monitor"],
@@ -363,7 +368,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Technology",
         "title": "Secure development lifecycle",
         "description": "Software is developed securely using consistent, tested processes. "
-                       "Pipeline evidence: SAST, code coverage, unit tests, linting, peer review gates.",
+        "Pipeline evidence: SAST, code coverage, unit tests, linting, peer review gates.",
         "task_types": ["sast", "unit-test", "code-coverage", "lint"],
         "dimension_keys": ["sast", "unit_testing", "code_coverage"],
         "evidence_keywords": ["sast", "lint", "test", "coverage", "secure-dev"],
@@ -374,7 +379,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Technology",
         "title": "Hardened infrastructure and container security",
         "description": "Infrastructure is configured to a hardened baseline. Pipeline evidence: "
-                       "IaC scanning, container image scanning, CIS benchmark checks.",
+        "IaC scanning, container image scanning, CIS benchmark checks.",
         "task_types": ["iac-scan", "container-scan", "compliance-check"],
         "dimension_keys": ["iac_security", "container_security", "compliance_as_code"],
         "evidence_keywords": ["terraform", "checkov", "trivy", "container", "iac", "cis"],
@@ -385,7 +390,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Information",
         "title": "Data classification and protection",
         "description": "Sensitive information is identified, classified and protected. "
-                       "Pipeline evidence: secret scanning, vault integration, masked secrets in logs.",
+        "Pipeline evidence: secret scanning, vault integration, masked secrets in logs.",
         "task_types": ["secret-scan"],
         "dimension_keys": ["secret_scanning"],
         "evidence_keywords": ["secret", "vault", "credential", "classify", "mask"],
@@ -396,7 +401,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Information",
         "title": "Audit logging and log integrity",
         "description": "Audit logs are generated, protected and retained. Pipeline evidence: "
-                       "immutable run audit trail, structured task logs, output JSON capture.",
+        "immutable run audit trail, structured task logs, output JSON capture.",
         "task_types": ["observability"],
         "dimension_keys": ["observability"],
         "evidence_keywords": ["audit", "log", "trail", "immutable", "retention"],
@@ -407,7 +412,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Supply Chain",
         "title": "Software supply chain security",
         "description": "Third-party components are vetted, inventoried and monitored for vulnerabilities. "
-                       "Pipeline evidence: SBOM generation, artifact signing, SCA scanning, Dependency-Track.",
+        "Pipeline evidence: SBOM generation, artifact signing, SCA scanning, Dependency-Track.",
         "task_types": ["sca", "supply-chain"],
         "dimension_keys": ["sca", "supply_chain"],
         "evidence_keywords": ["sbom", "cosign", "supply-chain", "sca", "dependency", "provenance"],
@@ -418,7 +423,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Supply Chain",
         "title": "Artifact integrity and provenance",
         "description": "Artifacts are signed and their provenance can be verified. "
-                       "Pipeline evidence: cosign signing, Sigstore, SLSA provenance attestation.",
+        "Pipeline evidence: cosign signing, Sigstore, SLSA provenance attestation.",
         "task_types": ["supply-chain", "artifact"],
         "dimension_keys": ["supply_chain", "artifact_management"],
         "evidence_keywords": ["cosign", "sigstore", "slsa", "provenance", "attestation", "sign"],
@@ -429,7 +434,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Performance & Reliability",
         "title": "Performance and capacity testing",
         "description": "Systems are tested for performance and capacity before deployment. "
-                       "Pipeline evidence: load test, stress test, benchmark tasks in pipeline.",
+        "Pipeline evidence: load test, stress test, benchmark tasks in pipeline.",
         "task_types": ["perf-test"],
         "dimension_keys": ["performance_testing"],
         "evidence_keywords": ["load", "performance", "k6", "jmeter", "gatling", "benchmark"],
@@ -440,7 +445,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Performance & Reliability",
         "title": "Smoke and health checks post-deployment",
         "description": "Systems are verified as healthy after deployment. Pipeline evidence: "
-                       "smoke test, health check, readyz endpoint verification.",
+        "smoke test, health check, readyz endpoint verification.",
         "task_types": ["smoke-test"],
         "dimension_keys": ["smoke_testing"],
         "evidence_keywords": ["smoke", "health", "healthcheck", "readyz", "curl"],
@@ -451,7 +456,7 @@ ACF_DOMAINS: list[dict] = [
         "domain": "Technology",
         "title": "API security and contract testing",
         "description": "APIs are tested for security vulnerabilities and conformance to specification. "
-                       "Pipeline evidence: OpenAPI validation, OWASP API security checks, contract tests.",
+        "Pipeline evidence: OpenAPI validation, OWASP API security checks, contract tests.",
         "task_types": ["api-security"],
         "dimension_keys": ["api_security"],
         "evidence_keywords": ["openapi", "spectral", "api-security", "contract", "owasp-api"],
@@ -462,7 +467,7 @@ ACF_DOMAINS: list[dict] = [
 
 # ── Evidence extraction ────────────────────────────────────────────────────────
 
-import json as _json
+import json as _json  # noqa: E402
 
 
 def _extract_task_type_set(run: Any) -> set[str]:
@@ -489,7 +494,9 @@ def _extract_all_text(run: Any) -> str:
     return " ".join(parts).lower()
 
 
-def _build_artifact_evidences(run: Any, keywords: list[str], required_types: set[str]) -> list[dict]:
+def _build_artifact_evidences(
+    run: Any, keywords: list[str], required_types: set[str]
+) -> list[dict]:
     """Extract structured evidence artifacts from task runs.
 
     Each artifact has:
@@ -666,7 +673,12 @@ def _score_control(
 
 
 def _confidence_label(c: str) -> str:
-    return {"confirmed": "Confirmed", "partial": "Partial", "manual": "Manual review", "not_met": "Not met"}.get(c, c)
+    return {
+        "confirmed": "Confirmed",
+        "partial": "Partial",
+        "manual": "Manual review",
+        "not_met": "Not met",
+    }.get(c, c)
 
 
 def _overall_rating(controls: list[dict]) -> str:
@@ -689,6 +701,7 @@ def _overall_rating(controls: list[dict]) -> str:
 
 # ── Active controls loader ─────────────────────────────────────────────────────
 
+
 def _get_active_controls(framework: str, builtin_list: list[dict]) -> list[dict]:
     """Return the merged + filtered list of controls for a framework.
 
@@ -696,11 +709,11 @@ def _get_active_controls(framework: str, builtin_list: list[dict]) -> list[dict]
     Falls back to the built-in list if the DB is unavailable.
     """
     import json as _j
+
     try:
         from app.models.framework_control import FrameworkControl
-        overrides = {
-            r.id: r for r in FrameworkControl.query.filter_by(framework=framework).all()
-        }
+
+        overrides = {r.id: r for r in FrameworkControl.query.filter_by(framework=framework).all()}
     except Exception:
         return builtin_list  # DB not available — use defaults
 
@@ -738,17 +751,23 @@ def _get_active_controls(framework: str, builtin_list: list[dict]) -> list[dict]
     # Custom (non-builtin) controls added by users
     for row in overrides.values():
         if row.id not in builtin_ids and row.enabled:
-            result.append({
-                "id": row.id,
-                "category": row.category or row.id,
-                "category_label": row.category_label or row.category or row.id,
-                "title": row.title or row.id,
-                "description": row.description or "",
-                "task_types": _j.loads(row.task_types_json) if row.task_types_json else [],
-                "dimension_keys": _j.loads(row.dimension_keys_json) if row.dimension_keys_json else [],
-                "evidence_keywords": _j.loads(row.evidence_keywords_json) if row.evidence_keywords_json else [],
-                "weight": row.weight or 2,
-            })
+            result.append(
+                {
+                    "id": row.id,
+                    "category": row.category or row.id,
+                    "category_label": row.category_label or row.category or row.id,
+                    "title": row.title or row.id,
+                    "description": row.description or "",
+                    "task_types": _j.loads(row.task_types_json) if row.task_types_json else [],
+                    "dimension_keys": _j.loads(row.dimension_keys_json)
+                    if row.dimension_keys_json
+                    else [],
+                    "evidence_keywords": _j.loads(row.evidence_keywords_json)
+                    if row.evidence_keywords_json
+                    else [],
+                    "weight": row.weight or 2,
+                }
+            )
 
     return result
 
@@ -758,13 +777,13 @@ def _get_active_controls(framework: str, builtin_list: list[dict]) -> list[dict]
 
 def build_isae_report(run_id: str) -> dict:
     """Generate an ISAE 3000 / SOC 2 TSC report for a PipelineRun."""
-    from app.models.pipeline import Pipeline, Stage
-    from app.models.run import PipelineRun
     from sqlalchemy.orm import joinedload
 
+    from app.models.pipeline import Pipeline, Stage
+    from app.models.run import PipelineRun
+
     run = (
-        PipelineRun.query
-        .options(
+        PipelineRun.query.options(
             joinedload(PipelineRun.stage_runs),
         )
         .filter_by(id=run_id)
@@ -773,8 +792,7 @@ def build_isae_report(run_id: str) -> dict:
 
     # Load pipeline with its stages and tasks to get task_type info
     pipeline = (
-        Pipeline.query
-        .options(joinedload(Pipeline.stages).joinedload(Stage.tasks))
+        Pipeline.query.options(joinedload(Pipeline.stages).joinedload(Stage.tasks))
         .filter_by(id=run.pipeline_id)
         .first()
     )
@@ -783,7 +801,12 @@ def build_isae_report(run_id: str) -> dict:
     pipeline_dimensions: dict[str, int] = {}
     if pipeline:
         try:
-            from app.services.maturity_service import DIMENSIONS, _applicable_dimensions, _score_pipeline_dimension
+            from app.services.maturity_service import (
+                DIMENSIONS,
+                _applicable_dimensions,
+                _score_pipeline_dimension,
+            )
+
             applicable = {k for k, _ in _applicable_dimensions(pipeline.kind or "ci")}
             for key, cfg in DIMENSIONS.items():
                 d = _score_pipeline_dimension(pipeline, key, cfg, applicable=(key in applicable))
@@ -830,7 +853,9 @@ def build_isae_report(run_id: str) -> dict:
         "framework": "ISAE 3000 / SOC 2 Type II (Trust Service Criteria)",
         "run_id": run.id,
         "pipeline_id": run.pipeline_id,
-        "pipeline_name": getattr(pipeline, "name", run.pipeline_id) if pipeline else run.pipeline_id,
+        "pipeline_name": getattr(pipeline, "name", run.pipeline_id)
+        if pipeline
+        else run.pipeline_id,
         "run_status": run.status,
         "run_started_at": run.started_at.isoformat() if run.started_at else None,
         "generated_at": datetime.now(UTC).isoformat(),
@@ -855,20 +880,19 @@ def build_isae_report(run_id: str) -> dict:
 
 def build_acf_report(run_id: str) -> dict:
     """Generate an ACF (Australian Assurance/Compliance Framework) report for a PipelineRun."""
-    from app.models.pipeline import Pipeline, Stage
-    from app.models.run import PipelineRun
     from sqlalchemy.orm import joinedload
 
+    from app.models.pipeline import Pipeline, Stage
+    from app.models.run import PipelineRun
+
     run = (
-        PipelineRun.query
-        .options(joinedload(PipelineRun.stage_runs))
+        PipelineRun.query.options(joinedload(PipelineRun.stage_runs))
         .filter_by(id=run_id)
         .first_or_404()
     )
 
     pipeline = (
-        Pipeline.query
-        .options(joinedload(Pipeline.stages).joinedload(Stage.tasks))
+        Pipeline.query.options(joinedload(Pipeline.stages).joinedload(Stage.tasks))
         .filter_by(id=run.pipeline_id)
         .first()
     )
@@ -876,7 +900,12 @@ def build_acf_report(run_id: str) -> dict:
     pipeline_dimensions: dict[str, int] = {}
     if pipeline:
         try:
-            from app.services.maturity_service import DIMENSIONS, _applicable_dimensions, _score_pipeline_dimension
+            from app.services.maturity_service import (
+                DIMENSIONS,
+                _applicable_dimensions,
+                _score_pipeline_dimension,
+            )
+
             applicable = {k for k, _ in _applicable_dimensions(pipeline.kind or "ci")}
             for key, cfg in DIMENSIONS.items():
                 d = _score_pipeline_dimension(pipeline, key, cfg, applicable=(key in applicable))
@@ -921,7 +950,9 @@ def build_acf_report(run_id: str) -> dict:
         "framework": "ACF — Australian Assurance & Compliance Framework (APRA CPS 234 / ASD ISM)",
         "run_id": run.id,
         "pipeline_id": run.pipeline_id,
-        "pipeline_name": getattr(pipeline, "name", run.pipeline_id) if pipeline else run.pipeline_id,
+        "pipeline_name": getattr(pipeline, "name", run.pipeline_id)
+        if pipeline
+        else run.pipeline_id,
         "run_status": run.status,
         "run_started_at": run.started_at.isoformat() if run.started_at else None,
         "generated_at": datetime.now(UTC).isoformat(),
@@ -933,9 +964,6 @@ def build_acf_report(run_id: str) -> dict:
             "not_met": not_met,
             "manual": manual,
         },
-        "domains": {
-            k: {"controls": v}
-            for k, v in sorted(domains.items())
-        },
+        "domains": {k: {"controls": v} for k, v in sorted(domains.items())},
         "controls": controls,
     }

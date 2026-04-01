@@ -16,15 +16,19 @@ from flask import Blueprint, jsonify, request
 from app.extensions import db
 from app.models.framework_control import FrameworkControl
 
-framework_controls_bp = Blueprint("framework_controls", __name__, url_prefix="/api/v1/framework-controls")
+framework_controls_bp = Blueprint(
+    "framework_controls", __name__, url_prefix="/api/v1/framework-controls"
+)
 
 
 def _builtin_controls(framework: str) -> list[dict]:
     if framework == "isae":
         from app.services.framework_audit_service import SOC2_CRITERIA
+
         return SOC2_CRITERIA
     if framework == "acf":
         from app.services.framework_audit_service import ACF_DOMAINS
+
         return ACF_DOMAINS
     return []
 
@@ -61,9 +65,7 @@ def list_controls(framework: str):
         return jsonify({"error": "framework must be 'isae' or 'acf'"}), 400
 
     builtins = _builtin_controls(framework)
-    overrides = {
-        r.id: r for r in FrameworkControl.query.filter_by(framework=framework).all()
-    }
+    overrides = {r.id: r for r in FrameworkControl.query.filter_by(framework=framework).all()}
 
     result = []
     # Built-in controls (merged with any DB overrides)
@@ -72,7 +74,9 @@ def list_controls(framework: str):
         if ctrl_id in overrides:
             result.append(_merge(b, overrides[ctrl_id]))
         else:
-            result.append({**b, "enabled": True, "is_builtin": True, "updated_at": None, "updated_by": None})
+            result.append(
+                {**b, "enabled": True, "is_builtin": True, "updated_at": None, "updated_by": None}
+            )
 
     # Custom controls (not in built-ins)
     builtin_ids = {b["id"] for b in builtins}
@@ -90,6 +94,7 @@ def update_control(framework: str, ctrl_id: str):
 
     data = request.get_json(silent=True) or {}
     from app.routes.auth import _current_user
+
     user = _current_user()
 
     row = FrameworkControl.query.filter_by(framework=framework, id=ctrl_id).first()
@@ -111,11 +116,17 @@ def update_control(framework: str, ctrl_id: str):
     if "category_label" in data:
         row.category_label = data["category_label"] or None
     if "task_types" in data:
-        row.task_types_json = json.dumps(data["task_types"]) if data["task_types"] is not None else None
+        row.task_types_json = (
+            json.dumps(data["task_types"]) if data["task_types"] is not None else None
+        )
     if "dimension_keys" in data:
-        row.dimension_keys_json = json.dumps(data["dimension_keys"]) if data["dimension_keys"] is not None else None
+        row.dimension_keys_json = (
+            json.dumps(data["dimension_keys"]) if data["dimension_keys"] is not None else None
+        )
     if "evidence_keywords" in data:
-        row.evidence_keywords_json = json.dumps(data["evidence_keywords"]) if data["evidence_keywords"] is not None else None
+        row.evidence_keywords_json = (
+            json.dumps(data["evidence_keywords"]) if data["evidence_keywords"] is not None else None
+        )
     if "weight" in data:
         row.weight = int(data["weight"]) if data["weight"] is not None else None
 
@@ -142,6 +153,7 @@ def add_custom_control(framework: str):
         return jsonify({"error": f"Control '{ctrl_id}' already exists"}), 409
 
     from app.routes.auth import _current_user
+
     user = _current_user()
 
     row = FrameworkControl(
@@ -154,8 +166,12 @@ def add_custom_control(framework: str):
         category=data.get("category"),
         category_label=data.get("category_label"),
         task_types_json=json.dumps(data["task_types"]) if data.get("task_types") else None,
-        dimension_keys_json=json.dumps(data["dimension_keys"]) if data.get("dimension_keys") else None,
-        evidence_keywords_json=json.dumps(data["evidence_keywords"]) if data.get("evidence_keywords") else None,
+        dimension_keys_json=json.dumps(data["dimension_keys"])
+        if data.get("dimension_keys")
+        else None,
+        evidence_keywords_json=json.dumps(data["evidence_keywords"])
+        if data.get("evidence_keywords")
+        else None,
         weight=int(data["weight"]) if data.get("weight") else 2,
         updated_by=user.username if user else None,
     )
@@ -175,7 +191,9 @@ def delete_control(framework: str, ctrl_id: str):
 
     builtin_ids = {b["id"] for b in _builtin_controls(framework)}
     if ctrl_id in builtin_ids:
-        return jsonify({"error": "Built-in controls cannot be deleted — use enabled=false to disable them"}), 400
+        return jsonify(
+            {"error": "Built-in controls cannot be deleted — use enabled=false to disable them"}
+        ), 400
 
     db.session.delete(row)
     db.session.commit()

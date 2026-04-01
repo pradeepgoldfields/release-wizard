@@ -91,7 +91,6 @@ echo "Branch: $BRANCH"
 echo ""
 echo "✓ Checkout complete"
 """,
-
     "lint": """\
 #!/usr/bin/env bash
 set -euo pipefail
@@ -119,7 +118,6 @@ echo "42 files already formatted"
 echo ""
 echo "✓ Lint passed — 0 issues found"
 """,
-
     "unit_test": """\
 #!/usr/bin/env bash
 set -euo pipefail
@@ -150,7 +148,6 @@ echo "━━━ 40 passed in 12.3s ━━━"
 echo ""
 echo "✓ All unit tests passed"
 """,
-
     "build_image": """\
 #!/usr/bin/env bash
 set -euo pipefail
@@ -192,7 +189,6 @@ echo "  Layer 6/6: digest sha256:e1f2a3 pushed"
 echo ""
 echo "✓ Image pushed: $IMAGE_TAG"
 """,
-
     "deploy": """\
 #!/usr/bin/env bash
 set -euo pipefail
@@ -227,7 +223,6 @@ echo "  deployment \"api-service\" successfully rolled out"
 echo ""
 echo "✓ Deploy complete → $NAMESPACE"
 """,
-
     "smoke_test": """\
 #!/usr/bin/env bash
 set -euo pipefail
@@ -249,7 +244,6 @@ echo "  GET $BASE_URL/api/v1/products ... 200 OK  (3 products)"
 echo ""
 echo "✓ All smoke tests passed (3/3)"
 """,
-
     "cleanup": """\
 #!/usr/bin/env bash
 set -euo pipefail
@@ -269,7 +263,6 @@ echo "  Freed: 847 MB"
 echo ""
 echo "✓ Workspace clean"
 """,
-
     "tag_release": """\
 #!/usr/bin/env bash
 set -euo pipefail
@@ -294,7 +287,6 @@ echo "  git push origin \"$TAG\""
 echo ""
 echo "✓ Tag $TAG pushed to origin"
 """,
-
     "notify": """\
 #!/usr/bin/env bash
 set -euo pipefail
@@ -378,7 +370,6 @@ if total < coverage_min:
 print(f"✓ Coverage {total:.1f}% meets minimum {coverage_min:.0f}%")
 print(f"  run_id={run_id}")
 """,
-
     "security_scan": """\
 #!/usr/bin/env python3
 \"\"\"SAST security scan — uses CDT_* context variables.\"\"\"
@@ -431,7 +422,6 @@ if highs and fail_on_high:
 print(f"✓ Security scan complete — no blocking issues")
 print(f"  run_id={run_id}")
 """,
-
     "integration_test": """\
 #!/usr/bin/env python3
 \"\"\"Integration test suite — uses CDT_* context variables.\"\"\"
@@ -481,7 +471,6 @@ print(f"━━━ {passed}/{total} passed in {sum(d for _,_,d in tests):.2f}s �
 print()
 print(f"✓ Integration tests passed  run_id={run_id}")
 """,
-
     "validate_manifest": """\
 #!/usr/bin/env python3
 \"\"\"Validate Kubernetes manifests — uses CDT_* context variables.\"\"\"
@@ -517,7 +506,6 @@ for path, api, kind, status in manifests:
 print()
 print(f"✓ All {len(manifests)} manifests valid  run_id={run_id}")
 """,
-
     "generate_sbom": """\
 #!/usr/bin/env python3
 \"\"\"Generate Software Bill of Materials — uses CDT_* context variables.\"\"\"
@@ -1336,11 +1324,11 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
 
         # ── Stage accent colors ───────────────────────────────────────────────
         STAGE_COLORS = {
-            "checkout": "#3b82f6",   # blue
-            "validate": "#8b5cf6",   # violet
-            "test":     "#10b981",   # emerald
-            "security": "#ef4444",   # rose
-            "publish":  "#f59e0b",   # amber
+            "checkout": "#3b82f6",  # blue
+            "validate": "#8b5cf6",  # violet
+            "test": "#10b981",  # emerald
+            "security": "#ef4444",  # rose
+            "publish": "#f59e0b",  # amber
         }
         for pipeline in pipelines.values():
             for stage in pipeline.stages:
@@ -1351,33 +1339,117 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
 
         # ── Design-time Properties ────────────────────────────────────────────
         from app.services.property_service import set_property
+
         prop_specs = [
             # Pipeline-level
-            ("pipeline", pipelines["api-ci-build"].id,  "IMAGE_REPO",    "registry.acme.internal/api",  "string",  "Container image repository"),
-            ("pipeline", pipelines["api-ci-build"].id,  "BUILD_NUMBER",  None,                          "string",  "Injected by CI trigger"),
-            ("pipeline", pipelines["api-ci-build"].id,  "COVERAGE_MIN",  "80",                          "number",  "Minimum test coverage %"),
-            ("pipeline", pipelines["api-cd-deploy"].id, "NAMESPACE",     "acme-prod",                   "string",  "Target k8s namespace"),
-            ("pipeline", pipelines["api-cd-deploy"].id, "REPLICAS",      "3",                           "number",  "Desired pod replicas"),
-            ("pipeline", pipelines["api-cd-deploy"].id, "DB_MIGRATE",    "true",                        "boolean", "Run db migrations on deploy"),
-            ("pipeline", pipelines["frontend-ci-build"].id, "NODE_ENV",  "production",                  "string",  "Node environment"),
-            ("pipeline", pipelines["frontend-ci-build"].id, "SENTRY_DSN", None,                         "secret",  "Sentry error reporting DSN"),
+            (
+                "pipeline",
+                pipelines["api-ci-build"].id,
+                "IMAGE_REPO",
+                "registry.acme.internal/api",
+                "string",
+                "Container image repository",
+            ),
+            (
+                "pipeline",
+                pipelines["api-ci-build"].id,
+                "BUILD_NUMBER",
+                None,
+                "string",
+                "Injected by CI trigger",
+            ),
+            (
+                "pipeline",
+                pipelines["api-ci-build"].id,
+                "COVERAGE_MIN",
+                "80",
+                "number",
+                "Minimum test coverage %",
+            ),
+            (
+                "pipeline",
+                pipelines["api-cd-deploy"].id,
+                "NAMESPACE",
+                "acme-prod",
+                "string",
+                "Target k8s namespace",
+            ),
+            (
+                "pipeline",
+                pipelines["api-cd-deploy"].id,
+                "REPLICAS",
+                "3",
+                "number",
+                "Desired pod replicas",
+            ),
+            (
+                "pipeline",
+                pipelines["api-cd-deploy"].id,
+                "DB_MIGRATE",
+                "true",
+                "boolean",
+                "Run db migrations on deploy",
+            ),
+            (
+                "pipeline",
+                pipelines["frontend-ci-build"].id,
+                "NODE_ENV",
+                "production",
+                "string",
+                "Node environment",
+            ),
+            (
+                "pipeline",
+                pipelines["frontend-ci-build"].id,
+                "SENTRY_DSN",
+                None,
+                "secret",
+                "Sentry error reporting DSN",
+            ),
             # Stage-level overrides
-            ("stage", _stage_id(pipelines["api-ci-build"], "test"),     "COVERAGE_MIN", "85",    "number", "Stricter minimum for test stage"),
-            ("stage", _stage_id(pipelines["api-ci-build"], "security"), "FAIL_ON_HIGH", "true",  "boolean","Fail pipeline on HIGH findings"),
-            ("stage", _stage_id(pipelines["api-cd-deploy"], "publish"),  "SLACK_CHANNEL", "#deploys", "string", "Notification channel"),
+            (
+                "stage",
+                _stage_id(pipelines["api-ci-build"], "test"),
+                "COVERAGE_MIN",
+                "85",
+                "number",
+                "Stricter minimum for test stage",
+            ),
+            (
+                "stage",
+                _stage_id(pipelines["api-ci-build"], "security"),
+                "FAIL_ON_HIGH",
+                "true",
+                "boolean",
+                "Fail pipeline on HIGH findings",
+            ),
+            (
+                "stage",
+                _stage_id(pipelines["api-cd-deploy"], "publish"),
+                "SLACK_CHANNEL",
+                "#deploys",
+                "string",
+                "Notification channel",
+            ),
         ]
         for owner_type, owner_id, name, value, vtype, desc in prop_specs:
-            if owner_id and not __import__("app.models.property", fromlist=["Property"]).Property.query.filter_by(
-                owner_type=owner_type, owner_id=owner_id, name=name
-            ).first():
+            if (
+                owner_id
+                and not __import__("app.models.property", fromlist=["Property"])
+                .Property.query.filter_by(owner_type=owner_type, owner_id=owner_id, name=name)
+                .first()
+            ):
                 set_property(owner_type, owner_id, name, value, value_type=vtype, description=desc)
         print("  Applied design-time properties")
 
         # ── Pipeline Runs (historical) ────────────────────────────────────────
         for pl_name in [
-            "api-ci-build", "api-cd-deploy",
-            "frontend-ci-build", "frontend-cd-deploy",
-            "worker-ci-build", "security-scan",
+            "api-ci-build",
+            "api-cd-deploy",
+            "frontend-ci-build",
+            "frontend-cd-deploy",
+            "worker-ci-build",
+            "security-scan",
         ]:
             _seed_pipeline_runs(pipelines[pl_name])
 
@@ -1387,61 +1459,159 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
 
         # ── Extra users ───────────────────────────────────────────────────────
         extra_users = [
-            ("carol",   "carol@acme.example",   "Carol Wu",       "Developer",  "carol123"),
-            ("dave",    "dave@acme.example",     "Dave Okafor",    "ReadOnly",   "dave123"),
-            ("eve",     "eve@acme.example",      "Eve Nakamura",   "Developer",  "eve123"),
-            ("frank",   "frank@acme.example",    "Frank Torres",   "Admin",      "frank123"),
-            ("grace",   "grace@acme.example",    "Grace Patel",    "ReadOnly",   "grace123"),
+            ("carol", "carol@acme.example", "Carol Wu", "Developer", "carol123"),
+            ("dave", "dave@acme.example", "Dave Okafor", "ReadOnly", "dave123"),
+            ("eve", "eve@acme.example", "Eve Nakamura", "Developer", "eve123"),
+            ("frank", "frank@acme.example", "Frank Torres", "Admin", "frank123"),
+            ("grace", "grace@acme.example", "Grace Patel", "ReadOnly", "grace123"),
         ]
         for uname, email, display, persona, pw in extra_users:
             if not User.query.filter_by(username=uname).first():
-                db.session.add(User(
-                    id=resource_id("usr"),
-                    username=uname, email=email, display_name=display,
-                    persona=persona, password_hash=_hash(pw), is_active=True,
-                ))
+                db.session.add(
+                    User(
+                        id=resource_id("usr"),
+                        username=uname,
+                        email=email,
+                        display_name=display,
+                        persona=persona,
+                        password_hash=_hash(pw),
+                        is_active=True,
+                    )
+                )
                 print(f"  Created user: {uname}")
         db.session.commit()
 
         # ── Extra audit events ────────────────────────────────────────────────
         extra_audit = [
-            ("pipeline.run.succeeded", "bob",    "pipeline", pipelines["api-ci-build"].id,   "run",    "allow", {"commit_sha": "b7c8d9e", "duration_s": 247}, _ago(hours=3)),
-            ("pipeline.run.failed",    "alice",  "pipeline", pipelines["data-ci-build"].id,  "run",    "allow", {"commit_sha": "c3d4e5f", "stage": "test"},   _ago(hours=5)),
-            ("release.run.started",    "alice",  "release",  rel_100.id,                     "run",    "allow", {"version": "1.0.0"},                         _ago(days=1)),
-            ("vault.secret.read",      "carol",  "secret",   "DATABASE_URL",                 "read",   "allow", {"reason": "pipeline inject"},                _ago(minutes=15)),
-            ("user.login",             "carol",  "user",     "carol",                        "login",  "allow", {"ip": "10.0.1.5"},                           _ago(minutes=45)),
-            ("gate.admission.denied",  "system", "pipeline", pipelines["data-cd-deploy"].id,  "attach", "deny",  {"reason": "Non-Compliant rating"},          _ago(hours=1, minutes=30)),
-            ("compliance.rule.updated","admin",  "rule",     "organization",                 "update", "allow", {"min_rating": "Gold"},                       _ago(days=2)),
-            ("pipeline.run.warning",   "bob",    "pipeline", pipelines["worker-ci-build"].id, "run",   "allow", {"commit_sha": "f6a7b8c"},                    _ago(hours=7)),
+            (
+                "pipeline.run.succeeded",
+                "bob",
+                "pipeline",
+                pipelines["api-ci-build"].id,
+                "run",
+                "allow",
+                {"commit_sha": "b7c8d9e", "duration_s": 247},
+                _ago(hours=3),
+            ),
+            (
+                "pipeline.run.failed",
+                "alice",
+                "pipeline",
+                pipelines["data-ci-build"].id,
+                "run",
+                "allow",
+                {"commit_sha": "c3d4e5f", "stage": "test"},
+                _ago(hours=5),
+            ),
+            (
+                "release.run.started",
+                "alice",
+                "release",
+                rel_100.id,
+                "run",
+                "allow",
+                {"version": "1.0.0"},
+                _ago(days=1),
+            ),
+            (
+                "vault.secret.read",
+                "carol",
+                "secret",
+                "DATABASE_URL",
+                "read",
+                "allow",
+                {"reason": "pipeline inject"},
+                _ago(minutes=15),
+            ),
+            (
+                "user.login",
+                "carol",
+                "user",
+                "carol",
+                "login",
+                "allow",
+                {"ip": "10.0.1.5"},
+                _ago(minutes=45),
+            ),
+            (
+                "gate.admission.denied",
+                "system",
+                "pipeline",
+                pipelines["data-cd-deploy"].id,
+                "attach",
+                "deny",
+                {"reason": "Non-Compliant rating"},
+                _ago(hours=1, minutes=30),
+            ),
+            (
+                "compliance.rule.updated",
+                "admin",
+                "rule",
+                "organization",
+                "update",
+                "allow",
+                {"min_rating": "Gold"},
+                _ago(days=2),
+            ),
+            (
+                "pipeline.run.warning",
+                "bob",
+                "pipeline",
+                pipelines["worker-ci-build"].id,
+                "run",
+                "allow",
+                {"commit_sha": "f6a7b8c"},
+                _ago(hours=7),
+            ),
         ]
         existing_count = AuditEvent.query.count()
         if existing_count < 12:
             for etype, actor, rtype, rid, action, decision, detail, ts in extra_audit:
-                db.session.add(AuditEvent(
-                    id=resource_id("aev"),
-                    event_type=etype, actor=actor,
-                    resource_type=rtype, resource_id=rid,
-                    action=action, decision=decision,
-                    detail=json.dumps(detail), timestamp=ts,
-                ))
+                db.session.add(
+                    AuditEvent(
+                        id=resource_id("aev"),
+                        event_type=etype,
+                        actor=actor,
+                        resource_type=rtype,
+                        resource_id=rid,
+                        action=action,
+                        decision=decision,
+                        detail=json.dumps(detail),
+                        timestamp=ts,
+                    )
+                )
             db.session.commit()
             print(f"  Created {len(extra_audit)} extra audit events")
 
         # ── Extra vault secrets ───────────────────────────────────────────────
         extra_secrets = [
-            ("NPM_AUTH_TOKEN",    "npm registry auth token for private packages",   "npm_XXXXXXXXXXXX", "admin,carol"),
-            ("SONAR_TOKEN",       "SonarQube analysis token",                        "sqp_XXXXXXXXXXXX", "admin,alice,carol"),
-            ("AWS_SECRET_KEY",    "AWS IAM secret for S3 artifact storage",          "wJaXXXXXXXXXXXX", "admin"),
-            ("POSTGRES_PASSWORD", "RDS PostgreSQL master password",                  "s3cur3P@ss!",      "admin"),
+            (
+                "NPM_AUTH_TOKEN",
+                "npm registry auth token for private packages",
+                "npm_XXXXXXXXXXXX",
+                "admin,carol",
+            ),
+            ("SONAR_TOKEN", "SonarQube analysis token", "sqp_XXXXXXXXXXXX", "admin,alice,carol"),
+            (
+                "AWS_SECRET_KEY",
+                "AWS IAM secret for S3 artifact storage",
+                "wJaXXXXXXXXXXXX",
+                "admin",
+            ),
+            ("POSTGRES_PASSWORD", "RDS PostgreSQL master password", "s3cur3P@ss!", "admin"),
         ]
         for name, desc, value, allowed in extra_secrets:
             if not VaultSecret.query.filter_by(name=name).first():
-                db.session.add(VaultSecret(
-                    id=resource_id("vsec"),
-                    name=name, description=desc,
-                    ciphertext=encrypt(value),
-                    allowed_users=allowed, created_by="admin",
-                ))
+                db.session.add(
+                    VaultSecret(
+                        id=resource_id("vsec"),
+                        name=name,
+                        description=desc,
+                        ciphertext=encrypt(value),
+                        allowed_users=allowed,
+                        created_by="admin",
+                    )
+                )
                 print(f"  Created vault secret: {name}")
         db.session.commit()
 
@@ -1543,12 +1713,12 @@ def _seed_pipeline_runs(pipeline: Pipeline) -> None:
     }
 
     run_specs = [
-        ("a1b2c3d", "Succeeded", "alice",  _ago(days=7),          timedelta(minutes=47), None),
-        ("d4e5f6a", "Failed",    "alice",  _ago(days=5),          timedelta(minutes=12), 2),
-        ("b7c8d9e", "Succeeded", "carol",  _ago(days=4),          timedelta(minutes=52), None),
-        ("c3d4e5f", "Warning",   "bob",    _ago(days=2),          timedelta(minutes=44), None),
-        ("e5f6a7b", "Failed",    "carol",  _ago(days=1),          timedelta(minutes=18), 3),
-        ("f6a7b8c", "Succeeded", "alice",  _ago(hours=3),         timedelta(minutes=51), None),
+        ("a1b2c3d", "Succeeded", "alice", _ago(days=7), timedelta(minutes=47), None),
+        ("d4e5f6a", "Failed", "alice", _ago(days=5), timedelta(minutes=12), 2),
+        ("b7c8d9e", "Succeeded", "carol", _ago(days=4), timedelta(minutes=52), None),
+        ("c3d4e5f", "Warning", "bob", _ago(days=2), timedelta(minutes=44), None),
+        ("e5f6a7b", "Failed", "carol", _ago(days=1), timedelta(minutes=18), 3),
+        ("f6a7b8c", "Succeeded", "alice", _ago(hours=3), timedelta(minutes=51), None),
     ]
 
     stages = sorted(pipeline.stages, key=lambda s: s.order)
@@ -1603,16 +1773,20 @@ def _seed_pipeline_runs(pipeline: Pipeline) -> None:
                 else:
                     tr_status = "Succeeded"
 
-                db.session.add(TaskRun(
-                    id=resource_id("trun"),
-                    task_id=task.id,
-                    stage_run_id=sr.id,
-                    status=tr_status,
-                    return_code=0 if tr_status in ("Succeeded", "Warning") else (1 if tr_status == "Failed" else None),
-                    logs=TASK_LOGS.get(tr_status, ""),
-                    started_at=sr.started_at + timedelta(seconds=j * 90),
-                    finished_at=sr.started_at + timedelta(seconds=j * 90 + 85),
-                ))
+                db.session.add(
+                    TaskRun(
+                        id=resource_id("trun"),
+                        task_id=task.id,
+                        stage_run_id=sr.id,
+                        status=tr_status,
+                        return_code=0
+                        if tr_status in ("Succeeded", "Warning")
+                        else (1 if tr_status == "Failed" else None),
+                        logs=TASK_LOGS.get(tr_status, ""),
+                        started_at=sr.started_at + timedelta(seconds=j * 90),
+                        finished_at=sr.started_at + timedelta(seconds=j * 90 + 85),
+                    )
+                )
     db.session.flush()
     print(f"  Created pipeline runs for: {pipeline.name}")
 

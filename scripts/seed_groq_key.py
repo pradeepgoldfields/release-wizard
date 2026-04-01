@@ -3,17 +3,23 @@
 Run after any data seed or server restart:
     python scripts/seed_groq_key.py
 """
+
 from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import create_app
-from app.config import Config
-from app.extensions import db
-from app.models.setting import PlatformSetting
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+from app import create_app  # noqa: E402
+from app.config import Config  # noqa: E402
+from app.extensions import db  # noqa: E402
+from app.models.setting import PlatformSetting  # noqa: E402
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 

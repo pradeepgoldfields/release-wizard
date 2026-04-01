@@ -7,9 +7,9 @@ Each run is identified by a time-sortable ULID-based ID:
 
 from __future__ import annotations
 
-from flask import Blueprint, current_app, jsonify, request
-
 import json
+
+from flask import Blueprint, current_app, jsonify, request
 
 from app.domain.enums import RunStatus
 from app.extensions import db
@@ -22,6 +22,7 @@ from app.services.run_service import (
     start_release_run,
     update_run_status,
 )
+from app.utils import paginate
 
 runs_bp = Blueprint("runs", __name__)
 
@@ -34,14 +35,16 @@ VALID_STATUSES: frozenset[str] = frozenset(RunStatus)
 
 @runs_bp.get("/api/v1/pipelines/<pipeline_id>/runs")
 def list_pipeline_runs(pipeline_id: str):
-    """Return all runs for a pipeline, newest first."""
+    """Return runs for a pipeline, newest first.
+
+    Query params: ``limit`` (default 50, max 200), ``offset`` (default 0).
+    """
     db.get_or_404(Pipeline, pipeline_id)
-    runs = (
-        PipelineRun.query.filter_by(pipeline_id=pipeline_id)
-        .order_by(PipelineRun.started_at.desc())
-        .all()
+    query = PipelineRun.query.filter_by(pipeline_id=pipeline_id).order_by(
+        PipelineRun.started_at.desc()
     )
-    return jsonify([r.to_dict() for r in runs])
+    items, meta = paginate(query)
+    return jsonify({"items": [r.to_dict() for r in items], "meta": meta})
 
 
 @runs_bp.post("/api/v1/pipelines/<pipeline_id>/runs")
@@ -183,37 +186,43 @@ def get_pipeline_run_context(run_id: str):
                 except (ValueError, TypeError):
                     ctx_env = {}
 
-            tasks_out.append({
-                "task_run_id": tr.id,
-                "task_name": tr.task.name if tr.task else tr.task_id,
-                "status": tr.status,
-                "context_env": ctx_env,
-                "output_json": out_json,
-                "user_input": user_inp,
-            })
+            tasks_out.append(
+                {
+                    "task_run_id": tr.id,
+                    "task_name": tr.task.name if tr.task else tr.task_id,
+                    "status": tr.status,
+                    "context_env": ctx_env,
+                    "output_json": out_json,
+                    "user_input": user_inp,
+                }
+            )
 
-        stages_out.append({
-            "stage_run_id": sr.id,
-            "stage_name": sr.stage.name if sr.stage else sr.stage_id,
-            "status": sr.status,
-            "runtime_properties": json.loads(sr.runtime_properties or "{}"),
-            "tasks": tasks_out,
-        })
+        stages_out.append(
+            {
+                "stage_run_id": sr.id,
+                "stage_name": sr.stage.name if sr.stage else sr.stage_id,
+                "status": sr.status,
+                "runtime_properties": json.loads(sr.runtime_properties or "{}"),
+                "tasks": tasks_out,
+            }
+        )
 
-    return jsonify({
-        "run_id": run.id,
-        "pipeline": {
-            "id": pipeline.id if pipeline else None,
-            "name": pipeline.name if pipeline else None,
-            "git_repo": pipeline.git_repo if pipeline else None,
-            "git_branch": pipeline.git_branch if pipeline else None,
-        },
-        "triggered_by": run.triggered_by,
-        "commit_sha": run.commit_sha,
-        "artifact_id": run.artifact_id,
-        "runtime_properties": json.loads(run.runtime_properties or "{}"),
-        "stages": stages_out,
-    })
+    return jsonify(
+        {
+            "run_id": run.id,
+            "pipeline": {
+                "id": pipeline.id if pipeline else None,
+                "name": pipeline.name if pipeline else None,
+                "git_repo": pipeline.git_repo if pipeline else None,
+                "git_branch": pipeline.git_branch if pipeline else None,
+            },
+            "triggered_by": run.triggered_by,
+            "commit_sha": run.commit_sha,
+            "artifact_id": run.artifact_id,
+            "runtime_properties": json.loads(run.runtime_properties or "{}"),
+            "stages": stages_out,
+        }
+    )
 
 
 # ── Framework audit reports ───────────────────────────────────────────────────
@@ -223,6 +232,7 @@ def get_pipeline_run_context(run_id: str):
 def get_isae_report(run_id: str):
     """Return ISAE 3000 / SOC 2 Trust Service Criteria report for a pipeline run."""
     from app.services.framework_audit_service import build_isae_report
+
     report = build_isae_report(run_id)
     return jsonify(report)
 
@@ -231,6 +241,7 @@ def get_isae_report(run_id: str):
 def get_acf_report(run_id: str):
     """Return ACF (Australian Assurance & Compliance Framework) report for a pipeline run."""
     from app.services.framework_audit_service import build_acf_report
+
     report = build_acf_report(run_id)
     return jsonify(report)
 
@@ -239,18 +250,27 @@ def get_acf_report(run_id: str):
 def export_run_audit_pdf(run_id: str, framework: str):
     """Export ACF or ISAE audit report as PDF."""
     import io
-    from flask import send_file
-    from app.services.framework_audit_service import build_isae_report, build_acf_report
 
-    if framework == "isae":
-        report = build_isae_report(run_id)
-    elif framework == "acf":
-        report = build_acf_report(run_id)
-    else:
-        return jsonify({"error": f"Unknown framework: {framework}. Use 'isae' or 'acf'"}), 400
+    from flask import send_file
+
+    from app.services.framework_audit_service import build_acf_report, build_isae_report
+
+    try:
+        if framework == "isae":
+            report = build_isae_report(run_id)
+        elif framework == "acf":
+            report = build_acf_report(run_id)
+        else:
+            return jsonify({"error": f"Unknown framework: {framework}. Use 'isae' or 'acf'"}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Failed to build {framework.upper()} report: {exc}"}), 500
 
     from app.services.pdf_service import export_audit_report_pdf
-    pdf_bytes = export_audit_report_pdf(report)
+
+    try:
+        pdf_bytes = export_audit_report_pdf(report)
+    except Exception as exc:
+        return jsonify({"error": f"PDF generation failed: {exc}"}), 500
     return send_file(
         io.BytesIO(pdf_bytes),
         mimetype="application/pdf",
@@ -264,14 +284,14 @@ def export_run_audit_pdf(run_id: str, framework: str):
 
 @runs_bp.get("/api/v1/releases/<release_id>/runs")
 def list_release_runs(release_id: str):
-    """Return all runs for a release, newest first."""
+    """Return runs for a release, newest first.
+
+    Query params: ``limit`` (default 50, max 200), ``offset`` (default 0).
+    """
     db.get_or_404(Release, release_id)
-    runs = (
-        ReleaseRun.query.filter_by(release_id=release_id)
-        .order_by(ReleaseRun.started_at.desc())
-        .all()
-    )
-    return jsonify([r.to_dict() for r in runs])
+    query = ReleaseRun.query.filter_by(release_id=release_id).order_by(ReleaseRun.started_at.desc())
+    items, meta = paginate(query)
+    return jsonify({"items": [r.to_dict() for r in items], "meta": meta})
 
 
 @runs_bp.post("/api/v1/releases/<release_id>/runs")

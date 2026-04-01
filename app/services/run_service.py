@@ -157,8 +157,123 @@ def _build_runtime_context(run: PipelineRun, stage_run=None, task_run=None, task
     return {**pipeline_rt, "stageRuntime": stage_runtime, "properties": resolved_props}
 
 
+def _execute_stage(
+    app: Any, run_id: str, sr_id: str, context_env: dict[str, str]
+) -> tuple[bool, bool]:
+    """Execute a single stage's tasks sequentially.  Returns (failed, warned)."""
+    import copy
+
+    def _now() -> datetime:
+        return datetime.now(UTC)
+
+    with app.app_context():
+        run = db.session.get(PipelineRun, run_id)
+        sr = db.session.get(StageRun, sr_id)
+        if not run or not sr:
+            return True, False
+
+        env = copy.copy(context_env)
+        env["CDT_STAGE_RUN_ID"] = sr.id
+        env["CDT_STAGE_ID"] = sr.stage_id
+        env["CDT_STAGE_NAME"] = sr.stage.name if sr.stage else ""
+
+        task_runs = sorted(sr.task_runs, key=lambda tr: tr.task.order)
+        stage_failed = False
+        stage_warning = False
+
+        for tr in task_runs:
+            task = tr.task
+            tr.status = "Running"
+            tr.started_at = _now()
+            db.session.commit()
+
+            runtime_ctx = _build_runtime_context(run, stage_run=sr, task_run=tr, task=task)
+            user_input = {}
+            if tr.user_input:
+                try:
+                    user_input = json.loads(tr.user_input)
+                except (ValueError, TypeError):
+                    user_input = {}
+
+            webhook_payload = runtime_ctx.get("webhook", {}).get("payload", {})
+            task_env = {
+                **env,
+                "CDT_TASK_RUN_ID": tr.id,
+                "CDT_TASK_ID": task.id,
+                "CDT_TASK_NAME": task.name,
+                "CDT_RUNTIME": json.dumps(runtime_ctx),
+                "CDT_USER_INPUT": json.dumps(user_input),
+                "CDT_WEBHOOK_PAYLOAD": json.dumps(webhook_payload),
+                "CDT_PROPS": json.dumps(runtime_ctx.get("properties", {})),
+            }
+            tr.context_env = json.dumps(task_env)
+
+            if _in_kubernetes():
+                rc, logs = _run_script_k8s(task.run_language, task.run_code, task.timeout, tr.id)
+            else:
+                rc, logs = _run_script_subprocess(
+                    task.run_language, task.run_code, task.timeout, task_env
+                )
+
+            output_json = _parse_output_json(logs)
+            status = _status_from_code(rc, task.on_error)
+            tr.return_code = rc
+            tr.logs = logs
+            tr.output_json = output_json
+            tr.status = status
+            tr.finished_at = _now()
+            db.session.commit()
+            task_run_finished(tr)
+
+            if status == "Warning":
+                stage_warning = True
+            elif status == "Failed" and task.on_error == "fail":
+                stage_failed = True
+                for remaining in task_runs[task_runs.index(tr) + 1 :]:
+                    remaining.status = "Cancelled"
+                    remaining.finished_at = _now()
+                db.session.commit()
+                break
+
+        sr.status = (
+            RunStatus.FAILED
+            if stage_failed
+            else ("Warning" if stage_warning else RunStatus.SUCCEEDED)
+        )
+        sr.finished_at = _now()
+        db.session.commit()
+        stage_run_finished(sr)
+        return stage_failed, stage_warning
+
+
+def _group_stage_runs(stage_runs: list) -> list[list]:
+    """Group stage runs into sequential batches.
+
+    Consecutive stages with execution_mode='parallel' are placed in the same
+    batch and run concurrently; all other stages get their own single-element batch.
+    """
+    groups: list[list] = []
+    for sr in stage_runs:
+        mode = (sr.stage.execution_mode or "sequential") if sr.stage else "sequential"
+        if mode == "parallel" and groups and len(groups[-1]) > 0:
+            prev_mode = (
+                (groups[-1][-1].stage.execution_mode or "sequential")
+                if groups[-1][-1].stage
+                else "sequential"
+            )
+            if prev_mode == "parallel":
+                groups[-1].append(sr)
+                continue
+        groups.append([sr])
+    return groups
+
+
 def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
-    """Background thread: execute all stages and tasks in order."""
+    """Background thread: execute all stages, respecting per-stage execution_mode.
+
+    Consecutive stages marked execution_mode='parallel' run concurrently in
+    separate threads; sequential stages (the default) run one after another.
+    """
 
     def _now() -> datetime:
         return datetime.now(UTC)
@@ -170,9 +285,8 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
 
         stage_runs = sorted(run.stage_runs, key=lambda sr: sr.stage.order)
         pipeline_warning = False
-
-        # Build base context env vars accessible as $CDT_* in all task scripts
         pipeline = run.pipeline
+
         context_env: dict[str, str] = {
             "CDT_PIPELINE_RUN_ID": run.id,
             "CDT_PIPELINE_ID": run.pipeline_id,
@@ -184,95 +298,52 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
             "CDT_GIT_BRANCH": (pipeline.git_branch or "main") if pipeline else "main",
         }
 
-        for sr in stage_runs:
-            sr.status = RunStatus.RUNNING
-            sr.started_at = _now()
-            db.session.commit()
+        groups = _group_stage_runs(stage_runs)
 
-            context_env["CDT_STAGE_RUN_ID"] = sr.id
-            context_env["CDT_STAGE_ID"] = sr.stage_id
-            context_env["CDT_STAGE_NAME"] = sr.stage.name if sr.stage else ""
-
-            task_runs = sorted(sr.task_runs, key=lambda tr: tr.task.order)
-            stage_failed = False
-            stage_warning = False
-
-            for tr in task_runs:
-                task = tr.task
-                tr.status = "Running"
-                tr.started_at = _now()
+        for group in groups:
+            if len(group) == 1:
+                # Sequential — execute inline
+                sr = group[0]
+                sr.status = RunStatus.RUNNING
+                sr.started_at = _now()
+                db.session.commit()
+                failed, warned = _execute_stage(app, run.id, sr.id, context_env)
+            else:
+                # Parallel group — mark all running, then fan-out via threads
+                results: dict[str, tuple[bool, bool]] = {}
+                threads = []
+                for sr in group:
+                    sr.status = RunStatus.RUNNING
+                    sr.started_at = _now()
                 db.session.commit()
 
-                # Build full runtime context from accumulated outputs so far
-                runtime_ctx = _build_runtime_context(run, stage_run=sr, task_run=tr, task=task)
-                user_input = {}
-                if tr.user_input:
-                    try:
-                        user_input = json.loads(tr.user_input)
-                    except (ValueError, TypeError):
-                        user_input = {}
+                def _run_and_collect(sr_id: str) -> None:
+                    f, w = _execute_stage(app, pipeline_run_id, sr_id, dict(context_env))
+                    results[sr_id] = (f, w)
 
-                # Expose webhook payload as a dedicated env var if present
-                webhook_payload = runtime_ctx.get("webhook", {}).get("payload", {})
+                for sr in group:
+                    t = threading.Thread(target=_run_and_collect, args=(sr.id,), daemon=True)
+                    t.start()
+                    threads.append(t)
+                for t in threads:
+                    t.join()
 
-                task_env = {
-                    **context_env,
-                    "CDT_TASK_RUN_ID": tr.id,
-                    "CDT_TASK_ID": task.id,
-                    "CDT_TASK_NAME": task.name,
-                    # Full runtime context as JSON string
-                    "CDT_RUNTIME": json.dumps(runtime_ctx),
-                    "CDT_USER_INPUT": json.dumps(user_input),
-                    # Webhook payload shortcut — empty dict if not triggered by webhook
-                    "CDT_WEBHOOK_PAYLOAD": json.dumps(webhook_payload),
-                    # Resolved properties flat dict — accessible as $CDT_PROPS in scripts
-                    "CDT_PROPS": json.dumps(runtime_ctx.get("properties", {})),
-                }
+                failed = any(r[0] for r in results.values())
+                warned = any(r[1] for r in results.values())
 
-                # Persist the full CDT_* context so users can inspect it later
-                tr.context_env = json.dumps(task_env)
-
-                if _in_kubernetes():
-                    rc, logs = _run_script_k8s(
-                        task.run_language, task.run_code, task.timeout, tr.id
-                    )
-                else:
-                    rc, logs = _run_script_subprocess(
-                        task.run_language, task.run_code, task.timeout, task_env
-                    )
-                output_json = _parse_output_json(logs)
-                status = _status_from_code(rc, task.on_error)
-
-                tr.return_code = rc
-                tr.logs = logs
-                tr.output_json = output_json
-                tr.status = status
-                tr.finished_at = _now()
-                db.session.commit()
-                task_run_finished(tr)
-
-                if status == "Warning":
-                    stage_warning = True
-                elif status == "Failed" and task.on_error == "fail":
-                    stage_failed = True
-                    # Cancel remaining tasks in this stage
-                    for remaining in task_runs[task_runs.index(tr) + 1 :]:
-                        remaining.status = "Cancelled"
-                        remaining.finished_at = _now()
-                    db.session.commit()
-                    break
-
-            if stage_failed:
-                sr.status = RunStatus.FAILED
-                sr.finished_at = _now()
-                db.session.commit()
-                stage_run_finished(sr)
-                # Cancel remaining stages
-                remaining_stages = stage_runs[stage_runs.index(sr) + 1 :]
-                for rem_sr in remaining_stages:
-                    rem_sr.status = "Cancelled"
-                    for rem_tr in rem_sr.task_runs:
-                        rem_tr.status = "Cancelled"
+            if failed:
+                # Cancel all remaining stage-runs not yet started
+                started_ids = {sr.id for sr in group}
+                for rem_sr in stage_runs:
+                    if rem_sr.id not in started_ids and rem_sr.status not in (
+                        RunStatus.SUCCEEDED,
+                        RunStatus.FAILED,
+                        "Warning",
+                        "Cancelled",
+                    ):
+                        rem_sr.status = "Cancelled"
+                        for rem_tr in rem_sr.task_runs:
+                            rem_tr.status = "Cancelled"
                 db.session.commit()
                 run.status = RunStatus.FAILED
                 run.finished_at = _now()
@@ -280,12 +351,7 @@ def _execute_pipeline_async(app: Any, pipeline_run_id: str) -> None:
                 pipeline_run_finished(run)
                 return
 
-            sr.status = "Warning" if stage_warning else RunStatus.SUCCEEDED
-            sr.finished_at = _now()
-            db.session.commit()
-            stage_run_finished(sr)
-
-            if stage_warning:
+            if warned:
                 pipeline_warning = True
 
         run.status = "Warning" if pipeline_warning else RunStatus.SUCCEEDED

@@ -7,11 +7,16 @@ can be created independently without side effects.
 
 from __future__ import annotations
 
+import logging
 import time
+import uuid
 
-from flask import Flask
+from flask import Flask, g, request
 
 from app.extensions import db, migrate
+from app.logging_config import configure_logging
+
+log = logging.getLogger(__name__)
 
 # Startup timestamp used as cache-buster for static assets
 _BOOT_TS = str(int(time.time()))
@@ -31,7 +36,11 @@ def create_app(config=None) -> Flask:
 
     from app.config import Config
 
-    app.config.from_object(config or Config)
+    cfg = config or Config
+    app.config.from_object(cfg)
+
+    # Configure structured JSON logging as early as possible
+    configure_logging(app.config.get("LOG_LEVEL", "INFO"))
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -68,22 +77,22 @@ def create_app(config=None) -> Flask:
     from app.routes.agents import agents_bp
     from app.routes.auth import _current_user, auth_bp, ensure_admin_user
     from app.routes.chat import chat_bp
-    from app.routes.metrics import metrics_bp
     from app.routes.compliance import compliance_bp
     from app.routes.environments import environments_bp
+    from app.routes.framework_controls import framework_controls_bp
     from app.routes.health import health_bp
     from app.routes.main import main_bp
     from app.routes.maturity import maturity_bp
+    from app.routes.metrics import metrics_bp
     from app.routes.pipelines import pipelines_bp
     from app.routes.plugins import plugins_bp
     from app.routes.products import products_bp
     from app.routes.properties import properties_bp
     from app.routes.releases import releases_bp
     from app.routes.runs import runs_bp
-    from app.routes.framework_controls import framework_controls_bp
-    from app.routes.templates import templates_bp
     from app.routes.settings import settings_bp
     from app.routes.swagger import openapi_bp, swagger_bp
+    from app.routes.templates import templates_bp
     from app.routes.users import users_bp
     from app.routes.vault import vault_bp
     from app.routes.webhook import webhook_bp
@@ -119,6 +128,35 @@ def create_app(config=None) -> Flask:
     def inject_static_version():
         return {"v": _BOOT_TS}
 
+    # ── Request correlation ID + structured access log ────────────────────────
+    @app.before_request
+    def _attach_request_id() -> None:
+        g.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        g.request_start = time.perf_counter()
+
+    @app.after_request
+    def _log_request(response):
+        # Skip static assets and health probes to avoid log noise
+        if not request.path.startswith("/static") and request.path not in ("/healthz", "/readyz"):
+            duration_ms = round(
+                (time.perf_counter() - g.get("request_start", time.perf_counter())) * 1000
+            )
+            log.info(
+                "%s %s %s",
+                request.method,
+                request.path,
+                response.status_code,
+                extra={
+                    "request_id": g.get("request_id"),
+                    "method": request.method,
+                    "path": request.path,
+                    "status": response.status_code,
+                    "duration_ms": duration_ms,
+                },
+            )
+        response.headers["X-Request-ID"] = g.get("request_id", "")
+        return response
+
     # JWT guard — skip public paths
     _PUBLIC = {
         "/api/v1/auth/login",
@@ -132,7 +170,7 @@ def create_app(config=None) -> Flask:
 
         @app.before_request
         def require_auth():
-            from flask import g, jsonify, request
+            from flask import jsonify
 
             path = request.path
             # Allow public paths and anything under the Swagger/docs UI
@@ -156,6 +194,7 @@ def create_app(config=None) -> Flask:
     if not app.config.get("TESTING"):
         with app.app_context():
             db.create_all()
+            _apply_schema_migrations()
             ensure_admin_user(app)
             _load_db_settings(app)
 
@@ -170,5 +209,30 @@ def _load_db_settings(app) -> None:
         for row in PlatformSetting.query.all():
             if row.value:
                 app.config[row.key] = row.value
-    except Exception:
-        pass  # table may not exist yet on first boot
+    except Exception:  # noqa: BLE001 — table may not exist yet on first boot
+        log.debug("DB settings not yet available (first boot)")
+        pass
+
+
+def _apply_schema_migrations() -> None:
+    """Apply additive schema changes that db.create_all() cannot handle.
+
+    Each migration is idempotent: check whether the column/index exists before
+    running ALTER TABLE.  Works for SQLite, PostgreSQL, and Oracle.
+    """
+    from sqlalchemy import inspect, text  # noqa: PLC0415
+
+    engine = db.engine
+    inspector = inspect(engine)
+
+    # ── Migration 001: stages.execution_mode ─────────────────────────────────
+    stage_cols = {c["name"] for c in inspector.get_columns("stages")}
+    if "execution_mode" not in stage_cols:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE stages ADD COLUMN execution_mode VARCHAR(16) DEFAULT 'sequential'"
+                )
+            )
+            conn.commit()
+        log.info("schema_migration", extra={"migration": "stages.execution_mode added"})

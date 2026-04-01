@@ -34,6 +34,7 @@ class Stage(db.Model):
     output_schema = db.Column(db.Text, default="{}")
     is_protected = db.Column(db.Boolean, default=False)  # org-managed stage
     accent_color = db.Column(db.String(64))  # user-chosen hex or gradient stop, e.g. "#3b82f6"
+    execution_mode = db.Column(db.String(16), default="sequential")  # sequential | parallel
 
     pipeline = db.relationship("Pipeline", back_populates="stages")
     tasks = db.relationship(
@@ -63,6 +64,7 @@ class Stage(db.Model):
             "output_schema": json.loads(self.output_schema or "{}"),
             "is_protected": self.is_protected,
             "accent_color": self.accent_color or None,
+            "execution_mode": self.execution_mode or "sequential",
         }
         if include_tasks:
             data["tasks"] = [t.to_dict() for t in self.tasks]

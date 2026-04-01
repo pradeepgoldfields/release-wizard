@@ -9,14 +9,12 @@ path) so the container filesystem restriction does not apply.
 from __future__ import annotations
 
 import json
-import os
 import platform
 import shutil
 import subprocess
 import tempfile
 import textwrap
 from pathlib import Path
-from typing import Any
 
 # ── Config templates ──────────────────────────────────────────────────────────
 
@@ -133,58 +131,105 @@ datasources:
 """)
 
 # Grafana Conduit dashboard JSON (simplified 6-panel starter)
-_GRAFANA_DASHBOARD = json.dumps({
-    "id": None,
-    "title": "Conduit CI/CD Platform",
-    "tags": ["conduit"],
-    "timezone": "browser",
-    "schemaVersion": 38,
-    "version": 1,
-    "panels": [
-        {
-            "id": 1, "title": "Pipeline Run Rate", "type": "timeseries",
-            "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
-            "targets": [{"expr": 'rate(conduit_pipeline_runs_total[5m])', "legendFormat": "{{status}}"}],
-        },
-        {
-            "id": 2, "title": "Active Pipeline Runs", "type": "stat",
-            "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
-            "targets": [{"expr": "conduit_active_pipeline_runs"}],
-        },
-        {
-            "id": 3, "title": "Compliance Score Avg", "type": "gauge",
-            "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
-            "targets": [{"expr": "conduit_compliance_score_avg"}],
-            "fieldConfig": {"defaults": {"min": 0, "max": 100,
-                "thresholds": {"mode": "absolute", "steps": [
-                    {"color": "red", "value": 0},
-                    {"color": "yellow", "value": 60},
-                    {"color": "green", "value": 80},
-                ]}}},
-        },
-        {
-            "id": 4, "title": "P95 Pipeline Duration (s)", "type": "timeseries",
-            "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
-            "targets": [{"expr": 'histogram_quantile(0.95, rate(conduit_pipeline_run_duration_seconds_bucket[5m]))', "legendFormat": "p95"}],
-        },
-        {
-            "id": 5, "title": "Success Rate %", "type": "gauge",
-            "gridPos": {"x": 12, "y": 4, "w": 6, "h": 4},
-            "targets": [{"expr": 'rate(conduit_pipeline_runs_total{status="Succeeded"}[1h]) / rate(conduit_pipeline_runs_total[1h]) * 100'}],
-            "fieldConfig": {"defaults": {"min": 0, "max": 100,
-                "thresholds": {"mode": "absolute", "steps": [
-                    {"color": "red", "value": 0},
-                    {"color": "yellow", "value": 70},
-                    {"color": "green", "value": 90},
-                ]}}},
-        },
-        {
-            "id": 6, "title": "HTTP Request Latency P99 (s)", "type": "timeseries",
-            "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
-            "targets": [{"expr": 'histogram_quantile(0.99, rate(conduit_http_request_duration_seconds_bucket[5m]))', "legendFormat": "p99 {{endpoint}}"}],
-        },
-    ],
-}, indent=2)
+_GRAFANA_DASHBOARD = json.dumps(
+    {
+        "id": None,
+        "title": "Conduit CI/CD Platform",
+        "tags": ["conduit"],
+        "timezone": "browser",
+        "schemaVersion": 38,
+        "version": 1,
+        "panels": [
+            {
+                "id": 1,
+                "title": "Pipeline Run Rate",
+                "type": "timeseries",
+                "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+                "targets": [
+                    {"expr": "rate(conduit_pipeline_runs_total[5m])", "legendFormat": "{{status}}"}
+                ],
+            },
+            {
+                "id": 2,
+                "title": "Active Pipeline Runs",
+                "type": "stat",
+                "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+                "targets": [{"expr": "conduit_active_pipeline_runs"}],
+            },
+            {
+                "id": 3,
+                "title": "Compliance Score Avg",
+                "type": "gauge",
+                "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+                "targets": [{"expr": "conduit_compliance_score_avg"}],
+                "fieldConfig": {
+                    "defaults": {
+                        "min": 0,
+                        "max": 100,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {"color": "red", "value": 0},
+                                {"color": "yellow", "value": 60},
+                                {"color": "green", "value": 80},
+                            ],
+                        },
+                    }
+                },
+            },
+            {
+                "id": 4,
+                "title": "P95 Pipeline Duration (s)",
+                "type": "timeseries",
+                "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+                "targets": [
+                    {
+                        "expr": "histogram_quantile(0.95, rate(conduit_pipeline_run_duration_seconds_bucket[5m]))",
+                        "legendFormat": "p95",
+                    }
+                ],
+            },
+            {
+                "id": 5,
+                "title": "Success Rate %",
+                "type": "gauge",
+                "gridPos": {"x": 12, "y": 4, "w": 6, "h": 4},
+                "targets": [
+                    {
+                        "expr": 'rate(conduit_pipeline_runs_total{status="Succeeded"}[1h]) / rate(conduit_pipeline_runs_total[1h]) * 100'
+                    }
+                ],
+                "fieldConfig": {
+                    "defaults": {
+                        "min": 0,
+                        "max": 100,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {"color": "red", "value": 0},
+                                {"color": "yellow", "value": 70},
+                                {"color": "green", "value": 90},
+                            ],
+                        },
+                    }
+                },
+            },
+            {
+                "id": 6,
+                "title": "HTTP Request Latency P99 (s)",
+                "type": "timeseries",
+                "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+                "targets": [
+                    {
+                        "expr": "histogram_quantile(0.99, rate(conduit_http_request_duration_seconds_bucket[5m]))",
+                        "legendFormat": "p99 {{endpoint}}",
+                    }
+                ],
+            },
+        ],
+    },
+    indent=2,
+)
 
 _GRAFANA_DASHBOARD_PROV = textwrap.dedent("""\
 apiVersion: 1
@@ -227,6 +272,7 @@ def _compose_cmd(runtime: str) -> list[str]:
 
 
 # ── Stack directory ───────────────────────────────────────────────────────────
+
 
 def _stack_dir() -> Path:
     """Return (and create) the directory where stack configs are written."""
@@ -324,11 +370,17 @@ def get_stack_status() -> dict:
         }
 
     services: dict[str, dict] = {}
-    for name, port in [("conduit-prometheus", 9090), ("conduit-alertmanager", 9093), ("conduit-grafana", 3000)]:
+    for name, port in [
+        ("conduit-prometheus", 9090),
+        ("conduit-alertmanager", 9093),
+        ("conduit-grafana", 3000),
+    ]:
         try:
             result = subprocess.run(
                 [runtime, "inspect", "--format", "{{.State.Status}}", name],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             state = result.stdout.strip() or "not found"
         except Exception:
@@ -351,7 +403,9 @@ def start_stack() -> dict:
     try:
         result = subprocess.run(
             compose + ["-f", str(stack_dir / "docker-compose.yml"), "up", "-d"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
             cwd=str(stack_dir),
         )
         if result.returncode != 0:
@@ -385,7 +439,9 @@ def stop_stack() -> dict:
     try:
         result = subprocess.run(
             compose + ["-f", str(stack_dir / "docker-compose.yml"), "down"],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
             cwd=str(stack_dir),
         )
         return {"ok": result.returncode == 0, "output": result.stdout or result.stderr}

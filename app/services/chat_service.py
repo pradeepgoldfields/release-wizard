@@ -188,8 +188,14 @@ TOOLS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "resource_type": {"type": "string", "description": "e.g. release, pipeline, product"},
-                    "limit": {"type": "integer", "description": "Max events to return (default 20)"},
+                    "resource_type": {
+                        "type": "string",
+                        "description": "e.g. release, pipeline, product",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max events to return (default 20)",
+                    },
                 },
                 "required": [],
             },
@@ -330,7 +336,10 @@ TOOLS: list[dict[str, Any]] = [
                     "product_id": {"type": "string"},
                     "name": {"type": "string", "description": "Release name/version e.g. v1.2.3"},
                     "description": {"type": "string"},
-                    "environment_id": {"type": "string", "description": "Optional target environment ID"},
+                    "environment_id": {
+                        "type": "string",
+                        "description": "Optional target environment ID",
+                    },
                 },
                 "required": ["product_id", "name"],
             },
@@ -414,18 +423,24 @@ def _execute_tool(name: str, inputs: dict, current_user: Any = None) -> Any:
                             out_json = json.loads(tr.output_json)
                         except (ValueError, TypeError):
                             out_json = tr.output_json
-                    tasks_out.append({
-                        "task_name": tr.task.name if tr.task else tr.task_id,
-                        "status": tr.status,
-                        "cdt_variables": {k: v for k, v in ctx_env.items() if k.startswith("CDT_")},
-                        "resolved_properties": json.loads(ctx_env.get("CDT_PROPS", "{}")),
-                        "output_json": out_json,
-                    })
-                stages_out.append({
-                    "stage_name": sr.stage.name if sr.stage else sr.stage_id,
-                    "status": sr.status,
-                    "tasks": tasks_out,
-                })
+                    tasks_out.append(
+                        {
+                            "task_name": tr.task.name if tr.task else tr.task_id,
+                            "status": tr.status,
+                            "cdt_variables": {
+                                k: v for k, v in ctx_env.items() if k.startswith("CDT_")
+                            },
+                            "resolved_properties": json.loads(ctx_env.get("CDT_PROPS", "{}")),
+                            "output_json": out_json,
+                        }
+                    )
+                stages_out.append(
+                    {
+                        "stage_name": sr.stage.name if sr.stage else sr.stage_id,
+                        "status": sr.status,
+                        "tasks": tasks_out,
+                    }
+                )
             return {
                 "run_id": run.id,
                 "status": run.status,
@@ -481,10 +496,10 @@ def _execute_tool(name: str, inputs: dict, current_user: Any = None) -> Any:
             result = {"pipeline": [p.to_dict() for p in props], "stages": {}, "tasks": {}}
             pl = db.session.get(Pipeline, pipeline_id)
             if pl:
-                for stage in (pl.stages or []):
+                for stage in pl.stages or []:
                     sp = Property.query.filter_by(owner_type="stage", owner_id=stage.id).all()
                     result["stages"][stage.name] = [p.to_dict() for p in sp]
-                    for task in (stage.tasks or []):
+                    for task in stage.tasks or []:
                         tp = Property.query.filter_by(owner_type="task", owner_id=task.id).all()
                         if tp:
                             result["tasks"][task.name] = [p.to_dict() for p in tp]
@@ -508,6 +523,7 @@ def _execute_tool(name: str, inputs: dict, current_user: Any = None) -> Any:
         # ── WRITE / ACTION tools ──────────────────────────────────────────
         elif name == "trigger_pipeline_run":
             from app.services.run_service import start_pipeline_run
+
             run = start_pipeline_run(
                 pipeline_id=inputs["pipeline_id"],
                 commit_sha=inputs.get("commit_sha"),
@@ -515,19 +531,29 @@ def _execute_tool(name: str, inputs: dict, current_user: Any = None) -> Any:
                 triggered_by=triggered_by,
                 app=current_app._get_current_object(),
             )
-            return {"run_id": run.id, "status": run.status, "message": f"Pipeline run started: {run.id}"}
+            return {
+                "run_id": run.id,
+                "status": run.status,
+                "message": f"Pipeline run started: {run.id}",
+            }
 
         elif name == "trigger_release_run":
             from app.services.run_service import start_release_run
+
             run = start_release_run(
                 release_id=inputs["release_id"],
                 triggered_by=triggered_by,
                 app=current_app._get_current_object(),
             )
-            return {"run_id": run.id, "status": run.status, "message": f"Release run started: {run.id}"}
+            return {
+                "run_id": run.id,
+                "status": run.status,
+                "message": f"Release run started: {run.id}",
+            }
 
         elif name == "rerun_pipeline":
             from app.services.run_service import start_pipeline_run
+
             original = db.get_or_404(PipelineRun, inputs["run_id"])
             run = start_pipeline_run(
                 pipeline_id=original.pipeline_id,
@@ -536,12 +562,18 @@ def _execute_tool(name: str, inputs: dict, current_user: Any = None) -> Any:
                 triggered_by=triggered_by,
                 app=current_app._get_current_object(),
             )
-            return {"run_id": run.id, "status": run.status, "message": f"Pipeline re-run started: {run.id}"}
+            return {
+                "run_id": run.id,
+                "status": run.status,
+                "message": f"Pipeline re-run started: {run.id}",
+            }
 
         elif name == "create_product":
-            from app.services.id_service import resource_id
-            from app.models.product import Product as _Product
             import re
+
+            from app.models.product import Product as _Product
+            from app.services.id_service import resource_id
+
             slug = re.sub(r"[^a-z0-9-]", "-", inputs["name"].lower()).strip("-")
             p = _Product(
                 id=resource_id("prod"),
@@ -554,8 +586,9 @@ def _execute_tool(name: str, inputs: dict, current_user: Any = None) -> Any:
             return {"product_id": p.id, "name": p.name, "message": f"Product '{p.name}' created"}
 
         elif name == "create_release":
-            from app.services.id_service import resource_id
             from app.models.release import Release as _Release
+            from app.services.id_service import resource_id
+
             r = _Release(
                 id=resource_id("rel"),
                 product_id=inputs["product_id"],
@@ -577,6 +610,7 @@ def _execute_tool(name: str, inputs: dict, current_user: Any = None) -> Any:
 
 
 # ── System prompt with full platform knowledge ────────────────────────────────
+
 
 def _build_system_prompt(current_user: Any) -> str:
     user_info = ""
@@ -703,8 +737,11 @@ def chat(messages: list[dict], current_user: Any = None, max_iterations: int = 8
     """Run the agentic chat loop and return the assistant reply."""
     # Read from DB first (covers seeds that bypass the settings API)
     from app.models.setting import PlatformSetting as _PS
+
     _row = _PS.query.get("GROQ_API_KEY")
-    api_key = (_row.value if _row and _row.value else None) or current_app.config.get("GROQ_API_KEY", "")
+    api_key = (_row.value if _row and _row.value else None) or current_app.config.get(
+        "GROQ_API_KEY", ""
+    )
     if not api_key:
         return {
             "reply": (
@@ -723,52 +760,69 @@ def chat(messages: list[dict], current_user: Any = None, max_iterations: int = 8
         {"role": "system", "content": _build_system_prompt(current_user)}
     ] + list(messages)
 
-    for _ in range(max_iterations):
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=loop_messages,
-            tools=TOOLS,
-            tool_choice="auto",
-            max_tokens=4096,
-        )
+    try:
+        for _ in range(max_iterations):
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=loop_messages,
+                tools=TOOLS,
+                tool_choice="auto",
+                max_tokens=4096,
+            )
 
-        msg = response.choices[0].message
-        finish_reason = response.choices[0].finish_reason
+            msg = response.choices[0].message
+            finish_reason = response.choices[0].finish_reason
 
-        if finish_reason == "stop" or not msg.tool_calls:
-            return {"reply": msg.content or "", "tool_calls": tool_calls_made}
+            if finish_reason == "stop" or not msg.tool_calls:
+                return {"reply": msg.content or "", "tool_calls": tool_calls_made}
 
-        loop_messages.append(
-            {
-                "role": "assistant",
-                "content": msg.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                    }
-                    for tc in msg.tool_calls
-                ],
-            }
-        )
-
-        for tc in msg.tool_calls:
-            tool_calls_made.append(tc.function.name)
-            try:
-                inputs = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
-                inputs = {}
-            result = _execute_tool(tc.function.name, inputs, current_user=current_user)
             loop_messages.append(
                 {
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": json.dumps(result, default=str),
+                    "role": "assistant",
+                    "content": msg.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
                 }
             )
 
-    return {
-        "reply": "I reached the maximum number of reasoning steps. Please try a more specific question.",
-        "tool_calls": tool_calls_made,
-    }
+            for tc in msg.tool_calls:
+                tool_calls_made.append(tc.function.name)
+                try:
+                    inputs = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    inputs = {}
+                result = _execute_tool(tc.function.name, inputs, current_user=current_user)
+                loop_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps(result, default=str),
+                    }
+                )
+
+        return {
+            "reply": "I reached the maximum number of reasoning steps. Please try a more specific question.",
+            "tool_calls": tool_calls_made,
+        }
+
+    except Exception as exc:
+        log.error("Chat service error: %s", exc, exc_info=True)
+        err = str(exc)
+        if "api_key" in err.lower() or "authentication" in err.lower() or "401" in err:
+            friendly = "The Groq API key appears to be invalid. Please update it in **Administration → Settings**."
+        elif "rate" in err.lower() or "429" in err:
+            friendly = "The AI assistant is temporarily rate-limited. Please try again in a moment."
+        elif "connect" in err.lower() or "network" in err.lower() or "timeout" in err.lower():
+            friendly = "Could not reach the Groq API. Please check your network connection."
+        else:
+            friendly = f"The AI assistant encountered an error: {err}"
+        return {"reply": friendly, "tool_calls": tool_calls_made}

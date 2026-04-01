@@ -86,27 +86,52 @@ def test_runner():
 
     data = request.get_json(silent=True) or {}
     runtime = data.get("runtime") or "subprocess"
-    image   = data.get("image") or "python:3.12-slim"
+    image = data.get("image") or "python:3.12-slim"
 
     if runtime == "subprocess":
-        return jsonify({"ok": True, "runtime": "subprocess", "message": "subprocess runner is always available"})
+        return jsonify(
+            {
+                "ok": True,
+                "runtime": "subprocess",
+                "message": "subprocess runner is always available",
+            }
+        )
 
     if not shutil.which(runtime):
-        return jsonify({"ok": False, "runtime": runtime, "message": f"'{runtime}' not found on PATH"}), 200
+        return jsonify(
+            {"ok": False, "runtime": runtime, "message": f"'{runtime}' not found on PATH"}
+        ), 200
 
     try:
         result = subprocess.run(
             [runtime, "run", "--rm", image, "echo", "conduit-ok"],
-            capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=60,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
         )
         if "conduit-ok" in result.stdout:
-            return jsonify({"ok": True, "runtime": runtime, "image": image,
-                            "message": f"{runtime} is working — image pulled successfully"})
-        return jsonify({"ok": False, "runtime": runtime, "image": image,
-                        "message": result.stderr or result.stdout or "unexpected output"}), 200
+            return jsonify(
+                {
+                    "ok": True,
+                    "runtime": runtime,
+                    "image": image,
+                    "message": f"{runtime} is working — image pulled successfully",
+                }
+            )
+        return jsonify(
+            {
+                "ok": False,
+                "runtime": runtime,
+                "image": image,
+                "message": result.stderr or result.stdout or "unexpected output",
+            }
+        ), 200
     except subprocess.TimeoutExpired:
-        return jsonify({"ok": False, "runtime": runtime, "message": "Timed out pulling/running image (60s)"}), 200
+        return jsonify(
+            {"ok": False, "runtime": runtime, "message": "Timed out pulling/running image (60s)"}
+        ), 200
     except Exception as exc:
         return jsonify({"ok": False, "runtime": runtime, "message": str(exc)}), 200
 
@@ -122,3 +147,66 @@ def clear_setting(key: str):
         db.session.commit()
         current_app.config[key] = ""
     return "", 204
+
+
+# ── Database info / test ───────────────────────────────────────────────────────
+
+
+@settings_bp.get("/database")
+def get_database_info():
+    """Return current database connection info (URI masked for secrets).
+
+    Derives db_type from the URI scheme:
+      sqlite → SQLite, postgresql/postgres → PostgreSQL, oracle+cx_oracle → Oracle, etc.
+    """
+    raw_uri: str = current_app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    scheme = raw_uri.split("://")[0].split("+")[0].lower() if "://" in raw_uri else "unknown"
+
+    _type_label = {
+        "sqlite": "SQLite",
+        "postgresql": "PostgreSQL",
+        "postgres": "PostgreSQL",
+        "oracle": "Oracle",
+        "mysql": "MySQL",
+        "mariadb": "MariaDB",
+        "mssql": "SQL Server",
+    }
+    db_type = _type_label.get(scheme, scheme.capitalize())
+
+    # Mask credentials in URI for display
+    import re
+
+    masked_uri = re.sub(r"://([^:@]+:[^@]+@)", "://*****@", raw_uri)
+
+    engine_opts = current_app.config.get("SQLALCHEMY_ENGINE_OPTIONS", {})
+    pool_info = {
+        "pool_size": engine_opts.get("pool_size", "N/A (SQLite)"),
+        "max_overflow": engine_opts.get("max_overflow", "N/A (SQLite)"),
+        "pool_timeout": engine_opts.get("pool_timeout", "N/A (SQLite)"),
+        "pool_recycle": engine_opts.get("pool_recycle", "N/A (SQLite)"),
+        "pool_pre_ping": engine_opts.get("pool_pre_ping", False),
+    }
+
+    return jsonify(
+        {
+            "db_type": db_type,
+            "scheme": scheme,
+            "uri_masked": masked_uri,
+            "pool": pool_info,
+        }
+    )
+
+
+@settings_bp.post("/database/test")
+def test_database_connection():
+    """Execute a trivial query to verify the database connection is healthy."""
+    from sqlalchemy import text
+
+    from app.extensions import db
+
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return jsonify({"ok": True, "message": "Database connection successful"})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 200

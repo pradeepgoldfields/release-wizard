@@ -27,7 +27,7 @@ def test_create_and_list_product(client):
 
     r2 = client.get("/api/v1/products")
     assert r2.status_code == 200
-    assert len(r2.get_json()) == 1
+    assert len(r2.get_json()["items"]) == 1
 
 
 def test_get_product(client):

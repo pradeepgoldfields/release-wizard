@@ -15,9 +15,9 @@ class PipelineTemplate(db.Model):
     id = db.Column(db.String(64), primary_key=True)
     name = db.Column(db.String(256), nullable=False)
     description = db.Column(db.Text)
-    kind = db.Column(db.String(16), default="ci")          # ci | cd
-    category = db.Column(db.String(64))                    # e.g. "Security", "Deploy", "Full Stack"
-    tags = db.Column(db.String(512))                       # comma-separated tags
+    kind = db.Column(db.String(16), default="ci")  # ci | cd
+    category = db.Column(db.String(64))  # e.g. "Security", "Deploy", "Full Stack"
+    tags = db.Column(db.String(512))  # comma-separated tags
     # Serialised pipeline structure: list of stage dicts (stages → tasks)
     definition_json = db.Column(db.Text, default="[]")
     created_by = db.Column(db.String(128))

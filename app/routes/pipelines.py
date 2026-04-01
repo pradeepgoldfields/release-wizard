@@ -13,6 +13,7 @@ from app.models.product import Product
 from app.models.task import Task
 from app.services.id_service import resource_id
 from app.services.pipeline_service import create_pipeline, update_compliance_score
+from app.utils import paginate
 
 pipelines_bp = Blueprint(
     "pipelines", __name__, url_prefix="/api/v1/products/<product_id>/pipelines"
@@ -21,10 +22,14 @@ pipelines_bp = Blueprint(
 
 @pipelines_bp.get("")
 def list_pipelines(product_id: str):
-    """Return all pipelines for a product."""
+    """Return pipelines for a product.
+
+    Query params: ``limit`` (default 50, max 200), ``offset`` (default 0).
+    """
     db.get_or_404(Product, product_id)
-    pipelines = Pipeline.query.filter_by(product_id=product_id).all()
-    return jsonify([p.to_dict() for p in pipelines])
+    query = Pipeline.query.filter_by(product_id=product_id).order_by(Pipeline.name)
+    items, meta = paginate(query)
+    return jsonify({"items": [p.to_dict() for p in items], "meta": meta})
 
 
 @pipelines_bp.post("")
@@ -82,12 +87,10 @@ def delete_pipeline(product_id: str, pipeline_id: str):
 @pipelines_bp.post("/<pipeline_id>/copy")
 def copy_pipeline(product_id: str, pipeline_id: str):
     """Duplicate a pipeline (with all its stages and tasks) into the same or another product."""
-    from app.models.task import Task
     from sqlalchemy.orm import joinedload
 
     src = (
-        Pipeline.query
-        .options(joinedload(Pipeline.stages).joinedload(Stage.tasks))
+        Pipeline.query.options(joinedload(Pipeline.stages).joinedload(Stage.tasks))
         .filter_by(id=pipeline_id, product_id=product_id)
         .first_or_404()
     )
@@ -97,29 +100,31 @@ def copy_pipeline(product_id: str, pipeline_id: str):
 
     stages_def = []
     for s in sorted(src.stages, key=lambda x: x.order):
-        stages_def.append({
-            "name": s.name,
-            "order": s.order,
-            "container_image": s.container_image,
-            "run_language": s.run_language,
-            "run_code": s.run_code,
-            "run_file": s.run_file,
-            "tasks": [
-                {
-                    "name": tk.name,
-                    "description": tk.description,
-                    "order": tk.order,
-                    "run_language": tk.run_language,
-                    "run_code": tk.run_code,
-                    "execution_mode": tk.execution_mode,
-                    "on_error": tk.on_error,
-                    "timeout": tk.timeout,
-                    "is_required": tk.is_required,
-                    "task_type": tk.task_type or "",
-                }
-                for tk in sorted(s.tasks, key=lambda x: x.order)
-            ],
-        })
+        stages_def.append(
+            {
+                "name": s.name,
+                "order": s.order,
+                "container_image": s.container_image,
+                "run_language": s.run_language,
+                "run_code": s.run_code,
+                "run_file": s.run_file,
+                "tasks": [
+                    {
+                        "name": tk.name,
+                        "description": tk.description,
+                        "order": tk.order,
+                        "run_language": tk.run_language,
+                        "run_code": tk.run_code,
+                        "execution_mode": tk.execution_mode,
+                        "on_error": tk.on_error,
+                        "timeout": tk.timeout,
+                        "is_required": tk.is_required,
+                        "task_type": tk.task_type or "",
+                    }
+                    for tk in sorted(s.tasks, key=lambda x: x.order)
+                ],
+            }
+        )
 
     new_pipeline = create_pipeline(
         product_id=dest_product_id,
@@ -181,6 +186,7 @@ def create_stage(product_id: str, pipeline_id: str):
         container_image=data.get("container_image"),
         is_protected=bool(data.get("is_protected", False)),
         accent_color=data.get("accent_color") or None,
+        execution_mode=data.get("execution_mode", "sequential"),
     )
     db.session.add(stage)
     db.session.commit()
@@ -200,6 +206,12 @@ def update_stage(product_id: str, pipeline_id: str, stage_id: str):
         stage.order = int(data["order"])
     if "is_protected" in data:
         stage.is_protected = bool(data["is_protected"])
+    if "execution_mode" in data:
+        stage.execution_mode = (
+            data["execution_mode"]
+            if data["execution_mode"] in ("sequential", "parallel")
+            else "sequential"
+        )
     db.session.commit()
     return jsonify(stage.to_dict(include_tasks=True))
 

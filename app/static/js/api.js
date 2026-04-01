@@ -39,7 +39,7 @@ const api = {
   changePassword: (userId, data) => request("PATCH", `/users/${userId}/password`, data),
 
   // Products
-  getProducts: () => request("GET", "/products"),
+  getProducts: () => request("GET", "/products").then(r => r?.items ?? r),
   createProduct: (data) => request("POST", "/products", data),
   getProduct: (id) => request("GET", `/products/${id}`),
   updateProduct: (id, data) => request("PUT", `/products/${id}`, data),
@@ -59,12 +59,13 @@ const api = {
 
   // Applications
   getApplications: (pid) => request("GET", `/products/${pid}/applications`),
+  getApplication: (pid, aid) => request("GET", `/products/${pid}/applications/${aid}`),
   createApplication: (pid, data) => request("POST", `/products/${pid}/applications`, data),
   updateApplication: (pid, aid, data) => request("PUT", `/products/${pid}/applications/${aid}`, data),
   deleteApplication: (pid, aid) => request("DELETE", `/products/${pid}/applications/${aid}`),
 
   // Pipelines
-  getPipelines: (pid) => request("GET", `/products/${pid}/pipelines`),
+  getPipelines: (pid) => request("GET", `/products/${pid}/pipelines`).then(r => r?.items ?? r),
   createPipeline: (pid, data) => request("POST", `/products/${pid}/pipelines`, data),
   getPipeline: (pid, plid) => request("GET", `/products/${pid}/pipelines/${plid}`),
   updatePipeline: (pid, plid, data) => request("PUT", `/products/${pid}/pipelines/${plid}`, data),
@@ -92,7 +93,7 @@ const api = {
   deleteAgentPool: (id) => request("DELETE", `/agent-pools/${id}`),
 
   // Pipeline runs
-  getPipelineRuns: (plid) => request("GET", `/pipelines/${plid}/runs`),
+  getPipelineRuns: (plid) => request("GET", `/pipelines/${plid}/runs`).then(r => r?.items ?? r),
   createPipelineRun: (plid, data) => request("POST", `/pipelines/${plid}/runs`, data),
   getPipelineRun: (id) => request("GET", `/pipeline-runs/${id}`),
   getPipelineRunContext: (id) => request("GET", `/pipeline-runs/${id}/context`),
@@ -118,7 +119,7 @@ const api = {
   rerunFromStage: (runId, stageRunId) => request("POST", `/pipeline-runs/${runId}/stages/${stageRunId}/rerun`),
 
   // Release runs
-  getReleaseRuns: (rid) => request("GET", `/releases/${rid}/runs`),
+  getReleaseRuns: (rid) => request("GET", `/releases/${rid}/runs`).then(r => r?.items ?? r),
   createReleaseRun: (rid, data) => request("POST", `/releases/${rid}/runs`, data),
   getReleaseRun: (id) => request("GET", `/release-runs/${id}`),
   updateReleaseRun: (id, data) => request("PATCH", `/release-runs/${id}`, data),
@@ -142,6 +143,11 @@ const api = {
   deleteGroup: (id) => request("DELETE", `/groups/${id}`),
   addGroupMember: (groupId, userId) => request("POST", `/groups/${groupId}/members/${userId}`),
   removeGroupMember: (groupId, userId) => request("DELETE", `/groups/${groupId}/members/${userId}`),
+
+  // RBAC scope bindings
+  getScopeBindings: (scope) => request("GET", `/rbac/bindings?scope=${encodeURIComponent(scope)}`),
+  createScopeBinding: (data) => request("POST", "/rbac/bindings", data),
+  deleteScopeBinding: (id) => request("DELETE", `/rbac/bindings/${id}`),
 
   // Roles
   getRoles: () => request("GET", "/roles"),
@@ -211,6 +217,8 @@ const api = {
   setSetting: (key, value) => request("PUT", `/settings/${key}`, { value }),
   clearSetting: (key) => request("DELETE", `/settings/${key}`),
   testRunner: (data) => request("POST", "/settings/runner/test", data),
+  getDatabaseInfo: () => request("GET", "/settings/database"),
+  testDatabase: () => request("POST", "/settings/database/test"),
 
   // Maturity
   getPipelineMaturity: (pipelineId) => request("GET", `/maturity/pipeline/${pipelineId}`),
