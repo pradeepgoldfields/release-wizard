@@ -292,7 +292,7 @@ def validate_pipeline_yaml(product_id: str, pipeline_id: str):
                     warnings.append(f"{loc}: `{gate_key}` is enabled but has no `script`")
 
         stage_props = s_spec.get("properties")
-        if stage_props is not None and not isinstance(stage_props, (list, dict)):
+        if stage_props is not None and not isinstance(stage_props, list | dict):
             errors.append(f"{loc}: `properties` must be a list or mapping")
 
         task_specs = s_spec.get("tasks", [])
@@ -346,7 +346,9 @@ def validate_pipeline_yaml(product_id: str, pipeline_id: str):
             if kind == "gate":
                 gate_script = t_spec.get("gate_script", "")
                 if not gate_script:
-                    warnings.append(f"{t_loc}: gate task has no `gate_script` — it will always pass")
+                    warnings.append(
+                        f"{t_loc}: gate task has no `gate_script` — it will always pass"
+                    )
                 gate_lang = t_spec.get("gate_language", "bash")
                 if gate_lang not in _VALID_LANGUAGES:
                     warnings.append(f"{t_loc}: unrecognised gate_language '{gate_lang}'")
@@ -358,7 +360,9 @@ def validate_pipeline_yaml(product_id: str, pipeline_id: str):
                 else:
                     for a in approvers:
                         if not isinstance(a, dict) or "type" not in a or "ref" not in a:
-                            warnings.append(f"{t_loc}: each approver should have 'type' and 'ref' keys")
+                            warnings.append(
+                                f"{t_loc}: each approver should have 'type' and 'ref' keys"
+                            )
                             break
                 req = t_spec.get("approval_required_count", 0)
                 if not isinstance(req, int) or req < 0:
@@ -371,7 +375,7 @@ def validate_pipeline_yaml(product_id: str, pipeline_id: str):
 
             # Validate properties block if present
             props = t_spec.get("properties")
-            if props is not None and not isinstance(props, (list, dict)):
+            if props is not None and not isinstance(props, list | dict):
                 errors.append(f"{t_loc}: `properties` must be a list or mapping")
 
             total_tasks += 1

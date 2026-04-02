@@ -373,6 +373,8 @@ def create_agent_pool():
     name = (data.get("name") or "").strip()
     if not name:
         return jsonify({"error": "name is required"}), 400
+    if AgentPool.query.filter_by(name=name).first():
+        return jsonify({"error": f"Agent pool '{name}' already exists"}), 409
     pool = AgentPool(
         id=resource_id("pool"),
         name=name,
@@ -387,6 +389,13 @@ def create_agent_pool():
     db.session.commit()
     cache_service.invalidate(_POOLS_CACHE_KEY)
     return jsonify(pool.to_dict()), 201
+
+
+@agents_bp.get("/agent-pools/<pool_id>")
+def get_agent_pool(pool_id: str):
+    """Return a single agent pool by ID."""
+    pool = db.get_or_404(AgentPool, pool_id)
+    return jsonify(pool.to_dict())
 
 
 @agents_bp.patch("/agent-pools/<pool_id>")

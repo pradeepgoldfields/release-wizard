@@ -4550,6 +4550,264 @@ async function saveTemplateYaml(tmplId) {
   }
 }
 
+// ── Backlog ────────────────────────────────────────────────────────────────
+
+const _BACKLOG_STATUSES  = ["open", "in_progress", "done", "cancelled"];
+const _BACKLOG_PRIORITIES = ["low", "medium", "high", "critical"];
+const _BACKLOG_TYPES      = ["feature", "bug", "chore", "spike"];
+
+function _backlogStatusBadge(status) {
+  const map = {
+    open: "badge-blue", in_progress: "badge-running",
+    done: "badge-success", cancelled: "badge-silver",
+  };
+  return `<span class="badge ${map[status] || "badge-silver"}">${status || "—"}</span>`;
+}
+
+function _backlogPriorityBadge(priority) {
+  const map = {
+    low: "#6b7280", medium: "#0369a1", high: "#d97706", critical: "#dc2626",
+  };
+  const color = map[priority] || "#6b7280";
+  return `<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#fff;background:${color}">${priority || "—"}</span>`;
+}
+
+router.register("backlog", async () => {
+  const gen = _navGen;
+  setBreadcrumb({ label: "Backlog" });
+  setContent(loading());
+
+  const products = await api.getProducts().catch(() => []);
+  if (_navGen !== gen) return;
+
+  if (products.length === 0) {
+    setContent(`<div class="page-header"><div><h1>Product Backlog</h1></div></div>
+      <div class="card"><div class="empty-state"><p>No products found. Create a product first.</p></div></div>`);
+    return;
+  }
+
+  const firstProduct = products[0];
+  await loadBacklog(firstProduct.id, products, gen);
+});
+
+async function loadBacklog(productId, products, gen) {
+  if (gen === undefined) gen = _navGen;
+  const statusFilter   = el("bl-filter-status")?.value   || "";
+  const priorityFilter = el("bl-filter-priority")?.value || "";
+  const typeFilter     = el("bl-filter-type")?.value     || "";
+  const searchVal      = el("bl-search")?.value          || "";
+
+  const params = {};
+  if (statusFilter)   params.status    = statusFilter;
+  if (priorityFilter) params.priority  = priorityFilter;
+  if (typeFilter)     params.item_type = typeFilter;
+  if (searchVal)      params.q         = searchVal;
+
+  const items = await api.listBacklog(productId, Object.keys(params).length ? params : null).catch(() => []);
+  if (_navGen !== gen) return;
+
+  const productSel = (products || []).map(p =>
+    `<option value="${p.id}"${p.id === productId ? " selected" : ""}>${p.name}</option>`
+  ).join("");
+
+  setContent(`
+    <div class="page-header">
+      <div><h1>Product Backlog</h1><div class="sub">Work items, features, and bugs</div></div>
+      <button class="btn btn-primary" onclick="showCreateBacklogItem('${productId}')">+ New Item</button>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+      <div class="form-group" style="margin:0;min-width:180px">
+        <select class="form-control" id="bl-product-sel"
+          onchange="loadBacklog(this.value,null,_navGen)">
+          ${productSel}
+        </select>
+      </div>
+      <select class="form-control" id="bl-filter-status" style="max-width:140px"
+        onchange="loadBacklog('${productId}',null,_navGen)">
+        <option value="">All Statuses</option>
+        ${_BACKLOG_STATUSES.map(s => `<option value="${s}"${s===statusFilter?" selected":""}>${s}</option>`).join("")}
+      </select>
+      <select class="form-control" id="bl-filter-priority" style="max-width:140px"
+        onchange="loadBacklog('${productId}',null,_navGen)">
+        <option value="">All Priorities</option>
+        ${_BACKLOG_PRIORITIES.map(p => `<option value="${p}"${p===priorityFilter?" selected":""}>${p}</option>`).join("")}
+      </select>
+      <select class="form-control" id="bl-filter-type" style="max-width:140px"
+        onchange="loadBacklog('${productId}',null,_navGen)">
+        <option value="">All Types</option>
+        ${_BACKLOG_TYPES.map(t => `<option value="${t}"${t===typeFilter?" selected":""}>${t}</option>`).join("")}
+      </select>
+      <input class="form-control" id="bl-search" placeholder="Search title…" style="max-width:200px"
+        value="${searchVal}"
+        oninput="clearTimeout(this._t);this._t=setTimeout(()=>loadBacklog('${productId}',null,_navGen),300)">
+    </div>
+
+    ${items.length === 0
+      ? `<div class="card"><div class="empty-state">
+           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--gray-300);margin-bottom:8px">
+             <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+             <line x1="8" y1="18" x2="21" y2="18"/>
+             <polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/>
+           </svg>
+           <p>No backlog items found.</p>
+           <button class="btn btn-primary" onclick="showCreateBacklogItem('${productId}')">Create first item</button>
+         </div></div>`
+      : `<div class="card"><div class="table-wrap"><table>
+          <thead>
+            <tr>
+              <th>Title</th><th>Type</th><th>Status</th><th>Priority</th><th>Effort</th><th>Assignee</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map(i => `
+              <tr>
+                <td style="max-width:320px">
+                  <strong style="font-size:13px">${i.title}</strong>
+                  ${i.labels && i.labels.length ? `<br><span style="font-size:11px;color:var(--gray-400)">${i.labels.join(", ")}</span>` : ""}
+                </td>
+                <td><span class="badge badge-blue" style="font-size:11px">${i.item_type}</span></td>
+                <td>${_backlogStatusBadge(i.status)}</td>
+                <td>${_backlogPriorityBadge(i.priority)}</td>
+                <td style="text-align:center">${i.effort || 0}</td>
+                <td style="color:var(--gray-500);font-size:12px">${i.assignee_name || "—"}</td>
+                <td onclick="event.stopPropagation()">
+                  ${pageMenu(`bl-${i.id}`, [
+                    { label: "Edit",   onclick: `showEditBacklogItem('${i.id}','${productId}')` },
+                    { label: "Mark Done", onclick: `patchBacklogStatus('${i.id}','done','${productId}')` },
+                    { label: "Mark In Progress", onclick: `patchBacklogStatus('${i.id}','in_progress','${productId}')` },
+                    { divider: true },
+                    { label: "Delete", danger: true, onclick: `deleteBacklogItem('${i.id}','${productId}')` },
+                  ])}
+                </td>
+              </tr>`).join("")}
+          </tbody>
+        </table></div></div>`
+    }
+  `);
+
+  // Wire product selector after render (products list may differ from initial call)
+  const psel = el("bl-product-sel");
+  if (psel && !psel._wired) {
+    psel._wired = true;
+    psel.onchange = async function() {
+      const prods = await api.getProducts().catch(() => []);
+      await loadBacklog(this.value, prods, _navGen);
+    };
+  }
+}
+
+function showCreateBacklogItem(productId) {
+  openModal("New Backlog Item",
+    `<div class="form-group"><label>Title *</label><input id="bl-title" class="form-control" placeholder="e.g. Add OAuth login support"></div>
+     <div class="form-group"><label>Description</label><textarea id="bl-desc" class="form-control" rows="3" placeholder="Optional description"></textarea></div>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+       <div class="form-group">
+         <label>Type</label>
+         <select id="bl-type" class="form-control">
+           ${_BACKLOG_TYPES.map(t => `<option value="${t}">${t}</option>`).join("")}
+         </select>
+       </div>
+       <div class="form-group">
+         <label>Priority</label>
+         <select id="bl-priority" class="form-control">
+           ${_BACKLOG_PRIORITIES.map(p => `<option value="${p}"${p==="medium"?" selected":""}>${p}</option>`).join("")}
+         </select>
+       </div>
+     </div>
+     <div class="form-group"><label>Effort (story points)</label><input id="bl-effort" class="form-control" type="number" min="0" value="0"></div>
+     <div class="form-group"><label>Acceptance Criteria</label><textarea id="bl-ac" class="form-control" rows="2" placeholder="Given… When… Then…"></textarea></div>`,
+    async () => {
+      const title = (el("bl-title")?.value || "").trim();
+      if (!title) return modalError("Title is required");
+      try {
+        await api.createBacklogItem(productId, {
+          title,
+          description: el("bl-desc")?.value || "",
+          item_type:   el("bl-type")?.value || "feature",
+          priority:    el("bl-priority")?.value || "medium",
+          effort:      parseInt(el("bl-effort")?.value || "0", 10),
+          acceptance_criteria: el("bl-ac")?.value || "",
+        });
+        closeModal();
+        toast("Backlog item created", "success");
+        loadBacklog(productId, null, _navGen);
+      } catch (e) { modalError(e.message); }
+    }, "Create"
+  );
+}
+
+async function showEditBacklogItem(itemId, productId) {
+  const item = await api.getBacklogItem(productId, itemId).catch(() => null);
+  if (!item) { toast("Item not found", "error"); return; }
+
+  openModal("Edit Backlog Item",
+    `<div class="form-group"><label>Title *</label><input id="ble-title" class="form-control" value="${item.title.replace(/"/g, "&quot;")}"></div>
+     <div class="form-group"><label>Description</label><textarea id="ble-desc" class="form-control" rows="3">${item.description || ""}</textarea></div>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+       <div class="form-group">
+         <label>Type</label>
+         <select id="ble-type" class="form-control">
+           ${_BACKLOG_TYPES.map(t => `<option value="${t}"${t===item.item_type?" selected":""}>${t}</option>`).join("")}
+         </select>
+       </div>
+       <div class="form-group">
+         <label>Status</label>
+         <select id="ble-status" class="form-control">
+           ${_BACKLOG_STATUSES.map(s => `<option value="${s}"${s===item.status?" selected":""}>${s}</option>`).join("")}
+         </select>
+       </div>
+     </div>
+     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+       <div class="form-group">
+         <label>Priority</label>
+         <select id="ble-priority" class="form-control">
+           ${_BACKLOG_PRIORITIES.map(p => `<option value="${p}"${p===item.priority?" selected":""}>${p}</option>`).join("")}
+         </select>
+       </div>
+       <div class="form-group"><label>Effort</label><input id="ble-effort" class="form-control" type="number" min="0" value="${item.effort || 0}"></div>
+     </div>
+     <div class="form-group"><label>Acceptance Criteria</label><textarea id="ble-ac" class="form-control" rows="2">${item.acceptance_criteria || ""}</textarea></div>
+     <div class="form-group"><label>Notes</label><textarea id="ble-notes" class="form-control" rows="2">${item.notes || ""}</textarea></div>`,
+    async () => {
+      const title = (el("ble-title")?.value || "").trim();
+      if (!title) return modalError("Title is required");
+      try {
+        await api.updateBacklogItem(productId, itemId, {
+          title,
+          description: el("ble-desc")?.value || "",
+          item_type:   el("ble-type")?.value || "feature",
+          status:      el("ble-status")?.value || "open",
+          priority:    el("ble-priority")?.value || "medium",
+          effort:      parseInt(el("ble-effort")?.value || "0", 10),
+          acceptance_criteria: el("ble-ac")?.value || "",
+          notes:       el("ble-notes")?.value || "",
+        });
+        closeModal();
+        toast("Backlog item updated", "success");
+        loadBacklog(productId, null, _navGen);
+      } catch (e) { modalError(e.message); }
+    }, "Save"
+  );
+}
+
+async function deleteBacklogItem(itemId, productId) {
+  if (!confirm("Delete this backlog item? This cannot be undone.")) return;
+  try {
+    await api.deleteBacklogItem(productId, itemId);
+    toast("Backlog item deleted", "success");
+    loadBacklog(productId, null, _navGen);
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function patchBacklogStatus(itemId, status, productId) {
+  try {
+    await api.patchBacklogStatus(productId, itemId, status);
+    toast(`Marked as ${status}`, "success");
+    loadBacklog(productId, null, _navGen);
+  } catch (e) { toast(e.message, "error"); }
+}
+
 // ── Environments list (top-level) ─────────────────────────────────────────
 router.register("environments", async () => {
   const gen = _navGen;

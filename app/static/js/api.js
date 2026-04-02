@@ -308,6 +308,17 @@ const api = {
   resolveForStageRun: (runId, stageRunId) => request("GET", `/properties/resolve/pipeline-run/${runId}/stage-run/${stageRunId}`),
   resolveForTaskRun: (runId, stageRunId, taskRunId) => request("GET", `/properties/resolve/pipeline-run/${runId}/stage-run/${stageRunId}/task-run/${taskRunId}`),
 
+  // Backlog
+  listBacklog: (pid, params) => {
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+    return request("GET", `/products/${pid}/backlog${qs}`).then(r => r?.items ?? r);
+  },
+  createBacklogItem: (pid, data) => request("POST", `/products/${pid}/backlog`, data),
+  getBacklogItem: (pid, iid) => request("GET", `/products/${pid}/backlog/${iid}`),
+  updateBacklogItem: (pid, iid, data) => request("PUT", `/products/${pid}/backlog/${iid}`, data),
+  deleteBacklogItem: (pid, iid) => request("DELETE", `/products/${pid}/backlog/${iid}`),
+  patchBacklogStatus: (pid, iid, status) => request("PATCH", `/products/${pid}/backlog/${iid}/status`, { status }),
+
   // Vault
   listSecrets: () => request("GET", "/vault"),
   createSecret: (data) => request("POST", "/vault", data),

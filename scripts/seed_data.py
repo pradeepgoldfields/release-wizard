@@ -39,6 +39,7 @@ from app.domain.enums import ArtifactType, ComplianceRating, EnvironmentType  # 
 from app.extensions import db  # noqa: E402
 from app.models.application import ApplicationArtifact  # noqa: E402
 from app.models.auth import Group, Role, RoleBinding, User  # noqa: E402
+from app.models.backlog import BacklogItem  # noqa: E402
 from app.models.compliance import AuditEvent, ComplianceRule  # noqa: E402
 from app.models.environment import Environment  # noqa: E402
 from app.models.pipeline import Pipeline, Stage  # noqa: E402
@@ -3073,6 +3074,95 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
         _seed_pipeline_runs(yaml_pipeline)
 
         db.session.commit()
+
+        # ── Backlog Items ──────────────────────────────────────────────────────
+        print("\n[backlog items]")
+        backlog_specs = [
+            {
+                "title": "OAuth 2.0 / OIDC login support",
+                "description": "Implement OAuth 2.0 authorization code flow with PKCE for external identity providers (Google, GitHub, Azure AD).",
+                "item_type": "feature",
+                "status": "open",
+                "priority": "high",
+                "effort": 8,
+                "labels": json.dumps(["auth", "security", "backend"]),
+                "acceptance_criteria": "Users can log in via at least one OIDC provider. JWT is issued on success.",
+                "notes": "Requires client_id / client_secret in Vault.",
+            },
+            {
+                "title": "Fix slow pipeline list query",
+                "description": "The /api/v1/products/:id/pipelines endpoint takes >2 s on products with 50+ pipelines.",
+                "item_type": "bug",
+                "status": "in_progress",
+                "priority": "critical",
+                "effort": 3,
+                "labels": json.dumps(["performance", "database"]),
+                "acceptance_criteria": "Response time under 300 ms with 100 pipelines.",
+                "notes": "Root cause: N+1 query on stages. Add eager-load.",
+            },
+            {
+                "title": "Dark mode UI theme",
+                "description": "Add a toggleable dark colour scheme via CSS custom properties.",
+                "item_type": "feature",
+                "status": "open",
+                "priority": "low",
+                "effort": 5,
+                "labels": json.dumps(["ui", "accessibility"]),
+                "acceptance_criteria": "Toggle persists across sessions via localStorage.",
+                "notes": "",
+            },
+            {
+                "title": "Upgrade SQLAlchemy to 2.x",
+                "description": "Migrate from SQLAlchemy 1.4 legacy style to the 2.x session API.",
+                "item_type": "chore",
+                "status": "open",
+                "priority": "medium",
+                "effort": 5,
+                "labels": json.dumps(["dependencies", "backend"]),
+                "acceptance_criteria": "All unit tests pass with SQLAlchemy 2.x pinned in requirements.txt.",
+                "notes": "Check for use of Query.get() — deprecated in 2.x.",
+            },
+            {
+                "title": "Evaluate WebSockets for live run status",
+                "description": "Spike: assess using WebSockets (Socket.IO or native) to push pipeline run status updates to the browser instead of polling.",
+                "item_type": "spike",
+                "status": "done",
+                "priority": "medium",
+                "effort": 2,
+                "labels": json.dumps(["architecture", "frontend"]),
+                "acceptance_criteria": "Technical decision document produced and linked in notes.",
+                "notes": "Outcome: SSE preferred over WebSockets — simpler server model, no sticky sessions.",
+            },
+            {
+                "title": "Helm chart — support existingSecret for DB credentials",
+                "description": "Allow operators to supply database credentials via an existing Kubernetes Secret rather than values.yaml.",
+                "item_type": "feature",
+                "status": "open",
+                "priority": "high",
+                "effort": 3,
+                "labels": json.dumps(["kubernetes", "security", "helm"]),
+                "acceptance_criteria": "existingSecret: <name> in values.yaml skips Secret template and mounts the named secret instead.",
+                "notes": "",
+            },
+        ]
+        for spec in backlog_specs:
+            existing = BacklogItem.query.filter_by(
+                product_id=product.id, title=spec["title"]
+            ).first()
+            if not existing:
+                db.session.add(
+                    BacklogItem(
+                        id=resource_id("backlog"),
+                        product_id=product.id,
+                        created_by=users["admin"].id,
+                        **spec,
+                    )
+                )
+                print(f"  Created backlog item: {spec['title']}")
+            else:
+                print(f"  Backlog item already exists: {spec['title']}")
+        db.session.commit()
+
         print("\nSeed complete.")
         _print_summary(product.id)
 

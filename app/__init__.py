@@ -51,6 +51,7 @@ def create_app(config=None) -> Flask:
         ApplicationArtifact,
         ApprovalDecision,
         AuditEvent,
+        BacklogItem,
         ComplianceRule,
         Environment,
         FeatureToggle,
@@ -78,6 +79,7 @@ def create_app(config=None) -> Flask:
     )
     from app.routes.agents import agents_bp
     from app.routes.auth import _current_user, auth_bp, ensure_admin_user
+    from app.routes.backlog import backlog_bp
     from app.routes.chat import chat_bp
     from app.routes.compliance import compliance_bp
     from app.routes.environments import environments_bp
@@ -103,6 +105,7 @@ def create_app(config=None) -> Flask:
     from app.routes.yaml_io import yaml_bp
 
     app.register_blueprint(auth_bp)
+    app.register_blueprint(backlog_bp)
     app.register_blueprint(chat_bp)
     app.register_blueprint(metrics_bp)
     app.register_blueprint(framework_controls_bp)
@@ -446,6 +449,10 @@ def _ensure_builtin_roles() -> None:
         "applications:create",
         "applications:edit",
         "applications:delete",
+        "backlog:view",
+        "backlog:create",
+        "backlog:edit",
+        "backlog:delete",
         "pipelines:view",
         "pipelines:create",
         "pipelines:edit",
@@ -528,6 +535,10 @@ def _ensure_builtin_roles() -> None:
         "applications:create",
         "applications:edit",
         "applications:delete",
+        "backlog:view",
+        "backlog:create",
+        "backlog:edit",
+        "backlog:delete",
         "pipelines:view",
         "pipelines:create",
         "pipelines:edit",

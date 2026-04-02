@@ -1675,6 +1675,10 @@ docker exec -it <container-id> /bin/bash
 
 ## 18. Kubernetes Deployment
 
+> **Recommended deployment method: Helm** (§19).
+> Three deployment paths exist — Helm chart, Terraform module, and raw k8s YAML manifests.
+> Use the Helm chart for all new deployments. Raw YAML (`k8s/`) and Terraform (`terraform/`) are kept for reference and advanced customisation only.
+
 ### Deployment Architecture
 
 ```mermaid
@@ -1955,35 +1959,38 @@ testpaths = ["tests"]
 
 ## 23. Database Migrations
 
-Flask-Migrate (Alembic) is configured in `app/extensions.py`.
+Flask-Migrate (Alembic) manages the database schema. The `migrations/` directory is checked into the repository.
+
+### Workflow
 
 ```bash
-# Initialize (first time)
-flask --app wsgi:app db init
-
-# Generate a new migration after model changes
-flask --app wsgi:app db migrate -m "add foo column"
-
-# Apply pending migrations
+# Apply all pending migrations (run on every deploy)
 flask --app wsgi:app db upgrade
 
-# Downgrade one revision
+# Generate a new migration after changing a model
+flask --app wsgi:app db migrate -m "describe your change"
+# Review the generated file in migrations/versions/ before committing
+
+# Downgrade one revision if needed
 flask --app wsgi:app db downgrade
 ```
 
 > **SQLite note:** SQLite has limited `ALTER TABLE` support. For new columns on existing tables, write the migration manually using `op.execute("ALTER TABLE ...")` rather than relying on Alembic auto-detection.
 
-### First-Boot Behavior
-On startup, `create_app()` calls `db.create_all()` (creates any missing tables) then `_apply_schema_migrations()` which idempotently applies additive `ALTER TABLE` changes:
+### Fresh install
 
-| Migration | Change |
-|---|---|
-| 001 | `stages.execution_mode VARCHAR(16) DEFAULT 'sequential'` |
-| 002 | `roles.is_builtin BOOLEAN DEFAULT 0 NOT NULL` |
-| 003 | `users.is_builtin BOOLEAN DEFAULT 0 NOT NULL` |
-| 004 | `tasks.execution_mode VARCHAR(32) DEFAULT 'sequential'` |
+On a brand-new database `create_app()` calls `db.create_all()` to create all tables, then `_apply_schema_migrations()` applies any additive changes that pre-date the Alembic history. After that, `flask db upgrade` is a no-op (already at head).
 
-Each migration checks for the column's existence before running, making it safe to apply multiple times.
+### Existing installs (upgrading from pre-Alembic)
+
+If you are upgrading a database that was created before the `migrations/` directory was added:
+
+```bash
+# Mark the database as being at the initial migration without re-running it
+flask --app wsgi:app db stamp head
+# Then apply any future migrations normally
+flask --app wsgi:app db upgrade
+```
 
 ---
 

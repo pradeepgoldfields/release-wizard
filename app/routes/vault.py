@@ -12,9 +12,15 @@ from app.services.vault_service import can_access, decrypt, encrypt
 vault_bp = Blueprint("vault", __name__, url_prefix="/api/v1/vault")
 
 
-def _require_admin():
+def _require_vault_write():
+    """Require vault:create permission (or system-administrator role)."""
     user = getattr(g, "current_user", None)
-    if not user or not getattr(user, "is_admin", False):
+    if not user:
+        return jsonify({"error": "Authentication required"}), 401
+    from app.services.authz_service import get_permissions_for_user  # noqa: PLC0415
+
+    perms = get_permissions_for_user(user.id, "organization")
+    if "vault:create" not in perms and "vault:delete" not in perms:
         return jsonify({"error": "Admin required"}), 403
     return None
 
@@ -26,7 +32,12 @@ def _current_username() -> str:
 
 def _is_admin() -> bool:
     user = getattr(g, "current_user", None)
-    return bool(user and getattr(user, "is_admin", False))
+    if not user:
+        return False
+    from app.services.authz_service import get_permissions_for_user  # noqa: PLC0415
+
+    perms = get_permissions_for_user(user.id, "organization")
+    return "vault:reveal" in perms or "vault:create" in perms
 
 
 @vault_bp.get("")
@@ -45,7 +56,7 @@ def list_secrets():
 @vault_bp.post("")
 def create_secret():
     """Create a new secret."""
-    err = _require_admin()
+    err = _require_vault_write()
     if err:
         return err
     data = request.get_json(force=True) or {}
@@ -95,7 +106,7 @@ def reveal_secret(secret_id: str):
 @vault_bp.put("/<secret_id>")
 def update_secret(secret_id: str):
     """Update a secret's value or metadata."""
-    err = _require_admin()
+    err = _require_vault_write()
     if err:
         return err
     secret = db.get_or_404(VaultSecret, secret_id)
@@ -115,7 +126,7 @@ def update_secret(secret_id: str):
 @vault_bp.delete("/<secret_id>")
 def delete_secret(secret_id: str):
     """Delete a secret."""
-    err = _require_admin()
+    err = _require_vault_write()
     if err:
         return err
     secret = db.get_or_404(VaultSecret, secret_id)

@@ -1,5 +1,6 @@
 from app.models.application import ApplicationArtifact
 from app.models.auth import Group, Role, RoleBinding, User, user_groups
+from app.models.backlog import BacklogItem
 from app.models.compliance import AuditEvent, ComplianceRule
 from app.models.environment import Environment, product_environments
 from app.models.feature_toggle import FeatureToggle
@@ -17,6 +18,7 @@ from app.models.vault import VaultSecret
 from app.models.webhook import Webhook, WebhookDelivery
 
 __all__ = [
+    "BacklogItem",
     "FrameworkControl",
     "PipelineTemplate",
     "PlatformSetting",

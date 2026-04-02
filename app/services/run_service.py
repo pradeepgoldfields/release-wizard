@@ -641,6 +641,8 @@ def restart_from_stage(
     records only for stages at or after the target stage (earlier stages are seeded
     as Succeeded so they appear in the flow graph).
     """
+    from app.services.id_service import pipeline_run_id as _new_run_id  # noqa: PLC0415
+
     original = db.get_or_404(PipelineRun, pipeline_run_id)
     original_sr = db.get_or_404(StageRun, stage_run_id)
 
@@ -650,7 +652,7 @@ def restart_from_stage(
     pipeline = db.get_or_404(Pipeline, original.pipeline_id)
 
     new_run = PipelineRun(
-        id=pipeline_run_id(),
+        id=_new_run_id(),
         pipeline_id=original.pipeline_id,
         status=RunStatus.RUNNING,
         commit_sha=original.commit_sha,

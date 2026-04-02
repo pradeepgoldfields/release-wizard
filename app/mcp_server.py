@@ -24,6 +24,7 @@ from fastmcp import FastMCP
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app import create_app  # noqa: E402
+from app.models.backlog import BacklogItem  # noqa: E402
 from app.models.pipeline import Pipeline, Stage  # noqa: E402
 from app.models.product import Product  # noqa: E402
 from app.models.run import PipelineRun, StageRun  # noqa: E402
@@ -346,6 +347,89 @@ def resource_latest_run(pipeline_id: str) -> str:
         if not run:
             return json.dumps({"error": "No runs found"})
         return json.dumps(run.to_dict(include_stages=True), indent=2, default=str)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BACKLOG
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool(description="List backlog items for a product. Filter by status, priority, or item_type.")
+def list_backlog(product_id: str, status: str | None = None, priority: str | None = None) -> str:
+    with flask_app.app_context():
+        q = BacklogItem.query.filter_by(product_id=product_id)
+        if status:
+            q = q.filter(BacklogItem.status == status)
+        if priority:
+            q = q.filter(BacklogItem.priority == priority)
+        items = q.order_by(BacklogItem.created_at.desc()).all()
+        if not items:
+            return f"No backlog items found for product '{product_id}'."
+        rows = [
+            f"  - [{i.priority.upper()}] {i.title} (id: {i.id})  "
+            f"type={i.item_type}  status={i.status}  effort={i.effort or 0}pt"
+            for i in items
+        ]
+        return f"Found {len(items)} backlog item(s):\n" + "\n".join(rows)
+
+
+@mcp.tool(description="Create a new backlog item for a product.")
+def create_backlog_item(
+    product_id: str,
+    title: str,
+    description: str = "",
+    item_type: str = "feature",
+    priority: str = "medium",
+    effort: int = 0,
+) -> str:
+    with flask_app.app_context():
+        from app.services.id_service import resource_id  # noqa: PLC0415
+
+        item = BacklogItem(
+            id=resource_id("backlog"),
+            product_id=product_id,
+            title=title,
+            description=description,
+            item_type=item_type,
+            priority=priority,
+            effort=effort,
+            status="open",
+            labels="[]",
+        )
+        from app.extensions import db  # noqa: PLC0415
+
+        db.session.add(item)
+        db.session.commit()
+        return f"Created backlog item '{title}' (id: {item.id}) in product '{product_id}'."
+
+
+@mcp.tool(description="Update a backlog item's status, priority, or other fields.")
+def update_backlog_item(
+    item_id: str,
+    status: str | None = None,
+    priority: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+) -> str:
+    with flask_app.app_context():
+        item = BacklogItem.query.get(item_id)
+        if not item:
+            return f"Backlog item '{item_id}' not found."
+        if status is not None:
+            item.status = status
+        if priority is not None:
+            item.priority = priority
+        if title is not None:
+            item.title = title
+        if description is not None:
+            item.description = description
+        from app.extensions import db  # noqa: PLC0415
+
+        db.session.commit()
+        return (
+            f"Updated backlog item '{item.title}' (id: {item.id})  "
+            f"status={item.status}  priority={item.priority}."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

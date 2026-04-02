@@ -6,20 +6,18 @@ All endpoints require authentication; tests use ``admin_client`` from conftest.
 from __future__ import annotations
 
 
-def test_create_user_with_persona(admin_client):
+def test_create_user(admin_client):
     r = admin_client.post(
         "/api/v1/users",
         json={
             "username": "pradeep",
             "email": "pradeep@example.com",
             "display_name": "Pradeep",
-            "persona": "ProductOwner",
         },
     )
     assert r.status_code == 201
     d = r.get_json()
     assert d["username"] == "pradeep"
-    assert d["persona"] == "ProductOwner"
     assert d["id"].startswith("usr_")
 
 
@@ -40,12 +38,12 @@ def test_create_user_missing_username(admin_client):
     assert r.status_code == 400
 
 
-def test_update_user_persona(admin_client):
-    r = admin_client.post("/api/v1/users", json={"username": "persona_test", "persona": "ReadOnly"})
+def test_update_user_display_name(admin_client):
+    r = admin_client.post("/api/v1/users", json={"username": "update_test"})
     user_id = r.get_json()["id"]
-    r2 = admin_client.patch(f"/api/v1/users/{user_id}", json={"persona": "PlatformAdmin"})
+    r2 = admin_client.patch(f"/api/v1/users/{user_id}", json={"display_name": "Updated Name"})
     assert r2.status_code == 200
-    assert r2.get_json()["persona"] == "PlatformAdmin"
+    assert r2.get_json()["display_name"] == "Updated Name"
 
 
 def test_get_user_permissions(admin_client):

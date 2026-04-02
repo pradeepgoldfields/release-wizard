@@ -34,6 +34,11 @@ PERMISSION_CATALOG: list[dict] = [
         ],
     },
     {
+        "group": "Backlog",
+        "product_scoped": True,
+        "perms": ["backlog:view", "backlog:create", "backlog:edit", "backlog:delete"],
+    },
+    {
         "group": "Pipelines",
         "product_scoped": True,
         "perms": [

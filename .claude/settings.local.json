@@ -14,7 +14,23 @@
       "Bash(git push:*)",
       "Bash(pytest)",
       "Bash(curl -s \"https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js\" -o \"/c/Users/prade/release-wizard/app/static/js/codemirror-yaml.min.js\")",
-      "Bash(ls -la /c/Users/prade/release-wizard/app/static/js/codemirror-*.min.js /c/Users/prade/release-wizard/app/static/css/codemirror-*.min.css)"
+      "Bash(ls -la /c/Users/prade/release-wizard/app/static/js/codemirror-*.min.js /c/Users/prade/release-wizard/app/static/css/codemirror-*.min.css)",
+      "Bash(git commit:*)",
+      "Bash(python -m pytest tests/unit/ -x --tb=short -q)",
+      "Bash(python -m pytest tests/e2e/test_e2e_pipeline_execution.py::test_submit_approval_decision_rejected -v --tb=long)",
+      "Bash(python -m pytest tests/e2e/test_e2e_pipeline_execution.py::test_runtime_properties_stored_on_run -v --tb=long)",
+      "Bash(python -m pytest tests/e2e/ -v --tb=short)",
+      "Bash(python -m pytest tests/unit/test_pipelines.py::test_list_pipelines_returns_existing tests/unit/test_releases.py::test_update_release_status tests/unit/test_runs.py::test_trigger_run_success tests/unit/test_runs.py::test_list_runs_after_trigger --tb=short -q)",
+      "Bash(python -m pytest tests/unit/test_pipelines.py::test_list_pipelines_returns_existing --tb=long -q)",
+      "Bash(python -m pytest tests/unit/ --tb=short -q)",
+      "Bash(python -m pytest tests/unit/ -q)",
+      "Bash(ruff format:*)",
+      "Bash(pytest tests/unit/ -q)",
+      "Bash(flask --app wsgi:app db init)",
+      "Bash(flask --app wsgi:app db migrate -m \"initial schema\")",
+      "Bash(flask --app wsgi:app db stamp head)",
+      "Bash(grep -r \"Blueprint\\(\" app/routes/*.py)",
+      "Bash(grep \"Blueprint\\(\" app/routes/*.py)"
     ]
   },
   "hooks": {

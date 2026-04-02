@@ -51,14 +51,20 @@ def require_product_access(user_id: str | None, product_id: str, permission: str
         return jsonify({"error": "Authentication required", "code": "UNAUTHENTICATED"}), 401
 
     visible = get_visible_product_ids(user_id)
-    if visible is None:
-        # Org-wide binding — always allowed
-        return None
-    if product_id not in visible:
+    if visible is not None and product_id not in visible:
         return jsonify({"error": "Access denied", "code": "FORBIDDEN"}), 403
 
-    if not has_product_permission(user_id, product_id, permission):
-        return jsonify({"error": "Access denied", "code": "FORBIDDEN"}), 403
+    # Always check the specific permission (org-wide binding grants visibility,
+    # not every action — a "products:view"-only role must not trigger pipelines:create)
+    if permission != "products:view" and not has_product_permission(
+        user_id, product_id, permission
+    ):
+        # Also check org-scope permissions (org-wide roles cover all products)
+        from app.services.authz_service import get_permissions_for_user  # noqa: PLC0415
+
+        org_perms = get_permissions_for_user(user_id, "organization")
+        if permission not in org_perms:
+            return jsonify({"error": "Access denied", "code": "FORBIDDEN"}), 403
 
     return None
 
