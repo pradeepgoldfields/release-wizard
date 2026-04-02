@@ -385,7 +385,7 @@ def test_config(plugin_id: str, config_id: str):
         probe_url = tool_url
 
     try:
-        resp = _requests.get(probe_url, auth=auth, headers=headers, timeout=8, verify=False)  # noqa: S501
+        resp = _requests.get(probe_url, auth=auth, headers=headers, timeout=8)
         if resp.status_code < 400:
             return jsonify({"ok": True, "message": f"Connected — HTTP {resp.status_code}"})
         return jsonify({"ok": False, "message": f"Server returned HTTP {resp.status_code}"})

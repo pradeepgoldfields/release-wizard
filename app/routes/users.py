@@ -273,7 +273,10 @@ def add_user_binding(user_id: str):
     if data.get("expires_at"):
         from datetime import datetime
 
-        expires_at = datetime.fromisoformat(data["expires_at"])
+        try:
+            expires_at = datetime.fromisoformat(data["expires_at"])
+        except (ValueError, TypeError):
+            return jsonify({"error": "expires_at must be a valid ISO 8601 datetime"}), 400
 
     binding = add_scoped_role(user_id, role_id, scope, expires_at)
     return jsonify(binding.to_dict()), 201
@@ -414,7 +417,10 @@ def add_group_binding(group_id: str):
     if data.get("expires_at"):
         from datetime import datetime  # noqa: PLC0415
 
-        expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+        try:
+            expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return jsonify({"error": "expires_at must be a valid ISO 8601 datetime"}), 400
 
     binding = RoleBinding(
         id=resource_id("rb"),

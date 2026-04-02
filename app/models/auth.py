@@ -37,6 +37,9 @@ class User(db.Model):
     ldap_dn = db.Column(db.String(512))
     is_active = db.Column(db.Boolean, default=True)
     is_builtin = db.Column(db.Boolean, default=False, nullable=False)  # protected system users
+    must_change_password = db.Column(
+        db.Boolean, default=False
+    )  # force password reset on next login
     last_login = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(UTC))
 
@@ -57,6 +60,7 @@ class User(db.Model):
             "display_name": self.display_name,
             "is_active": self.is_active,
             "is_builtin": bool(self.is_builtin),
+            "must_change_password": bool(self.must_change_password),
             "last_login": self.last_login.isoformat() if self.last_login else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

@@ -94,7 +94,7 @@ class TaskRun(db.Model):
     __tablename__ = "task_runs"
 
     id = db.Column(db.String(64), primary_key=True)
-    task_id = db.Column(db.String(64), db.ForeignKey("tasks.id"), nullable=False)
+    task_id = db.Column(db.String(64), db.ForeignKey("tasks.id"), nullable=True)
     stage_run_id = db.Column(db.String(64), db.ForeignKey("stage_runs.id"), nullable=True)
     status = db.Column(
         db.String(32), default="Pending"

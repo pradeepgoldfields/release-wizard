@@ -37,11 +37,13 @@ from app import create_app  # noqa: E402
 from app.config import Config  # noqa: E402
 from app.domain.enums import ArtifactType, ComplianceRating, EnvironmentType  # noqa: E402
 from app.extensions import db  # noqa: E402
+from app.models.app_dependency import AppDependency, EnvDeploymentRecord  # noqa: E402
 from app.models.application import ApplicationArtifact  # noqa: E402
 from app.models.auth import Group, Role, RoleBinding, User  # noqa: E402
 from app.models.backlog import BacklogItem  # noqa: E402
 from app.models.compliance import AuditEvent, ComplianceRule  # noqa: E402
 from app.models.environment import Environment  # noqa: E402
+from app.models.feature_toggle import FeatureToggle  # noqa: E402
 from app.models.pipeline import Pipeline, Stage  # noqa: E402
 from app.models.plugin import Plugin, PluginConfig  # noqa: E402
 from app.models.product import Product  # noqa: E402
@@ -761,6 +763,92 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
                     existing.description = spec["description"]
                 print(f"  Application already exists: {spec['name']}")
             apps[key] = existing
+        db.session.commit()
+
+        # ── App Dependencies ──────────────────────────────────────────────────
+        dep_specs = [
+            # Frontend depends on API Service (runtime)
+            {
+                "from_key": "frontend",
+                "to_key": "api",
+                "dep_type": "runtime",
+                "description": "Frontend calls API Service REST endpoints",
+            },
+            # Worker depends on API Service (runtime)
+            {
+                "from_key": "worker",
+                "to_key": "api",
+                "dep_type": "runtime",
+                "description": "Worker polls API Service task queue",
+            },
+            # API Service depends on Data Pipeline (runtime)
+            {
+                "from_key": "api",
+                "to_key": "data",
+                "dep_type": "runtime",
+                "description": "API Service reads processed data from Data Pipeline",
+            },
+            # Frontend depends on Data Pipeline (build) — bundles schema types
+            {
+                "from_key": "frontend",
+                "to_key": "data",
+                "dep_type": "build",
+                "description": "Frontend bundles generated schema types from Data Pipeline",
+            },
+        ]
+        for spec in dep_specs:
+            from_app = apps.get(spec["from_key"])
+            to_app = apps.get(spec["to_key"])
+            if not from_app or not to_app:
+                continue
+            if not AppDependency.query.filter_by(
+                from_app_id=from_app.id, to_app_id=to_app.id
+            ).first():
+                db.session.add(
+                    AppDependency(
+                        from_app_id=from_app.id,
+                        to_app_id=to_app.id,
+                        dep_type=spec["dep_type"],
+                        description=spec["description"],
+                    )
+                )
+                print(
+                    f"  Created dependency: {spec['from_key']} -> {spec['to_key']} [{spec['dep_type']}]"
+                )
+        db.session.commit()
+
+        # ── Deployment Records (seed historical state) ────────────────────────
+        env_deploy_specs = [
+            {"key": "api", "env": "dev", "artifact_id": "api-service:1.4.2"},
+            {"key": "api", "env": "staging", "artifact_id": "api-service:1.4.1"},
+            {"key": "api", "env": "prod", "artifact_id": "api-service:1.3.9"},
+            {"key": "frontend", "env": "dev", "artifact_id": "frontend:2.1.0"},
+            {"key": "frontend", "env": "staging", "artifact_id": "frontend:2.0.9"},
+            {"key": "frontend", "env": "prod", "artifact_id": "frontend:2.0.7"},
+            {"key": "worker", "env": "dev", "artifact_id": "worker:0.9.3"},
+            {"key": "worker", "env": "prod", "artifact_id": "worker:0.9.1"},
+            {"key": "data", "env": "dev", "artifact_id": "data-pipeline:3.2.0"},
+            {"key": "data", "env": "prod", "artifact_id": "data-pipeline:3.1.8"},
+        ]
+        for spec in env_deploy_specs:
+            app_obj = apps.get(spec["key"])
+            if not app_obj:
+                continue
+            if not EnvDeploymentRecord.query.filter_by(
+                app_id=app_obj.id, env_name=spec["env"]
+            ).first():
+                db.session.add(
+                    EnvDeploymentRecord(
+                        product_id=product.id,
+                        app_id=app_obj.id,
+                        env_name=spec["env"],
+                        artifact_id=spec["artifact_id"],
+                        deployed_by="seed",
+                    )
+                )
+                print(
+                    f"  Created deployment record: {spec['key']} @ {spec['env']} = {spec['artifact_id']}"
+                )
         db.session.commit()
 
         # ── Pipelines + Stages + Tasks ────────────────────────────────────────
@@ -3163,6 +3251,252 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
                 print(f"  Backlog item already exists: {spec['title']}")
         db.session.commit()
 
+        # ── Feature Toggles ───────────────────────────────────────────────────
+        print("\nSeeding feature toggles...")
+        toggle_specs = [
+            # ── Pipeline ──────────────────────────────────────────────────────
+            {
+                "key": "pipeline.enable_parallel_stages",
+                "label": "Enable Parallel Stage Execution",
+                "description": "Allow pipeline stages marked as parallel to run concurrently instead of sequentially.",
+                "category": "pipeline",
+                "enabled": True,
+            },
+            {
+                "key": "pipeline.enable_yaml_import",
+                "label": "Enable YAML Pipeline Import",
+                "description": "Allow pipelines to be defined and imported via YAML files.",
+                "category": "pipeline",
+                "enabled": True,
+            },
+            {
+                "key": "pipeline.enable_template_library",
+                "label": "Enable Pipeline Template Library",
+                "description": "Show the pipeline template library when creating a new pipeline.",
+                "category": "pipeline",
+                "enabled": True,
+            },
+            {
+                "key": "pipeline.enable_webhook_triggers",
+                "label": "Enable Webhook Triggers",
+                "description": "Allow pipelines to be triggered by inbound webhook calls.",
+                "category": "pipeline",
+                "enabled": True,
+            },
+            # ── Stage & Task ──────────────────────────────────────────────────
+            {
+                "key": "stage.enable_script_sandbox",
+                "label": "Enable Script Sandbox Execution",
+                "description": "Execute stage scripts inside an isolated sandbox container rather than the host agent.",
+                "category": "stage",
+                "enabled": True,
+            },
+            {
+                "key": "stage.enable_approval_gates",
+                "label": "Enable Manual Approval Gates",
+                "description": "Allow stages to pause and require human approval before proceeding.",
+                "category": "stage",
+                "enabled": True,
+            },
+            {
+                "key": "task.enable_sast_scan",
+                "label": "Enable SAST Security Scanning",
+                "description": "Run static application security testing (SAST) tasks as part of the pipeline.",
+                "category": "task",
+                "enabled": True,
+            },
+            {
+                "key": "task.enable_sca_scan",
+                "label": "Enable SCA Dependency Scanning",
+                "description": "Run software composition analysis (SCA) to detect vulnerable dependencies.",
+                "category": "task",
+                "enabled": False,
+            },
+            {
+                "key": "task.enable_dast_scan",
+                "label": "Enable DAST Dynamic Scanning",
+                "description": "Run dynamic application security testing (DAST) against a running instance.",
+                "category": "task",
+                "enabled": False,
+            },
+            # ── Release ───────────────────────────────────────────────────────
+            {
+                "key": "release.enable_compliance_gate",
+                "label": "Enable Compliance Gate on Promotion",
+                "description": "Block release promotion when compliance score falls below the configured minimum rating.",
+                "category": "release",
+                "enabled": True,
+            },
+            {
+                "key": "release.enable_audit_pdf_export",
+                "label": "Enable Audit PDF Export",
+                "description": "Allow users to export a release audit trail as a PDF report.",
+                "category": "release",
+                "enabled": True,
+            },
+            {
+                "key": "release.enable_parallel_app_groups",
+                "label": "Enable Parallel Application Groups",
+                "description": "Allow release application groups to deploy in parallel across environments.",
+                "category": "release",
+                "enabled": True,
+            },
+            # ── Applications & Artifacts ──────────────────────────────────────
+            {
+                "key": "application.enable_dependency_graph",
+                "label": "Enable Application Dependency Graph",
+                "description": "Show the directed dependency graph visualisation on the application detail page.",
+                "category": "application",
+                "enabled": True,
+            },
+            {
+                "key": "application.enable_env_deployment_tracker",
+                "label": "Enable Environment Deployment Tracker",
+                "description": "Track and display the latest deployed artifact version per application per environment.",
+                "category": "application",
+                "enabled": True,
+            },
+            {
+                "key": "application.enable_compliance_scoring",
+                "label": "Enable Application Compliance Scoring",
+                "description": "Calculate and display a compliance rating (Gold/Silver/Bronze/Non-Compliant) for each application artifact.",
+                "category": "application",
+                "enabled": True,
+            },
+            # ── Vault & Secrets ───────────────────────────────────────────────
+            {
+                "key": "vault.enable_secret_injection",
+                "label": "Enable Vault Secret Injection",
+                "description": "Automatically inject vault secrets as environment variables into pipeline task runs.",
+                "category": "vault",
+                "enabled": True,
+            },
+            {
+                "key": "vault.enable_secret_rotation_alerts",
+                "label": "Enable Secret Rotation Alerts",
+                "description": "Warn operators when vault secrets have not been rotated within the configured retention window.",
+                "category": "vault",
+                "enabled": False,
+            },
+            # ── RBAC & Users ──────────────────────────────────────────────────
+            {
+                "key": "auth.enable_ldap_sync",
+                "label": "Enable LDAP Group Sync",
+                "description": "Synchronise platform groups and role bindings from an LDAP/Active Directory source on login.",
+                "category": "auth",
+                "enabled": False,
+            },
+            {
+                "key": "auth.enable_role_binding_expiry",
+                "label": "Enable Role Binding Expiry",
+                "description": "Enforce expiry dates on role bindings and automatically revoke access when they lapse.",
+                "category": "auth",
+                "enabled": True,
+            },
+            # ── Compliance & Audit ────────────────────────────────────────────
+            {
+                "key": "compliance.enable_framework_controls",
+                "label": "Enable Framework Controls (ISAE/ACF)",
+                "description": "Activate framework control scoring (ISAE 3402 / ACF) as part of the compliance model.",
+                "category": "compliance",
+                "enabled": True,
+            },
+            {
+                "key": "compliance.enable_audit_trail",
+                "label": "Enable Immutable Audit Trail",
+                "description": "Record every resource create/update/delete event to the immutable audit event log.",
+                "category": "compliance",
+                "enabled": True,
+            },
+            {
+                "key": "compliance.enable_maturity_model",
+                "label": "Enable Maturity Model Assessment",
+                "description": "Display the pipeline maturity model assessment on the product dashboard.",
+                "category": "compliance",
+                "enabled": True,
+            },
+            # ── Plugins ───────────────────────────────────────────────────────
+            {
+                "key": "plugin.enable_marketplace",
+                "label": "Enable Plugin Marketplace",
+                "description": "Show the plugin marketplace tab, allowing admins to browse and install third-party integrations.",
+                "category": "plugin",
+                "enabled": False,
+            },
+            {
+                "key": "plugin.enable_custom_plugins",
+                "label": "Enable Custom (Non-Built-in) Plugins",
+                "description": "Allow administrators to register and activate custom plugins not bundled with the platform.",
+                "category": "plugin",
+                "enabled": True,
+            },
+            # ── Backlog ───────────────────────────────────────────────────────
+            {
+                "key": "backlog.enable_effort_tracking",
+                "label": "Enable Backlog Effort Tracking",
+                "description": "Show story-point effort fields on backlog items and display velocity metrics.",
+                "category": "backlog",
+                "enabled": True,
+            },
+            {
+                "key": "backlog.enable_acceptance_criteria",
+                "label": "Enable Acceptance Criteria Fields",
+                "description": "Show the acceptance criteria and notes fields on backlog item forms.",
+                "category": "backlog",
+                "enabled": True,
+            },
+            # ── MCP / Agents ──────────────────────────────────────────────────
+            {
+                "key": "agent.enable_mcp_server",
+                "label": "Enable MCP Server",
+                "description": "Expose the platform's Model Context Protocol (MCP) server for AI agent integrations.",
+                "category": "agent",
+                "enabled": True,
+            },
+            {
+                "key": "agent.enable_agent_pool_autoscale",
+                "label": "Enable Agent Pool Auto-Scaling",
+                "description": "Automatically scale agent pool capacity up or down based on pending task run queue depth.",
+                "category": "agent",
+                "enabled": False,
+            },
+            # ── UI / UX ───────────────────────────────────────────────────────
+            {
+                "key": "ui.enable_pipeline_run_canvas",
+                "label": "Enable Pipeline Run Canvas",
+                "description": "Show the interactive JointJS pipeline run canvas instead of the tabular stage view.",
+                "category": "ui",
+                "enabled": True,
+            },
+            {
+                "key": "ui.enable_dark_mode",
+                "label": "Enable Dark Mode",
+                "description": "Allow users to switch the UI to a dark colour scheme.",
+                "category": "ui",
+                "enabled": False,
+            },
+            {
+                "key": "ui.enable_collapsible_sidebar",
+                "label": "Enable Collapsible Sidebar",
+                "description": "Allow users to collapse the navigation sidebar to maximise canvas workspace.",
+                "category": "ui",
+                "enabled": True,
+            },
+        ]
+        for spec in toggle_specs:
+            existing = FeatureToggle.query.filter_by(key=spec["key"]).first()
+            if not existing:
+                db.session.add(
+                    FeatureToggle(
+                        id=resource_id("ftg"),
+                        **spec,
+                    )
+                )
+                print(f"  Created feature toggle: {spec['key']}")
+            else:
+                print(f"  Feature toggle already exists: {spec['key']}")
+        db.session.commit()
+
         print("\nSeed complete.")
         _print_summary(product.id)
 
@@ -3387,6 +3721,7 @@ def _print_summary(product_id: str) -> None:
     print(f"  Webhooks       : {Webhook.query.count()}")
     print(f"  Agent Pools    : {AgentPool.query.count()}")
     print(f"  Plugins        : {Plugin.query.count()}")
+    print(f"  Feature Toggles: {FeatureToggle.query.count()}")
 
 
 if __name__ == "__main__":

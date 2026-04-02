@@ -956,6 +956,7 @@ router.register("products/:id", async (hash, parts) => {
       <button class="tab-btn active" onclick="switchTab(this,'tab-releases')">Releases (${releases.length})</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-apps')">Applications & Pipelines (${apps.length})</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-envs')">Environments (${envs.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-deps');loadDepMap('${product.id}')">Dependencies</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-rbac');loadProductPermMatrix('${product.id}')">Permissions</button>
     </div>
 
@@ -1069,6 +1070,29 @@ router.register("products/:id", async (hash, parts) => {
       }
     </div>
 
+    <!-- Dependencies -->
+    <div id="tab-deps" class="tab-panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div>
+          <h3 style="margin:0;font-size:15px;font-weight:600">Application Dependency Map</h3>
+          <div style="font-size:12px;color:var(--gray-400);margin-top:2px">Node color = compliance rating. Arrows point from consumer to provider.</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="dep-map-env-${product.id}" class="form-control" style="width:140px;font-size:13px" onchange="refreshDepMapOverlay('${product.id}')">
+            <option value="">No overlay</option>
+            <option value="dev">Dev</option>
+            <option value="staging">Staging</option>
+            <option value="prod">Prod</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="showAddDependency('${product.id}')">+ Add Dependency</button>
+        </div>
+      </div>
+      <div id="dep-map-${product.id}" style="width:100%;height:560px;border:1px solid var(--gray-200);border-radius:8px;background:var(--gray-50);position:relative">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--gray-400);font-size:13px">Loading dependency map…</div>
+      </div>
+      <div id="dep-list-${product.id}" style="margin-top:14px"></div>
+    </div>
+
     <!-- Permissions -->
     <div id="tab-rbac" class="tab-panel">
       <div id="prod-perm-matrix-${product.id}" style="min-height:60px">
@@ -1077,6 +1101,241 @@ router.register("products/:id", async (hash, parts) => {
     </div>
   `);
 });
+
+// ── Dependency Map ──────────────────────────────────────────────────────────
+
+const DEP_RATING_COLOR = {
+  "Platinum":      "#3B82F6",
+  "Gold":          "#22C55E",
+  "Silver":        "#EAB308",
+  "Bronze":        "#F97316",
+  "Non-Compliant": "#EF4444",
+};
+
+async function loadDepMap(productId) {
+  const container = document.getElementById("dep-map-" + productId);
+  const listEl    = document.getElementById("dep-list-" + productId);
+  if (!container) return;
+
+  try {
+    const [graph, deps] = await Promise.all([
+      api.getDependencyGraph(productId),
+      api.listDependencies(productId),
+    ]);
+    renderDepMap(productId, container, graph);
+    renderDepList(productId, listEl, deps);
+  } catch (e) {
+    container.innerHTML = \`<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--gray-400);font-size:13px">Failed to load dependency map: \${e.message}</div>\`;
+  }
+}
+
+function renderDepMap(productId, container, graph) {
+  if (typeof joint === "undefined") {
+    container.innerHTML = \`<div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:8px;color:var(--gray-400)">
+      <div style="font-size:13px">Graph library not loaded.</div>
+      <div style="font-size:11px">Ensure joint.min.js is included before app.js.</div>
+    </div>\`;
+    return;
+  }
+
+  container.innerHTML = "";
+
+  if (!graph.nodes || graph.nodes.length === 0) {
+    container.innerHTML = \`<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--gray-400);font-size:13px">No applications in this product yet.</div>\`;
+    return;
+  }
+
+  const g = new joint.dia.Graph();
+  const paper = new joint.dia.Paper({
+    el: container,
+    model: g,
+    width: container.offsetWidth || 900,
+    height: 540,
+    gridSize: 10,
+    background: { color: "#F9FAFB" },
+    interactive: { linkMove: false },
+    defaultConnector: { name: "rounded" },
+    defaultRouter: { name: "manhattan", args: { padding: 20 } },
+  });
+
+  // Store node map for overlay updates
+  container._depGraph   = graph;
+  container._jointGraph = g;
+  container._jointPaper = paper;
+
+  const cells = [];
+  const nodeMap = {};
+
+  graph.nodes.forEach(node => {
+    const rect = new joint.shapes.standard.Rectangle({
+      id: node.id,
+      position: { x: 0, y: 0 },
+      size: { width: 170, height: 52 },
+      attrs: {
+        body:  { fill: DEP_RATING_COLOR[node.compliance_rating] || "#6B7280", rx: 8, ry: 8, strokeWidth: 0 },
+        label: {
+          text: node.label,
+          fill: "#ffffff",
+          fontSize: 12,
+          fontWeight: "bold",
+          textWrap: { width: 150, height: 40, ellipsis: true },
+        },
+      },
+      data: { appId: node.id, productId },
+    });
+    cells.push(rect);
+    nodeMap[node.id] = rect;
+  });
+
+  graph.edges.forEach(edge => {
+    const link = new joint.shapes.standard.Link({
+      source: { id: edge.source },
+      target: { id: edge.target },
+      labels: [{ attrs: { text: { text: edge.label, fontSize: 10, fill: "#6B7280" } }, position: 0.5 }],
+      attrs:  { line: { stroke: "#9CA3AF", strokeWidth: 1.5, targetMarker: { type: "arrow", size: 6 } } },
+    });
+    cells.push(link);
+  });
+
+  g.resetCells(cells);
+
+  // Auto-layout using DirectedGraph if available, else fallback grid
+  try {
+    joint.layout.DirectedGraph.layout(g, {
+      setVertices: true,
+      marginX: 30, marginY: 30,
+      rankDir: "LR",
+      rankSep: 80,
+      nodeSep: 30,
+    });
+  } catch (_) {
+    // Fallback: simple grid layout
+    let col = 0, row = 0;
+    g.getElements().forEach((el, i) => {
+      el.position(col * 200 + 30, row * 90 + 30);
+      col++;
+      if (col > 3) { col = 0; row++; }
+    });
+  }
+
+  paper.fitToContent({ padding: 30, allowNewOrigin: "any" });
+
+  // Click node → open application detail
+  paper.on("cell:pointerclick", (cellView) => {
+    const model = cellView.model;
+    if (model.isElement && model.isElement()) {
+      const d = model.get("data") || {};
+      if (d.appId && d.productId) {
+        navigate(\`products/\${d.productId}/applications/\${d.appId}\`);
+      }
+    }
+  });
+
+  paper.on("cell:mouseenter", (cellView) => {
+    if (cellView.model.isElement && cellView.model.isElement()) {
+      container.style.cursor = "pointer";
+    }
+  });
+  paper.on("cell:mouseleave", () => { container.style.cursor = "default"; });
+}
+
+function renderDepList(productId, listEl, deps) {
+  if (!listEl) return;
+  if (!deps || deps.length === 0) {
+    listEl.innerHTML = \`<div style="font-size:12px;color:var(--gray-400)">No dependency edges defined yet. Click "+ Add Dependency" to declare one.</div>\`;
+    return;
+  }
+  listEl.innerHTML = \`
+    <div style="font-size:13px;font-weight:600;margin-bottom:6px">Dependency Edges (${deps.length})</div>
+    <div class="table-wrap"><table style="font-size:12px">
+      <thead><tr><th>From (Consumer)</th><th>Type</th><th>To (Provider)</th><th>Description</th><th></th></tr></thead>
+      <tbody>\${deps.map(d => \`
+        <tr>
+          <td>\${d.from_app_id}</td>
+          <td><span class="badge badge-blue">\${d.dep_type}</span></td>
+          <td>\${d.to_app_id}</td>
+          <td style="color:var(--gray-400)">\${d.description || "—"}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteDependency('\${productId}','\${d.id}')">Remove</button></td>
+        </tr>\`).join("")}
+      </tbody>
+    </table></div>\`;
+}
+
+async function refreshDepMapOverlay(productId) {
+  const select = document.getElementById("dep-map-env-" + productId);
+  if (!select) return;
+  const env = select.value;
+  if (!env) return;
+  try {
+    const records = await api.listDeployments(productId, env);
+    const versionMap = {};
+    records.forEach(r => { versionMap[r.app_id] = r.artifact_id || "?"; });
+    const container = document.getElementById("dep-map-" + productId);
+    if (!container || !container._jointGraph) return;
+    container._jointGraph.getElements().forEach(el => {
+      const appId = (el.get("data") || {}).appId;
+      if (!appId) return;
+      const ver = versionMap[appId];
+      if (ver) {
+        const currentLabel = el.attr("label/text") || "";
+        // Strip previous overlay suffix, then append version
+        const baseName = currentLabel.replace(/\n\(.+\)$/, "");
+        el.attr("label/text", \`\${baseName}\n(\${ver})\`);
+      }
+    });
+  } catch (e) {
+    toast("Could not load deployment overlay: " + e.message, "error");
+  }
+}
+
+async function showAddDependency(productId) {
+  const apps = await api.getApplications(productId).catch(() => []);
+  if (apps.length < 2) {
+    return openModal("Add Dependency", "<p>You need at least 2 applications to create a dependency.</p>", () => closeModal(), "OK");
+  }
+  const opts = apps.map(a => \`<option value="\${a.id}">\${a.name}</option>\`).join("");
+  openModal("Add Dependency",
+    \`<div class="form-group"><label>Consumer (depends on…) *</label>
+      <select id="dep-from" class="form-control">\${opts}</select></div>
+    <div class="form-group"><label>Provider (…this app) *</label>
+      <select id="dep-to" class="form-control">\${opts}</select></div>
+    <div class="form-group"><label>Dependency Type</label>
+      <select id="dep-type" class="form-control">
+        <option value="runtime">runtime</option>
+        <option value="build">build</option>
+        <option value="test">test</option>
+        <option value="optional">optional</option>
+      </select></div>
+    <div class="form-group"><label>Description</label>
+      <input id="dep-desc" class="form-control" placeholder="Optional notes"></div>\`,
+    async () => {
+      const fromId = el("dep-from").value;
+      const toId   = el("dep-to").value;
+      if (fromId === toId) { modalError("Consumer and provider must be different applications."); return; }
+      try {
+        await api.createDependency(productId, {
+          from_app_id: fromId,
+          to_app_id:   toId,
+          dep_type:    el("dep-type").value,
+          description: el("dep-desc").value.trim() || null,
+        });
+        closeModal();
+        toast("Dependency created", "success");
+        loadDepMap(productId);
+      } catch (e) { modalError(e.message); }
+    },
+    "Create"
+  );
+}
+
+async function deleteDependency(productId, depId) {
+  if (!confirm("Remove this dependency edge?")) return;
+  try {
+    await api.deleteDependency(productId, depId);
+    toast("Dependency removed", "success");
+    loadDepMap(productId);
+  } catch (e) { toast(e.message, "error"); }
+}
 
 function toggleAppCard(bodyId, chevId) {
   const body = document.getElementById(bodyId);
@@ -3885,7 +4144,7 @@ router.register("products/:pid/releases/:id", async (hash, parts) => {
         <div class="sub">Version: ${release.version||"—"} · Created by ${release.created_by||"system"}</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn btn-primary btn-sm" onclick="showStartReleaseRun('${releaseId}')">▶ Run</button>
+        <button class="btn btn-primary btn-sm" onclick="showStartReleaseRun('${releaseId}','${productId}')">▶ Run</button>
         ${pageMenu("rel-"+releaseId, [
           {label: "📋 Audit Report", onclick: `navigate('products/${productId}/releases/${releaseId}/audit')`},
           {label: "⬇ Export YAML", onclick: `exportYaml('/api/v1/products/${productId}/releases/${releaseId}/export','${release.name.replace(/'/g,"\\'")}release.yaml')`},
@@ -4039,9 +4298,17 @@ async function deleteRelease(productId, releaseId, name) {
   } catch (e) { toast(e.message, "error"); }
 }
 
-function showStartReleaseRun(releaseId) {
+async function showStartReleaseRun(releaseId, productId) {
+  // Load impact analysis in parallel with showing the modal
+  const impactPromise = productId
+    ? api.getReleaseImpact(productId, releaseId).catch(() => null)
+    : Promise.resolve(null);
+
   openModal("Start Release Run",
-    `<div class="form-group"><label>Triggered By</label><input id="rrun-by" class="form-control" value="user"></div>`,
+    `<div class="form-group"><label>Triggered By</label><input id="rrun-by" class="form-control" value="user"></div>
+    <div id="impact-panel-${releaseId}" style="margin-top:12px">
+      <div style="font-size:12px;color:var(--gray-400)">Loading impact analysis…</div>
+    </div>`,
     async () => {
       try {
         const run = await api.createReleaseRun(releaseId, { triggered_by: el("rrun-by").value.trim()||"user" });
@@ -4051,6 +4318,51 @@ function showStartReleaseRun(releaseId) {
     },
     "Start"
   );
+
+  // Populate impact panel once data arrives
+  const impact = await impactPromise;
+  const panel = document.getElementById(`impact-panel-${releaseId}`);
+  if (!panel) return;
+  if (!impact) {
+    panel.innerHTML = `<div style="font-size:12px;color:var(--gray-400)">Impact analysis unavailable.</div>`;
+    return;
+  }
+
+  const warnBadge = impact.warning_count > 0
+    ? `<span style="background:#FEE2E2;color:#DC2626;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;margin-left:6px">${impact.warning_count} compliance warning${impact.warning_count > 1 ? "s" : ""}</span>`
+    : "";
+  const affectedBadge = impact.affected_count > 0
+    ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600">${impact.affected_count} affected service${impact.affected_count > 1 ? "s" : ""}</span>`
+    : `<span style="font-size:12px;color:var(--gray-400)">No affected dependents found.</span>`;
+
+  const rows = (impact.affected_dependents || []).map(d => {
+    const ratingColor = { "Platinum":"#3B82F6","Gold":"#22C55E","Silver":"#EAB308","Bronze":"#F97316","Non-Compliant":"#EF4444" };
+    const color = ratingColor[d.compliance_rating] || "#6B7280";
+    const warn = (d.compliance_rating === "Non-Compliant" || d.compliance_rating === "Bronze") ? " ⚠" : "";
+    return `<tr>
+      <td style="font-weight:500">${d.app_name}${warn}</td>
+      <td><span style="background:${color};color:#fff;padding:1px 7px;border-radius:9999px;font-size:11px">${d.compliance_rating}</span></td>
+      <td style="color:var(--gray-400);font-size:12px">${d.current_version || "—"}</td>
+    </tr>`;
+  }).join("");
+
+  panel.innerHTML = `
+    <div style="border-top:1px solid var(--gray-200);padding-top:10px;margin-top:4px">
+      <div style="font-size:12px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:4px">
+        Impact Analysis ${affectedBadge}${warnBadge}
+      </div>
+      ${impact.affected_count === 0 ? "" : `
+      <div style="max-height:160px;overflow-y:auto">
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr>
+            <th style="text-align:left;padding:3px 6px;color:var(--gray-400);font-weight:500;border-bottom:1px solid var(--gray-200)">Application</th>
+            <th style="text-align:left;padding:3px 6px;color:var(--gray-400);font-weight:500;border-bottom:1px solid var(--gray-200)">Compliance</th>
+            <th style="text-align:left;padding:3px 6px;color:var(--gray-400);font-weight:500;border-bottom:1px solid var(--gray-200)">Current Version</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`}
+    </div>`;
 }
 
 async function completeReleaseRun(runId, productId, releaseId) {

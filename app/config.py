@@ -36,6 +36,11 @@ class Config:
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-me-in-production")
     JWT_EXPIRY_HOURS: int = int(os.getenv("JWT_EXPIRY_HOURS", 8))
 
+    # Flask session signing key — must be set in production to survive pod restarts
+    SECRET_KEY: str = os.getenv(
+        "SECRET_KEY", os.getenv("JWT_SECRET_KEY", "change-me-in-production")
+    )
+
     # LDAP directory integration
     LDAP_URL: str = os.getenv("LDAP_URL", "ldaps://ldap.example.com")
     LDAP_BIND_DN: str = os.getenv("LDAP_BIND_DN", "")

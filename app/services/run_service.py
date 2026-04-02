@@ -777,6 +777,35 @@ def _post_run_hooks(run: PipelineRun) -> None:
                     },
                 )
 
+    # 1b. Record deployment inventory entry on successful runs with artifact_id
+    if run.status == RunStatus.SUCCEEDED and pipeline.application_id and run.artifact_id:
+        try:
+            from app.services.dependency_service import (  # noqa: PLC0415
+                resolve_env_name,
+                upsert_deployment,
+            )
+
+            env_name = resolve_env_name(run)
+            if env_name:
+                upsert_deployment(
+                    product_id=pipeline.product_id,
+                    app_id=pipeline.application_id,
+                    env_name=env_name,
+                    artifact_id=run.artifact_id,
+                    pipeline_run_id=run.id,
+                    deployed_by=run.triggered_by,
+                )
+                log.info(
+                    "deployment_recorded",
+                    extra={
+                        "app_id": pipeline.application_id,
+                        "env_name": env_name,
+                        "artifact_id": run.artifact_id,
+                    },
+                )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("deployment_record_failed run=%s error=%s", run.id, exc)
+
     # 2. Recalculate compliance score
     try:
         from app.services.pipeline_service import update_compliance_score  # noqa: PLC0415

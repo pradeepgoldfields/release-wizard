@@ -460,7 +460,7 @@ def submit_approval(task_run_id: str):
             break
         if ref_type == "group":
             grp = Group.query.filter_by(name=ref).first()
-            if grp and user in grp.members:
+            if grp and user in grp.users:
                 is_eligible = True
                 break
         if ref_type == "role":

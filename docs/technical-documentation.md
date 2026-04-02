@@ -473,6 +473,31 @@ erDiagram
 | `repository_url` | TEXT | Source repository URL |
 | `created_at` | DATETIME | |
 
+#### AppDependency
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | VARCHAR(64) PK | `dep_<ULID>` |
+| `from_app_id` | FK → ApplicationArtifact | Consumer (the app that depends on another) |
+| `to_app_id` | FK → ApplicationArtifact | Provider (the app being depended on) |
+| `dep_type` | VARCHAR(32) | `runtime · build · test · optional` |
+| `description` | TEXT | Optional notes |
+| `created_by` | VARCHAR(128) | User who declared the dependency |
+| `created_at` | DATETIME | |
+Unique constraint: `(from_app_id, to_app_id)`.
+
+#### EnvDeploymentRecord
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | VARCHAR(64) PK | `edr_<ULID>` |
+| `product_id` | FK → Product | |
+| `app_id` | FK → ApplicationArtifact | |
+| `env_name` | VARCHAR(128) NOT NULL | e.g. `dev`, `staging`, `prod` |
+| `artifact_id` | VARCHAR(128) | e.g. `api-service:2.4.1` |
+| `pipeline_run_id` | FK → PipelineRun (nullable) | Run that produced this deployment |
+| `deployed_at` | DATETIME | |
+| `deployed_by` | VARCHAR(128) | Triggered-by from the pipeline run |
+Unique constraint: `(app_id, env_name)` — one record per app per environment, upserted on each successful run.
+
 #### Environment
 | Column | Type | Notes |
 |--------|------|-------|
@@ -996,6 +1021,34 @@ Dimensions: **Source Control**, **CI Pipeline**, **Testing**, **Security Scannin
 
 ---
 
+### 5.32 Dependency Map
+
+All routes are under `/api/v1/products/{product_id}/`.
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| GET | `{pid}/dependency-graph` | `dependencies:view` | JointJS-compatible graph payload (nodes + edges) for all apps in the product |
+| GET | `{pid}/dependencies` | `dependencies:view` | List all declared dependency edges for the product |
+| POST | `{pid}/dependencies` | `dependencies:edit` | Declare a new dependency edge. Body: `{from_app_id, to_app_id, dep_type?, description?}`. Returns 409 on duplicate. |
+| DELETE | `{pid}/dependencies/{dep_id}` | `dependencies:edit` | Remove a dependency edge |
+| GET | `{pid}/applications/{app_id}/dependents` | `dependencies:view` | BFS traversal — list all app IDs that transitively depend on `app_id`. Query params: `dep_type` (repeatable), `max_hops` |
+| GET | `{pid}/deployments` | `dependencies:view` | List latest deployment records per app. Query param: `environment` to filter |
+| GET | `{pid}/releases/{release_id}/impact` | `releases:view` | Pre-flight blast-radius report for a release. Query param: `environment` for version enrichment |
+
+**Impact analysis response shape:**
+```json
+{
+  "release_id": "rel_...",
+  "applications_being_changed": [{"app_id": "...", "app_name": "...", "compliance_rating": "Gold"}],
+  "affected_dependents": [{"app_id": "...", "app_name": "...", "compliance_rating": "...", "current_version": "...", "last_deployed_at": "..."}],
+  "affected_count": 2,
+  "compliance_warnings": [{"app_id": "...", "app_name": "...", "reason": "Dependent has Non-Compliant rating"}],
+  "warning_count": 1
+}
+```
+
+---
+
 ## 6. Authentication & Authorization
 
 ### 6.1 JWT Authentication
@@ -1072,6 +1125,7 @@ Each permission is a `<resource>:<action>` string. The full catalogue is:
 | Agent Pools | `agent_pools:view` `agent_pools:create` `agent_pools:edit` `agent_pools:delete` |
 | Vault | `vault:view` `vault:create` `vault:edit` `vault:delete` `vault:reveal` |
 | Compliance | `compliance:view` `compliance:edit` `compliance:approve` |
+| Dependencies | `dependencies:view` `dependencies:edit` |
 | App Dictionary | `app_dictionary:view` `app_dictionary:create` `app_dictionary:edit` `app_dictionary:delete` |
 | Monitoring | `monitoring:view` `monitoring:edit` |
 | Users | `users:view` `users:create` `users:edit` `users:delete` |
@@ -1362,6 +1416,26 @@ Audit event recorder.
 ### id_service.py
 ULID-based ID generation.
 - `resource_id(prefix)` → e.g. `usr_01ARZ3NDEKTSV4RRFFQ69G5FAV`.
+
+### dependency_service.py
+Application Dependency Map — graph traversal, deployment inventory, and release impact analysis.
+
+**Dependency CRUD:**
+- `create_dependency(from_app_id, to_app_id, dep_type, description, created_by)` — Declares a directed dependency edge. Raises `ValueError` on self-reference or duplicate.
+- `delete_dependency(dep_id)` — Removes a dependency edge (404 if not found).
+- `list_dependencies(product_id)` — Returns all edges whose `from_app` belongs to the product.
+
+**Graph traversal:**
+- `get_dependents(app_id, dep_types?, max_hops=3)` — BFS from `app_id` following *incoming* edges (i.e. "who depends on me?"). Returns list of app IDs up to `max_hops` away.
+- `get_dependency_graph(product_id)` — Returns `{nodes, edges}` in JointJS-compatible format. Nodes carry `color` (derived from `compliance_rating`), `compliance_rating`, `artifact_type`. Edges carry `dep_type` label.
+
+**Deployment inventory:**
+- `upsert_deployment(product_id, app_id, env_name, artifact_id, pipeline_run_id, deployed_by)` — Creates or updates the single `EnvDeploymentRecord` for `(app_id, env_name)`. Called automatically by `run_service._post_run_hooks()` on every `Succeeded` pipeline run that has a non-null `artifact_id`.
+- `list_deployments(product_id, env_name?)` — Lists deployment records, optionally filtered by environment name.
+- `resolve_env_name(run)` — Derives env name: first checks `runtime_properties["environment"]`, then falls back to pipeline kind (`"cd"` → `"prod"`).
+
+**Impact analysis:**
+- `compute_impact(release_id, target_env?)` — Computes blast-radius. Collects all `ApplicationArtifact` IDs referenced by the release's `ReleaseApplicationGroup` pipeline lists, finds their transitive `runtime`+`build` dependents (up to 3 hops), enriches with compliance rating and current deployed version in `target_env`. Returns `{applications_being_changed, affected_dependents, affected_count, compliance_warnings, warning_count}`.
 
 ---
 

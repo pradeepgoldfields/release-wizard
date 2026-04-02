@@ -98,6 +98,11 @@ PERMISSION_CATALOG: list[dict] = [
         "perms": ["compliance:view", "compliance:edit", "compliance:approve"],
     },
     {
+        "group": "Dependencies",
+        "product_scoped": True,
+        "perms": ["dependencies:view", "dependencies:edit"],
+    },
+    {
         "group": "Plugins",
         "product_scoped": False,
         "perms": ["plugins:view", "plugins:install", "plugins:configure", "plugins:delete"],
@@ -192,11 +197,10 @@ def get_permissions_for_user(user_id: str, scope: str) -> set[str]:
         ),
     ).all()
 
-    for binding in bindings:
-        if binding.expires_at and binding.expires_at < now:
-            continue
-        role = db.session.get(Role, binding.role_id)
-        if role:
+    active_role_ids = {b.role_id for b in bindings if not (b.expires_at and b.expires_at < now)}
+    if active_role_ids:
+        roles = Role.query.filter(Role.id.in_(active_role_ids)).all()
+        for role in roles:
             permissions.update(role.permission_list)
 
     return permissions
@@ -234,10 +238,16 @@ def get_visible_product_ids(user_id: str) -> set[str] | None:
 
     active_bindings = [b for b in bindings if not (b.expires_at and b.expires_at < now)]
 
+    # Bulk-load all referenced roles in one query
+    all_role_ids = {b.role_id for b in active_bindings}
+    roles_by_id: dict = {}
+    if all_role_ids:
+        roles_by_id = {r.id: r for r in Role.query.filter(Role.id.in_(all_role_ids)).all()}
+
     # Any organisation-scope binding means the user can see everything
     for b in active_bindings:
         if b.scope == "organization":
-            role = db.session.get(Role, b.role_id)
+            role = roles_by_id.get(b.role_id)
             if role and role.permission_list:
                 return None  # unrestricted
 
@@ -246,7 +256,7 @@ def get_visible_product_ids(user_id: str) -> set[str] | None:
     for b in active_bindings:
         if b.scope.startswith("product:"):
             pid = b.scope.split(":", 1)[1]
-            role = db.session.get(Role, b.role_id)
+            role = roles_by_id.get(b.role_id)
             if role and (
                 "products:view" in role.permission_list
                 or any(

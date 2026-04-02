@@ -325,4 +325,16 @@ const api = {
   revealSecret: (id) => request("POST", `/vault/${id}/reveal`),
   updateSecret: (id, data) => request("PUT", `/vault/${id}`, data),
   deleteSecret: (id) => request("DELETE", `/vault/${id}`),
+
+  // Dependencies
+  getDependencyGraph: (pid) => request("GET", `/products/${pid}/dependency-graph`),
+  listDependencies: (pid) => request("GET", `/products/${pid}/dependencies`),
+  createDependency: (pid, data) => request("POST", `/products/${pid}/dependencies`, data),
+  deleteDependency: (pid, depId) => request("DELETE", `/products/${pid}/dependencies/${depId}`),
+  getDependents: (pid, appId, depTypes) => {
+    const qs = depTypes ? depTypes.map(t => `dep_type=${encodeURIComponent(t)}`).join("&") : "";
+    return request("GET", `/products/${pid}/applications/${appId}/dependents${qs ? "?" + qs : ""}`);
+  },
+  listDeployments: (pid, env) => request("GET", `/products/${pid}/deployments${env ? "?environment=" + encodeURIComponent(env) : ""}`),
+  getReleaseImpact: (pid, releaseId, env) => request("GET", `/products/${pid}/releases/${releaseId}/impact${env ? "?environment=" + encodeURIComponent(env) : ""}`),
 };

@@ -70,12 +70,17 @@ def require_product_access(user_id: str | None, product_id: str, permission: str
 
 
 def require_admin(user_id: str | None):
-    """Return a 401/403 JSON response if the user is not an admin, else None."""
+    """Return a 401/403 JSON response if the user lacks system-administrator access."""
     if user_id is None:
         return jsonify({"error": "Authentication required", "code": "UNAUTHENTICATED"}), 401
-    from app.models.auth import User  # noqa: PLC0415
+    from app.services.authz_service import get_permissions_for_user  # noqa: PLC0415
 
-    user = User.query.get(user_id)
-    if not user or not user.is_admin:
+    org_perms = get_permissions_for_user(user_id, "organization")
+    # Any permission from a system-administrator binding implies full admin access
+    if not (
+        "users:create" in org_perms
+        or "users:delete" in org_perms
+        or "global-vars:edit" in org_perms
+    ):
         return jsonify({"error": "Admin access required", "code": "FORBIDDEN"}), 403
     return None

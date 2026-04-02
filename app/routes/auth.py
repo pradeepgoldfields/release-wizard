@@ -333,7 +333,11 @@ def ensure_admin_user(app) -> None:
             password_hash=hashed,
             is_active=True,
             is_builtin=True,
+            must_change_password=True,
         )
         db.session.add(user)
         db.session.commit()
-        app.logger.info("Created default admin user (password: admin)")
+        app.logger.warning(
+            "Created default admin user with password 'admin'. "
+            "Change this password immediately via Administration → Users."
+        )

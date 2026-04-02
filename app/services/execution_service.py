@@ -504,53 +504,72 @@ def run_task_async(  # noqa: PLR0913
 
     def _worker() -> None:
         with app.app_context():
-            task_run = db.session.get(TaskRun, task_run_id)
-            if not task_run:
-                return
+            try:
+                task_run = db.session.get(TaskRun, task_run_id)
+                if not task_run:
+                    return
 
-            task_run.status = "Running"
-            db.session.commit()
+                task_run.status = "Running"
+                db.session.commit()
 
-            if scratch:
-                # In-editor test run — always use the bundled sandbox container
-                log.info("scratch_run_start", extra={"task_run_id": task_run_id})
-                return_code, logs = _run_script_sandbox(
-                    language, code, timeout, task_run_id, extra_env
-                )
-            else:
-                # Production task run — respect platform runner setting
-                from app.models.setting import PlatformSetting  # noqa: PLC0415
-
-                runner_setting = PlatformSetting.query.get("TASK_RUNNER")
-                runner_type = (runner_setting.value if runner_setting else None) or "subprocess"
-                image_setting = PlatformSetting.query.get("TASK_RUNNER_IMAGE")
-                runner_image = image_setting.value if image_setting else None
-
-                if _in_kubernetes():
-                    log.info("Executing task %s via K8s Job", task_run_id)
-                    return_code, logs = _run_script_k8s(language, code, timeout, task_run_id)
-                elif runner_type in ("docker", "podman"):
-                    log.info("Executing task %s via %s container", task_run_id, runner_type)
-                    return_code, logs = _run_script_container(
-                        language,
-                        code,
-                        timeout,
-                        task_run_id,
-                        runtime=runner_type,
-                        image=runner_image,
+                if scratch:
+                    # In-editor test run — always use the bundled sandbox container
+                    log.info("scratch_run_start", extra={"task_run_id": task_run_id})
+                    return_code, logs = _run_script_sandbox(
+                        language, code, timeout, task_run_id, extra_env
                     )
                 else:
-                    return_code, logs = _run_script_subprocess(language, code, timeout, extra_env)
+                    # Production task run — respect platform runner setting
+                    from app.models.setting import PlatformSetting  # noqa: PLC0415
 
-            output_json = _parse_output_json(logs)
-            status = _status_from_code(return_code, on_error)
+                    runner_setting = PlatformSetting.query.get("TASK_RUNNER")
+                    runner_type = (runner_setting.value if runner_setting else None) or "subprocess"
+                    image_setting = PlatformSetting.query.get("TASK_RUNNER_IMAGE")
+                    runner_image = image_setting.value if image_setting else None
 
-            task_run.return_code = return_code
-            task_run.logs = logs
-            task_run.output_json = output_json
-            task_run.status = status
-            task_run.finished_at = datetime.now(UTC)
-            db.session.commit()
+                    if _in_kubernetes():
+                        log.info("Executing task %s via K8s Job", task_run_id)
+                        return_code, logs = _run_script_k8s(language, code, timeout, task_run_id)
+                    elif runner_type in ("docker", "podman"):
+                        log.info("Executing task %s via %s container", task_run_id, runner_type)
+                        return_code, logs = _run_script_container(
+                            language,
+                            code,
+                            timeout,
+                            task_run_id,
+                            runtime=runner_type,
+                            image=runner_image,
+                        )
+                    else:
+                        return_code, logs = _run_script_subprocess(
+                            language, code, timeout, extra_env
+                        )
+
+                output_json = _parse_output_json(logs)
+                status = _status_from_code(return_code, on_error)
+
+                task_run.return_code = return_code
+                task_run.logs = logs
+                task_run.output_json = output_json
+                task_run.status = status
+                task_run.finished_at = datetime.now(UTC)
+                db.session.commit()
+
+            except Exception as exc:  # noqa: BLE001
+                log.error(
+                    "task_run_worker_error",
+                    extra={"task_run_id": task_run_id, "error": str(exc)},
+                    exc_info=True,
+                )
+                try:
+                    task_run = db.session.get(TaskRun, task_run_id)
+                    if task_run and task_run.status == "Running":
+                        task_run.status = "Failed"
+                        task_run.logs = (task_run.logs or "") + f"\n\n[Internal error: {exc}]"
+                        task_run.finished_at = datetime.now(UTC)
+                        db.session.commit()
+                except Exception:  # noqa: BLE001
+                    log.error("task_run_cleanup_error", extra={"task_run_id": task_run_id})
 
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()

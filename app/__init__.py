@@ -48,11 +48,13 @@ def create_app(config=None) -> Flask:
     # Register all models so Flask-Migrate can detect them
     from app.models import (  # noqa: F401
         AgentPool,
+        AppDependency,
         ApplicationArtifact,
         ApprovalDecision,
         AuditEvent,
         BacklogItem,
         ComplianceRule,
+        EnvDeploymentRecord,
         Environment,
         FeatureToggle,
         Group,
@@ -82,6 +84,7 @@ def create_app(config=None) -> Flask:
     from app.routes.backlog import backlog_bp
     from app.routes.chat import chat_bp
     from app.routes.compliance import compliance_bp
+    from app.routes.dependencies import dependencies_bp
     from app.routes.environments import environments_bp
     from app.routes.feature_toggles import feature_toggles_bp
     from app.routes.framework_controls import framework_controls_bp
@@ -116,6 +119,7 @@ def create_app(config=None) -> Flask:
     app.register_blueprint(products_bp)
     app.register_blueprint(environments_bp)
     app.register_blueprint(agents_bp)
+    app.register_blueprint(dependencies_bp)
     app.register_blueprint(pipelines_bp)
     app.register_blueprint(properties_bp)
     app.register_blueprint(releases_bp)
@@ -185,8 +189,7 @@ def create_app(config=None) -> Flask:
             path in _PUBLIC
             or path.startswith("/api/v1/docs")
             or path.startswith("/static")
-            or path.startswith("/api/v1/webhooks/")
-            and path.endswith("/trigger")
+            or (path.startswith("/api/v1/webhooks/") and path.endswith("/trigger"))
         ):
             return None
         if not path.startswith("/api/v1"):
@@ -196,6 +199,21 @@ def create_app(config=None) -> Flask:
             return jsonify({"error": "Authentication required", "code": "UNAUTHENTICATED"}), 401
         g.current_user = user
         return None
+
+    # Warn loudly on insecure defaults when not testing
+    if not app.config.get("TESTING"):
+        import os as _os  # noqa: PLC0415
+
+        if app.config.get("JWT_SECRET_KEY") == "change-me-in-production":
+            log.warning(
+                "INSECURE_DEFAULT: JWT_SECRET_KEY is set to the public default value. "
+                "Set JWT_SECRET_KEY to a random secret before deploying to production."
+            )
+        if not _os.getenv("VAULT_KEY"):
+            log.warning(
+                "INSECURE_DEFAULT: VAULT_KEY is not set. Vault secrets will use an ephemeral "
+                "key and will be unreadable after restart. Set VAULT_KEY in production."
+            )
 
     # Seed default admin on first boot (skip during testing)
     if not app.config.get("TESTING"):
@@ -416,6 +434,16 @@ def _apply_schema_migrations() -> None:
                 conn.commit()
         log.info("schema_migration", extra={"migration": "task_runs.task_id made nullable"})
 
+    # ── Migration 013: users.must_change_password ────────────────────────────
+    user_cols_v2 = {c["name"] for c in inspector.get_columns("users")}
+    if "must_change_password" not in user_cols_v2:
+        with engine.connect() as conn:
+            conn.execute(
+                text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT 0")
+            )
+            conn.commit()
+        log.info("schema_migration", extra={"migration": "users.must_change_password added"})
+
     # ── Migration 012: agent_pools — agent_role, skills, mcp_config ─────────
     pool_cols = {c["name"] for c in inspector.get_columns("agent_pools")}
     new_pool_cols = {
@@ -502,6 +530,8 @@ def _ensure_builtin_roles() -> None:
         "compliance:view",
         "compliance:edit",
         "compliance:approve",
+        "dependencies:view",
+        "dependencies:edit",
         "app-dictionary:view",
         "app-dictionary:edit",
         "monitoring:view",
@@ -571,6 +601,8 @@ def _ensure_builtin_roles() -> None:
         "vault:view",
         "compliance:view",
         "compliance:edit",
+        "dependencies:view",
+        "dependencies:edit",
         "monitoring:view",
         "global-vars:view",
         "permissions:view",

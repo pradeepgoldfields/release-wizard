@@ -1,3 +1,4 @@
+from app.models.app_dependency import AppDependency, EnvDeploymentRecord
 from app.models.application import ApplicationArtifact
 from app.models.auth import Group, Role, RoleBinding, User, user_groups
 from app.models.backlog import BacklogItem
@@ -18,6 +19,8 @@ from app.models.vault import VaultSecret
 from app.models.webhook import Webhook, WebhookDelivery
 
 __all__ = [
+    "AppDependency",
+    "EnvDeploymentRecord",
     "BacklogItem",
     "FrameworkControl",
     "PipelineTemplate",
