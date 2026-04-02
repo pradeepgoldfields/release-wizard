@@ -18,31 +18,147 @@ from app.models.auth import Role, RoleBinding, User
 #     "product_scoped": <True if this group belongs to product-child objects> }
 
 PERMISSION_CATALOG: list[dict] = [
-    {"group": "Products",        "product_scoped": False, "perms": ["products:view","products:create","products:edit","products:delete"]},
-    {"group": "Applications",    "product_scoped": True,  "perms": ["applications:view","applications:create","applications:edit","applications:delete"]},
-    {"group": "Pipelines",       "product_scoped": True,  "perms": ["pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:execute","pipelines:run"]},
-    {"group": "Releases",        "product_scoped": True,  "perms": ["releases:view","releases:create","releases:edit","releases:delete","releases:execute","releases:approve"]},
-    {"group": "Tasks",           "product_scoped": True,  "perms": ["tasks:view","tasks:create","tasks:edit","tasks:delete","tasks:execute"]},
-    {"group": "Stages",          "product_scoped": True,  "perms": ["stages:view","stages:create","stages:edit","stages:delete","stages:execute"]},
-    {"group": "Environments",    "product_scoped": True,  "perms": ["environments:view","environments:create","environments:edit","environments:delete"]},
-    {"group": "Templates",       "product_scoped": True,  "perms": ["templates:view","templates:create","templates:edit","templates:delete"]},
-    {"group": "Webhooks",        "product_scoped": True,  "perms": ["webhooks:view","webhooks:create","webhooks:edit","webhooks:delete"]},
-    {"group": "Compliance",      "product_scoped": True,  "perms": ["compliance:view","compliance:edit","compliance:approve"]},
-    {"group": "Plugins",         "product_scoped": False, "perms": ["plugins:view","plugins:install","plugins:configure","plugins:delete"]},
-    {"group": "Agent Pools",     "product_scoped": False, "perms": ["agent-pools:view","agent-pools:create","agent-pools:edit","agent-pools:delete"]},
-    {"group": "Vault",           "product_scoped": False, "perms": ["vault:view","vault:create","vault:reveal","vault:delete"]},
-    {"group": "App Dictionary",  "product_scoped": False, "perms": ["app-dictionary:view","app-dictionary:edit"]},
-    {"group": "Monitoring",      "product_scoped": False, "perms": ["monitoring:view","monitoring:configure"]},
-    {"group": "Users",           "product_scoped": False, "perms": ["users:view","users:create","users:edit","users:delete"]},
-    {"group": "Groups",          "product_scoped": False, "perms": ["groups:view","groups:create","groups:edit","groups:delete"]},
-    {"group": "Roles",           "product_scoped": False, "perms": ["roles:view","roles:create","roles:edit","roles:delete"]},
-    {"group": "Permissions",     "product_scoped": False, "perms": ["permissions:view","permissions:grant","permissions:revoke","permissions:change"]},
-    {"group": "Global Variables","product_scoped": False, "perms": ["global-vars:view","global-vars:edit"]},
+    {
+        "group": "Products",
+        "product_scoped": False,
+        "perms": ["products:view", "products:create", "products:edit", "products:delete"],
+    },
+    {
+        "group": "Applications",
+        "product_scoped": True,
+        "perms": [
+            "applications:view",
+            "applications:create",
+            "applications:edit",
+            "applications:delete",
+        ],
+    },
+    {
+        "group": "Pipelines",
+        "product_scoped": True,
+        "perms": [
+            "pipelines:view",
+            "pipelines:create",
+            "pipelines:edit",
+            "pipelines:delete",
+            "pipelines:execute",
+            "pipelines:run",
+        ],
+    },
+    {
+        "group": "Releases",
+        "product_scoped": True,
+        "perms": [
+            "releases:view",
+            "releases:create",
+            "releases:edit",
+            "releases:delete",
+            "releases:execute",
+            "releases:approve",
+        ],
+    },
+    {
+        "group": "Tasks",
+        "product_scoped": True,
+        "perms": ["tasks:view", "tasks:create", "tasks:edit", "tasks:delete", "tasks:execute"],
+    },
+    {
+        "group": "Stages",
+        "product_scoped": True,
+        "perms": ["stages:view", "stages:create", "stages:edit", "stages:delete", "stages:execute"],
+    },
+    {
+        "group": "Environments",
+        "product_scoped": True,
+        "perms": [
+            "environments:view",
+            "environments:create",
+            "environments:edit",
+            "environments:delete",
+        ],
+    },
+    {
+        "group": "Templates",
+        "product_scoped": True,
+        "perms": ["templates:view", "templates:create", "templates:edit", "templates:delete"],
+    },
+    {
+        "group": "Webhooks",
+        "product_scoped": True,
+        "perms": ["webhooks:view", "webhooks:create", "webhooks:edit", "webhooks:delete"],
+    },
+    {
+        "group": "Compliance",
+        "product_scoped": True,
+        "perms": ["compliance:view", "compliance:edit", "compliance:approve"],
+    },
+    {
+        "group": "Plugins",
+        "product_scoped": False,
+        "perms": ["plugins:view", "plugins:install", "plugins:configure", "plugins:delete"],
+    },
+    {
+        "group": "Agent Pools",
+        "product_scoped": False,
+        "perms": [
+            "agent-pools:view",
+            "agent-pools:create",
+            "agent-pools:edit",
+            "agent-pools:delete",
+        ],
+    },
+    {
+        "group": "Vault",
+        "product_scoped": False,
+        "perms": ["vault:view", "vault:create", "vault:reveal", "vault:delete"],
+    },
+    {
+        "group": "App Dictionary",
+        "product_scoped": False,
+        "perms": ["app-dictionary:view", "app-dictionary:edit"],
+    },
+    {
+        "group": "Monitoring",
+        "product_scoped": False,
+        "perms": ["monitoring:view", "monitoring:configure"],
+    },
+    {
+        "group": "Users",
+        "product_scoped": False,
+        "perms": ["users:view", "users:create", "users:edit", "users:delete"],
+    },
+    {
+        "group": "Groups",
+        "product_scoped": False,
+        "perms": ["groups:view", "groups:create", "groups:edit", "groups:delete"],
+    },
+    {
+        "group": "Roles",
+        "product_scoped": False,
+        "perms": ["roles:view", "roles:create", "roles:edit", "roles:delete"],
+    },
+    {
+        "group": "Permissions",
+        "product_scoped": False,
+        "perms": [
+            "permissions:view",
+            "permissions:grant",
+            "permissions:revoke",
+            "permissions:change",
+        ],
+    },
+    {
+        "group": "Global Variables",
+        "product_scoped": False,
+        "perms": ["global-vars:view", "global-vars:edit"],
+    },
 ]
 
 # Convenience sets derived from the catalog
 ALL_PERMISSIONS: list[str] = [p for g in PERMISSION_CATALOG for p in g["perms"]]
-PRODUCT_PERMISSIONS: list[str] = [p for g in PERMISSION_CATALOG if g["product_scoped"] for p in g["perms"]]
+PRODUCT_PERMISSIONS: list[str] = [
+    p for g in PERMISSION_CATALOG if g["product_scoped"] for p in g["perms"]
+]
 
 
 def get_permissions_for_user(user_id: str, scope: str) -> set[str]:
@@ -111,10 +227,7 @@ def get_visible_product_ids(user_id: str) -> set[str] | None:
         )
     ).all()
 
-    active_bindings = [
-        b for b in bindings
-        if not (b.expires_at and b.expires_at < now)
-    ]
+    active_bindings = [b for b in bindings if not (b.expires_at and b.expires_at < now)]
 
     # Any organisation-scope binding means the user can see everything
     for b in active_bindings:
@@ -129,12 +242,17 @@ def get_visible_product_ids(user_id: str) -> set[str] | None:
         if b.scope.startswith("product:"):
             pid = b.scope.split(":", 1)[1]
             role = db.session.get(Role, b.role_id)
-            if role and ("products:view" in role.permission_list or any(
-                p.startswith("applications:") or p.startswith("pipelines:") or
-                p.startswith("releases:") or p.startswith("tasks:") or
-                p.startswith("stages:")
-                for p in role.permission_list
-            )):
+            if role and (
+                "products:view" in role.permission_list
+                or any(
+                    p.startswith("applications:")
+                    or p.startswith("pipelines:")
+                    or p.startswith("releases:")
+                    or p.startswith("tasks:")
+                    or p.startswith("stages:")
+                    for p in role.permission_list
+                )
+            ):
                 product_ids.add(pid)
 
     return product_ids

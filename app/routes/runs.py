@@ -74,12 +74,24 @@ def create_pipeline_run(pipeline_id: str):
         if err:
             return err
     data = request.get_json(silent=True) or {}
+    runtime_props = data.get("runtime_properties") or {}
+
+    # Validate supplied runtime_properties against design-time definitions
+    if runtime_props:
+        from app.services.property_service import validate_runtime_properties
+
+        pipeline_obj = db.session.get(Pipeline, pipeline_id)
+        if pipeline_obj:
+            errors = validate_runtime_properties(pipeline_obj, runtime_props)
+            if errors:
+                return jsonify({"error": "Invalid runtime_properties", "details": errors}), 422
+
     run = start_pipeline_run(
         pipeline_id=pipeline_id,
         commit_sha=data.get("commit_sha"),
         artifact_id=data.get("artifact_id"),
         triggered_by=data.get("triggered_by", "system"),
-        runtime_properties=data.get("runtime_properties"),
+        runtime_properties=runtime_props or None,
         app=current_app._get_current_object(),
     )
     return jsonify(run.to_dict()), 202
@@ -497,12 +509,16 @@ def submit_approval(task_run_id: str):
     if approved_count >= threshold:
         tr.status = "Succeeded"
         tr.finished_at = datetime.now(UTC)
-        tr.logs = (tr.logs or "") + f"\n[APPROVED — {approved_count}/{threshold} approvals received]"
+        tr.logs = (
+            tr.logs or ""
+        ) + f"\n[APPROVED — {approved_count}/{threshold} approvals received]"
 
     db.session.commit()
-    return jsonify({
-        "status": "recorded",
-        "approvals": approved_count,
-        "required": threshold,
-        "task_run": tr.to_dict(),
-    }), 200
+    return jsonify(
+        {
+            "status": "recorded",
+            "approvals": approved_count,
+            "required": threshold,
+            "task_run": tr.to_dict(),
+        }
+    ), 200

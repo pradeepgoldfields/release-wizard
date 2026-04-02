@@ -124,7 +124,9 @@ def attach_pipeline(product_id: str, release_id: str):
                 "violations": result["violations"],
             }
         ), 422
-    return jsonify({"release_id": release_id, "pipeline_id": pipeline_id, "admission": "passed"}), 200
+    return jsonify(
+        {"release_id": release_id, "pipeline_id": pipeline_id, "admission": "passed"}
+    ), 200
 
 
 @releases_bp.delete("/<release_id>/pipelines/<pipeline_id>")

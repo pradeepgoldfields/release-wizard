@@ -1,8 +1,8 @@
 from app.models.application import ApplicationArtifact
-from app.models.feature_toggle import FeatureToggle
 from app.models.auth import Group, Role, RoleBinding, User, user_groups
 from app.models.compliance import AuditEvent, ComplianceRule
 from app.models.environment import Environment, product_environments
+from app.models.feature_toggle import FeatureToggle
 from app.models.framework_control import FrameworkControl
 from app.models.pipeline import Pipeline, Stage
 from app.models.pipeline_template import PipelineTemplate

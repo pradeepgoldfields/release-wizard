@@ -31,6 +31,29 @@ async function request(method, path, body) {
   return json;
 }
 
+// For sending/receiving non-JSON bodies (e.g. YAML text).
+async function requestRaw(method, path, body, contentType = "text/plain") {
+  const token = auth.getToken();
+  const headers = { "Content-Type": contentType };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(BASE + path, { method, headers, body });
+  if (res.status === 401) {
+    auth.clearToken();
+    if (typeof showLoginPage === "function") showLoginPage();
+    throw Object.assign(new Error("Session expired"), { code: "UNAUTHENTICATED" });
+  }
+  const text = await res.text();
+  // Try to parse as JSON first (error responses are JSON); fall back to raw text
+  try {
+    const json = JSON.parse(text);
+    if (!res.ok) throw Object.assign(new Error(json.error || "Request failed"), { data: json });
+    return json;
+  } catch (_) {
+    if (!res.ok) throw new Error(text || res.statusText);
+    return text;
+  }
+}
+
 const api = {
   // Auth
   login: (data) => request("POST", "/auth/login", data),
@@ -87,12 +110,15 @@ const api = {
   runTask: (pid, plid, sid, tid, data) => request("POST", `/products/${pid}/pipelines/${plid}/stages/${sid}/tasks/${tid}/run`, data),
   listTaskRuns: (pid, plid, sid, tid) => request("GET", `/products/${pid}/pipelines/${plid}/stages/${sid}/tasks/${tid}/runs`),
   getTaskRun: (runId) => request("GET", `/task-runs/${runId}`),
+  runScript: (data) => request("POST", "/script-run", data),
+  getSandboxStatus: () => request("GET", "/script-run/sandbox-status"),
   listApprovals: (taskRunId) => request("GET", `/task-runs/${taskRunId}/approvals`),
   submitApproval: (taskRunId, data) => request("POST", `/task-runs/${taskRunId}/approvals`, data),
 
   // Agent Pools
   getAgentPools: () => request("GET", "/agent-pools"),
   createAgentPool: (data) => request("POST", "/agent-pools", data),
+  updateAgentPool: (id, data) => request("PATCH", `/agent-pools/${id}`, data),
   deleteAgentPool: (id) => request("DELETE", `/agent-pools/${id}`),
 
   // Pipeline runs
@@ -192,6 +218,19 @@ const api = {
     });
   },
 
+  validatePipelineYaml: (pid, plid, yamlText) => {
+    const token = auth.getToken();
+    const headers = { "Content-Type": "text/yaml" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    return fetch(`${BASE}/products/${pid}/pipelines/${plid}/validate`, {
+      method: "POST", headers, body: yamlText,
+    }).then(async r => {
+      const j = await r.json();
+      if (!r.ok) throw Object.assign(new Error(j.error || "Validation failed"), { data: j });
+      return j;
+    });
+  },
+
   // Git sync
   gitPullPipeline: (pid, plid) => request("POST", `/products/${pid}/pipelines/${plid}/git/pull`),
   gitPushPipeline: (pid, plid, data) => request("POST", `/products/${pid}/pipelines/${plid}/git/push`, data),
@@ -203,6 +242,7 @@ const api = {
   // Compliance
   getComplianceRules: () => request("GET", "/compliance/rules"),
   createComplianceRule: (data) => request("POST", "/compliance/rules", data),
+  updateComplianceRule: (id, data) => request("PATCH", `/compliance/rules/${id}`, data),
   deleteComplianceRule: (id) => request("DELETE", `/compliance/rules/${id}`),
   getIso27001Report: () => request("GET", "/compliance/iso27001"),
   getAuditEvents: (params = {}) => {
@@ -253,6 +293,11 @@ const api = {
   updateProperty: (ownerType, ownerId, name, data) => request("PUT", `/properties/${ownerType}/${ownerId}/${encodeURIComponent(name)}`, data),
   deleteProperty: (ownerType, ownerId, name) => request("DELETE", `/properties/${ownerType}/${ownerId}/${encodeURIComponent(name)}`),
 
+  // Property YAML language
+  exportPropYaml: (ownerType, ownerId) => requestRaw("GET", `/prop-yaml/${ownerType}/${ownerId}`),
+  validatePropYaml: (ownerType, ownerId, yamlText) => requestRaw("POST", `/prop-yaml/${ownerType}/${ownerId}/validate`, yamlText, "text/yaml"),
+  applyPropYaml: (ownerType, ownerId, yamlText, replace = false) => requestRaw("POST", `/prop-yaml/${ownerType}/${ownerId}/apply${replace ? "?replace=true" : ""}`, yamlText, "text/yaml"),
+
   // Parameter values (runtime overrides)
   listParamValues: (runType, runId) => request("GET", `/parameter-values/${runType}/${runId}`),
   setParamValue: (runType, runId, data) => request("POST", `/parameter-values/${runType}/${runId}`, data),
@@ -261,6 +306,7 @@ const api = {
   // Resolved properties view
   resolveForPipelineRun: (runId) => request("GET", `/properties/resolve/pipeline-run/${runId}`),
   resolveForStageRun: (runId, stageRunId) => request("GET", `/properties/resolve/pipeline-run/${runId}/stage-run/${stageRunId}`),
+  resolveForTaskRun: (runId, stageRunId, taskRunId) => request("GET", `/properties/resolve/pipeline-run/${runId}/stage-run/${stageRunId}/task-run/${taskRunId}`),
 
   // Vault
   listSecrets: () => request("GET", "/vault"),

@@ -141,7 +141,10 @@ def _build_runtime_context(run: PipelineRun, stage_run=None, task_run=None, task
             task_runtime[task_name] = {**task_out, "input": user_inp}
         stage_runtime[stage_name] = {**sr_props, "taskRuntime": task_runtime}
 
-    # Hierarchical resolved properties for the current execution context
+    # Hierarchical resolved properties for the current execution context.
+    # Secrets are masked here so they never appear in CDT_PROPS, CDT_RUNTIME,
+    # or the stored context_env — tasks that need a secret must use the Vault
+    # reveal endpoint instead.
     pipeline = run.pipeline
     stage = stage_run.stage if stage_run else None
     product = pipeline.product if pipeline else None
@@ -153,6 +156,7 @@ def _build_runtime_context(run: PipelineRun, stage_run=None, task_run=None, task
         stage=stage,
         pipeline=pipeline,
         product=product,
+        mask_secrets=True,
     )
 
     return {**pipeline_rt, "stageRuntime": stage_runtime, "properties": resolved_props}
@@ -213,7 +217,9 @@ def _execute_task_run(
         task = tr.task
 
         # ── Run condition check ───────────────────────────────────────────────
-        if not _evaluate_run_condition(task.run_condition if task else None, pipeline_so_far_status):
+        if not _evaluate_run_condition(
+            task.run_condition if task else None, pipeline_so_far_status
+        ):
             tr.status = "Skipped"
             tr.logs = f"[SKIPPED] run_condition='{task.run_condition}' not met (pipeline status: {pipeline_so_far_status})"
             tr.started_at = _now()
@@ -258,9 +264,10 @@ def _execute_task_run(
                 approvers = json.loads(approvers_raw)
             except (ValueError, TypeError):
                 approvers = []
-            approver_summary = ", ".join(
-                f"{s.get('type','user')}:{s.get('ref','?')}" for s in approvers
-            ) or "anyone"
+            approver_summary = (
+                ", ".join(f"{s.get('type', 'user')}:{s.get('ref', '?')}" for s in approvers)
+                or "anyone"
+            )
             tr.logs = f"[AWAITING APPROVAL] Required approvers: {approver_summary}\n"
             if timeout_secs:
                 tr.logs += f"Timeout: {timeout_secs}s\n"
@@ -270,6 +277,7 @@ def _execute_task_run(
             # Poll until approved/rejected or timeout
             deadline = datetime.now(UTC).timestamp() + timeout_secs if timeout_secs else None
             import time as _time  # noqa: PLC0415
+
             while True:
                 _time.sleep(3)
                 with app.app_context():
@@ -292,7 +300,9 @@ def _execute_task_run(
             script = (task.gate_script or "") if task else ""
             language = (task.gate_language or "bash") if task else "bash"
             timeout = (task.timeout or 60) if task else 60
-            passed, logs = _run_gate_script(language, script, timeout, task_env, f"gate:{task.name}")
+            passed, logs = _run_gate_script(
+                language, script, timeout, task_env, f"gate:{task.name}"
+            )
             tr.logs = logs
             tr.return_code = 0 if passed else 1
             tr.status = "Succeeded" if passed else "Failed"
@@ -366,10 +376,12 @@ def _execute_stage(
                     env,
                     f"entry-gate:{stage.name}",
                 )
-                sr.runtime_properties = json.dumps({
-                    **json.loads(sr.runtime_properties or "{}"),
-                    "entry_gate": {"passed": passed, "logs": logs},
-                })
+                sr.runtime_properties = json.dumps(
+                    {
+                        **json.loads(sr.runtime_properties or "{}"),
+                        "entry_gate": {"passed": passed, "logs": logs},
+                    }
+                )
                 db.session.commit()
                 if not passed:
                     sr.status = RunStatus.FAILED
@@ -427,7 +439,7 @@ def _execute_stage(
                 def _run_task(tr_id: str) -> None:
                     with app.app_context():
                         _tr = db.session.get(TaskRun, tr_id)
-                        on_err = (_tr.task.on_error if _tr and _tr.task else "fail")
+                        on_err = _tr.task.on_error if _tr and _tr.task else "fail"
                     s, w = _execute_task_run(
                         app, run_id, sr_id, tr_id, dict(env), pipeline_so_far_status
                     )

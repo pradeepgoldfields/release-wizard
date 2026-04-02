@@ -1,10 +1,11 @@
-/* ── Pipeline Editor — X6 Canvas UI ──────────────────────────────────────── */
+/* ── Pipeline Editor — JointJS Canvas UI ─────────────────────────────────── */
 
 /* ── Canvas wrapper ────────────────────────────────────────────────────────── */
 .pe-canvas-outer {
   display: flex;
   flex-direction: column;
-  height: 640px;
+  height: auto;
+  min-height: 200px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid #1e293b;
@@ -77,16 +78,36 @@
 .pe-canvas-wrap {
   flex: 1;
   position: relative;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: auto;
+  /* height is driven by pe-jj-mount content; auto-shrinks to fit */
+  height: auto;
 }
 
-.pe-x6-mount {
+.pe-canvas-wrap::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.pe-canvas-wrap::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+.pe-canvas-wrap::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+.pe-canvas-wrap::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+.pe-jj-mount {
   width: 100%;
   height: 100%;
+  min-width: 800px;
+  /* height is set explicitly by JS after layout; no CSS min-height needed */
 }
 
-/* X6 canvas background override (grid dots) */
-.pe-x6-mount .x6-graph-svg {
+/* JointJS canvas background override */
+.pe-jj-mount .joint-paper {
   background: transparent !important;
 }
 
@@ -101,9 +122,6 @@
   background: #0f172a;
   box-shadow: 0 2px 12px #00000060;
   pointer-events: none;
-}
-.pe-minimap-wrap .x6-minimap {
-  background: #0f172a !important;
 }
 
 /* ── Stage node card ────────────────────────────────────────────────────────── */
@@ -147,15 +165,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  font-size: 11px;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 13px;
   font-weight: 800;
   flex-shrink: 0;
 }
 .pe-stage-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: #f1f5f9;
   flex: 1;
@@ -169,10 +187,24 @@
   flex-shrink: 0;
   flex-wrap: nowrap;
 }
+.pe-stage-info-btn {
+  background: none;
+  border: none;
+  color: #475569;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.12s, background 0.12s;
+  margin-left: 2px;
+}
+.pe-stage-info-btn:hover { color: #93c5fd; background: #1e293b; }
 .pe-stage-badge {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  padding: 1px 6px;
+  padding: 2px 8px;
   border-radius: 10px;
   white-space: nowrap;
 }
@@ -203,7 +235,7 @@
   position: relative;
   overflow: hidden;
   transition: background 0.12s, border-color 0.12s;
-  min-height: 44px;
+  min-height: 56px;
 }
 .pe-task-row:hover {
   background: #1e293b;
@@ -221,12 +253,12 @@
 }
 
 .pe-task-icon {
-  font-size: 13px;
+  font-size: 16px;
   flex-shrink: 0;
-  margin-left: 6px;
+  margin-left: 8px;
 }
 .pe-task-name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: #e2e8f0;
   flex: 1;
@@ -240,9 +272,9 @@
   flex-shrink: 0;
 }
 .pe-task-badge {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
-  padding: 1px 5px;
+  padding: 2px 6px;
   border-radius: 4px;
   white-space: nowrap;
 }
@@ -262,8 +294,8 @@
 }
 .pe-task-empty:hover { color: #94a3b8; }
 
-/* ── X6 selection box override ──────────────────────────────────────────────── */
-.x6-node-selected .pe-stage-node {
+/* ── JointJS element selected override ──────────────────────────────────────── */
+.joint-element.selected .pe-stage-node {
   border-color: #3b82f6 !important;
   box-shadow: 0 0 0 2px #3b82f640, 0 4px 24px #00000070 !important;
 }
@@ -296,7 +328,7 @@
   position: fixed;
   inset: 0;
   background: #00000040;
-  z-index: 1100;
+  z-index: 10000;
   backdrop-filter: blur(2px);
   animation: pe-fade-in 0.18s ease;
 }
@@ -312,7 +344,7 @@
   background: #0f172a;
   border-left: 1px solid #1e293b;
   box-shadow: -4px 0 40px #00000080;
-  z-index: 1101;
+  z-index: 10001;
   display: flex;
   flex-direction: column;
   animation: pe-slide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
@@ -545,7 +577,360 @@
   box-sizing: border-box;
 }
 
-/* ── Responsive: narrow side panel on small screens ────────────────────────── */
+/* ── Theme picker ───────────────────────────────────────────────────────────── */
+.pe-theme-picker {
+  position: relative;
+}
+.pe-theme-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px;
+  min-width: 160px;
+  box-shadow: 0 8px 32px #00000060;
+  z-index: 2000;
+  flex-direction: column;
+  gap: 4px;
+}
+.pe-theme-menu.open {
+  display: flex;
+}
+.pe-theme-label {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #475569;
+  margin-bottom: 4px;
+  padding: 0 4px;
+}
+.pe-theme-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+.pe-theme-opt:hover {
+  background: #334155;
+  color: #e2e8f0;
+}
+.pe-theme-opt.selected {
+  border-color: #3b82f6;
+  color: #e2e8f0;
+  background: #1e40af20;
+}
+.pe-theme-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 2px solid;
+  flex-shrink: 0;
+}
+
+/* ── Fill-page / fullscreen mode ────────────────────────────────────────────── */
+/* Fullscreen is handled entirely by JS — the mount div gets position:fixed directly */
+.pe-jj-mount.pe-jj-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9999 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: unset !important;
+  min-height: unset !important;
+  background: #0f172a;
+}
+
+/* ── Properties Inspector Panel ─────────────────────────────────────────────── */
+/* Sits inside pe-canvas-outer as a right-rail overlay on the canvas */
+.pe-props-rail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 280px;
+  background: #0c1628;
+  border-left: 1px solid #1e293b;
+  box-shadow: -4px 0 24px #00000060;
+  display: flex;
+  flex-direction: column;
+  z-index: 500;
+  transform: translateX(100%);
+  transition: transform 0.22s cubic-bezier(0.22,1,0.36,1);
+  pointer-events: none;
+}
+.pe-props-rail.open {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.pe-canvas-wrap {
+  position: relative;
+}
+/* Shrink canvas scroll area when props rail is open */
+.pe-props-rail.open ~ * { /* no-op, handled via JS padding */ }
+
+.pe-props-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 10px 14px;
+  border-bottom: 1px solid #1e293b;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.pe-props-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pe-props-close {
+  background: none;
+  border: none;
+  color: #475569;
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+  flex-shrink: 0;
+}
+.pe-props-close:hover { color: #e2e8f0; background: #1e293b; }
+
+.pe-props-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pe-props-body::-webkit-scrollbar { width: 4px; }
+.pe-props-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+/* Object name header */
+.pe-props-object-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+  padding: 8px 0 4px;
+  border-bottom: 1px solid #1e293b;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Property row */
+.pe-prop-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pe-prop-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.pe-prop-value {
+  font-size: 12px;
+  color: #cbd5e1;
+  word-break: break-word;
+  line-height: 1.4;
+}
+.pe-prop-value.mono {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  color: #a5f3fc;
+  background: #0f172a;
+  padding: 4px 6px;
+  border-radius: 5px;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.pe-prop-value.mono::-webkit-scrollbar { width: 3px; }
+.pe-prop-value.mono::-webkit-scrollbar-thumb { background: #334155; }
+
+/* Inline badge inside value */
+.pe-prop-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 3px;
+}
+.pe-prop-badge-green  { background: #16a34a22; color: #4ade80; border: 1px solid #16a34a40; }
+.pe-prop-badge-blue   { background: #3b82f622; color: #60a5fa; border: 1px solid #3b82f640; }
+.pe-prop-badge-amber  { background: #f59e0b22; color: #fbbf24; border: 1px solid #f59e0b40; }
+.pe-prop-badge-red    { background: #ef444422; color: #f87171; border: 1px solid #ef444440; }
+.pe-prop-badge-slate  { background: #33415522; color: #94a3b8; border: 1px solid #33415540; }
+.pe-prop-badge-purple { background: #8b5cf622; color: #a78bfa; border: 1px solid #8b5cf640; }
+.pe-prop-badge-indigo { background: #6366f122; color: #818cf8; border: 1px solid #6366f140; }
+
+/* Divider between property groups */
+.pe-prop-divider {
+  border: none;
+  border-top: 1px solid #1e293b;
+  margin: 6px 0;
+}
+
+/* Section heading */
+.pe-prop-section {
+  font-size: 10px;
+  font-weight: 800;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+}
+
+/* Footer action row */
+.pe-props-foot {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid #1e293b;
+  flex-shrink: 0;
+}
+.pe-props-foot .pe-btn {
+  flex: 1;
+  justify-content: center;
+}
+
+/* Responsive: narrow side panel on small screens */
 @media (max-width: 600px) {
   .pe-sp-drawer { width: 100vw; }
+}
+
+/* ── Pipeline colour picker (in toolbar) ─────────────────────────────────── */
+.pe-pipeline-color-picker {
+  position: relative;
+}
+.pe-pl-color-btn {
+  gap: 6px;
+}
+.pe-pl-color-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  border: 1px solid #ffffff30;
+}
+.pe-pl-color-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px;
+  min-width: 170px;
+  box-shadow: 0 8px 32px #00000060;
+  z-index: 2000;
+  flex-direction: column;
+  gap: 4px;
+}
+.pe-pl-color-menu.open { display: flex; }
+
+/* ── Pipeline Container (wraps the canvas with a labelled border) ─────────── */
+.pe-pipeline-container {
+  border: 1.5px solid #1e3a5f;
+  border-radius: 14px;
+  margin-bottom: 20px;
+  background: #080f1c;
+  box-shadow: 0 0 0 1px #0ea5e920, 0 4px 32px #00000060;
+}
+
+.pe-pipeline-container-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: linear-gradient(90deg, #0f2340 0%, #0c1a30 100%);
+  border-bottom: 1px solid #1e3a5f;
+  gap: 10px;
+}
+
+.pe-pipeline-container-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #93c5fd;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pe-pipeline-container-icon {
+  font-size: 15px;
+  color: #3b82f6;
+  flex-shrink: 0;
+}
+
+.pe-pipeline-container-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pe-pipeline-container-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+.pe-pipeline-container-badge-kind {
+  background: #1d4ed822;
+  color: #60a5fa;
+  border: 1px solid #1d4ed840;
+}
+.pe-pipeline-container-badge-git {
+  background: #0f766e22;
+  color: #2dd4bf;
+  border: 1px solid #0f766e40;
+}
+.pe-pipeline-container-badge-stages {
+  background: #33415522;
+  color: #94a3b8;
+  border: 1px solid #33415540;
+}
+
+/* Canvas outer inside container loses its standalone margin/border-radius */
+.pe-pipeline-container .pe-canvas-outer {
+  margin-bottom: 0;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
 }

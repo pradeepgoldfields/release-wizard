@@ -65,7 +65,11 @@ def get_technical_doc():
     """Return the technical documentation markdown as plain text."""
     doc_path = Path(__file__).parent.parent.parent / "docs" / "technical-documentation.md"
     try:
-        return doc_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/markdown; charset=utf-8"}
+        return (
+            doc_path.read_text(encoding="utf-8"),
+            200,
+            {"Content-Type": "text/markdown; charset=utf-8"},
+        )
     except FileNotFoundError:
         return jsonify({"error": "Documentation file not found"}), 404
 
@@ -75,7 +79,11 @@ def get_admin_guide():
     """Return the system administrator guide markdown as plain text."""
     doc_path = Path(__file__).parent.parent.parent / "docs" / "admin-guide.md"
     try:
-        return doc_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/markdown; charset=utf-8"}
+        return (
+            doc_path.read_text(encoding="utf-8"),
+            200,
+            {"Content-Type": "text/markdown; charset=utf-8"},
+        )
     except FileNotFoundError:
         return jsonify({"error": "Admin guide not found"}), 404
 

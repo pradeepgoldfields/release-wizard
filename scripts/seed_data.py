@@ -851,117 +851,225 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
 
             # Stage 1: setup (sequential, always runs)
             e2e_setup = Stage(
-                id=resource_id("stg"), pipeline_id=e2e_pipeline.id,
-                name="setup", order=1, run_language="bash", execution_mode="sequential",
+                id=resource_id("stg"),
+                pipeline_id=e2e_pipeline.id,
+                name="setup",
+                order=1,
+                run_language="bash",
+                execution_mode="sequential",
                 run_condition="always",
-                entry_gate=_ejson.dumps({
-                    "enabled": True, "language": "bash", "timeout": 20,
-                    "script": "#!/bin/bash\necho 'Entry gate: verifying environment is ready'\n# Check required services are reachable\necho 'All checks passed'\nexit 0",
-                }),
+                entry_gate=_ejson.dumps(
+                    {
+                        "enabled": True,
+                        "language": "bash",
+                        "timeout": 20,
+                        "script": "#!/bin/bash\necho 'Entry gate: verifying environment is ready'\n# Check required services are reachable\necho 'All checks passed'\nexit 0",
+                    }
+                ),
             )
             db.session.add(e2e_setup)
             db.session.flush()
-            for t_order, (t_name, t_lang, t_key, t_on_err, t_type) in enumerate([
-                ("install-deps",  "bash", "checkout", "fail", "build"),
-                ("start-services","bash", "notify",   "fail", "build"),
-            ], start=1):
-                db.session.add(Task(
-                    id=resource_id("task"), stage_id=e2e_setup.id, name=t_name, order=t_order,
-                    run_language=t_lang, run_code=_script(t_lang, t_key), on_error=t_on_err,
-                    timeout=300, is_required=(t_on_err == "fail"), task_type=t_type,
-                    kind="script", run_condition="always",
-                ))
+            for t_order, (t_name, t_lang, t_key, t_on_err, t_type) in enumerate(
+                [
+                    ("install-deps", "bash", "checkout", "fail", "build"),
+                    ("start-services", "bash", "notify", "fail", "build"),
+                ],
+                start=1,
+            ):
+                db.session.add(
+                    Task(
+                        id=resource_id("task"),
+                        stage_id=e2e_setup.id,
+                        name=t_name,
+                        order=t_order,
+                        run_language=t_lang,
+                        run_code=_script(t_lang, t_key),
+                        on_error=t_on_err,
+                        timeout=300,
+                        is_required=(t_on_err == "fail"),
+                        task_type=t_type,
+                        kind="script",
+                        run_condition="always",
+                    )
+                )
 
             # Stage 2: ui-tests (parallel, runs on success only) with entry gate
             e2e_ui = Stage(
-                id=resource_id("stg"), pipeline_id=e2e_pipeline.id,
-                name="ui-tests", order=2, run_language="bash", execution_mode="parallel",
+                id=resource_id("stg"),
+                pipeline_id=e2e_pipeline.id,
+                name="ui-tests",
+                order=2,
+                run_language="bash",
+                execution_mode="parallel",
                 run_condition="on_success",
-                entry_gate=_ejson.dumps({
-                    "enabled": True, "language": "bash", "timeout": 15,
-                    "script": "#!/bin/bash\necho 'Entry gate: verifying test environment URL is reachable'\n# curl -sf http://staging.internal/health || exit 1\necho 'Staging environment is ready'\nexit 0",
-                }),
-                exit_gate=_ejson.dumps({
-                    "enabled": True, "language": "bash", "timeout": 15,
-                    "script": "#!/bin/bash\necho 'Exit gate: verifying all browser test results were stored'\necho 'Results found in artifact store'\nexit 0",
-                }),
+                entry_gate=_ejson.dumps(
+                    {
+                        "enabled": True,
+                        "language": "bash",
+                        "timeout": 15,
+                        "script": "#!/bin/bash\necho 'Entry gate: verifying test environment URL is reachable'\n# curl -sf http://staging.internal/health || exit 1\necho 'Staging environment is ready'\nexit 0",
+                    }
+                ),
+                exit_gate=_ejson.dumps(
+                    {
+                        "enabled": True,
+                        "language": "bash",
+                        "timeout": 15,
+                        "script": "#!/bin/bash\necho 'Exit gate: verifying all browser test results were stored'\necho 'Results found in artifact store'\nexit 0",
+                    }
+                ),
             )
             db.session.add(e2e_ui)
             db.session.flush()
-            for t_order, (t_name, t_lang, t_key, t_on_err, t_type) in enumerate([
-                ("chrome-tests",  "bash", "unit_test", "fail", "integration-test"),
-                ("firefox-tests", "bash", "unit_test", "fail", "integration-test"),
-                ("safari-tests",  "bash", "unit_test", "warn", "integration-test"),
-            ], start=1):
-                db.session.add(Task(
-                    id=resource_id("task"), stage_id=e2e_ui.id, name=t_name, order=t_order,
-                    run_language=t_lang, run_code=_script(t_lang, t_key), on_error=t_on_err,
-                    timeout=300, is_required=(t_on_err == "fail"), task_type=t_type,
-                    kind="script", run_condition="always", execution_mode="parallel",
-                ))
+            for t_order, (t_name, t_lang, t_key, t_on_err, t_type) in enumerate(
+                [
+                    ("chrome-tests", "bash", "unit_test", "fail", "integration-test"),
+                    ("firefox-tests", "bash", "unit_test", "fail", "integration-test"),
+                    ("safari-tests", "bash", "unit_test", "warn", "integration-test"),
+                ],
+                start=1,
+            ):
+                db.session.add(
+                    Task(
+                        id=resource_id("task"),
+                        stage_id=e2e_ui.id,
+                        name=t_name,
+                        order=t_order,
+                        run_language=t_lang,
+                        run_code=_script(t_lang, t_key),
+                        on_error=t_on_err,
+                        timeout=300,
+                        is_required=(t_on_err == "fail"),
+                        task_type=t_type,
+                        kind="script",
+                        run_condition="always",
+                        execution_mode="parallel",
+                    )
+                )
 
             # Stage 3: api-tests (parallel, runs on success only) with gate task inside
             e2e_api = Stage(
-                id=resource_id("stg"), pipeline_id=e2e_pipeline.id,
-                name="api-tests", order=3, run_language="bash", execution_mode="parallel",
+                id=resource_id("stg"),
+                pipeline_id=e2e_pipeline.id,
+                name="api-tests",
+                order=3,
+                run_language="bash",
+                execution_mode="parallel",
                 run_condition="on_success",
             )
             db.session.add(e2e_api)
             db.session.flush()
             # Gate task first (sequential) then parallel API tests
-            db.session.add(Task(
-                id=resource_id("task"), stage_id=e2e_api.id,
-                name="verify-api-contract-gate", order=1,
-                kind="gate", gate_language="bash",
-                gate_script="#!/bin/bash\necho 'Gate: verifying API contract version matches expected'\nEXPECTED='v2'\nACTUAL='v2'  # In real usage: read from build artifact\nif [ \"$ACTUAL\" != \"$EXPECTED\" ]; then\n  echo \"FAIL: API contract version mismatch ($ACTUAL != $EXPECTED)\"\n  exit 1\nfi\necho \"PASS: API contract version $ACTUAL matches expected\"\nexit 0",
-                on_error="fail", timeout=30, is_required=True,
-                task_type="security-gate", run_condition="always", execution_mode="sequential",
-            ))
-            for t_order, (t_name, t_lang, t_key, t_on_err, t_type) in enumerate([
-                ("smoke-tests",       "bash",   "unit_test",        "fail", "integration-test"),
-                ("contract-tests",    "python", "integration_test", "fail", "integration-test"),
-                ("performance-tests", "python", "collect_metrics",  "warn", "code-coverage"),
-            ], start=2):
-                db.session.add(Task(
-                    id=resource_id("task"), stage_id=e2e_api.id, name=t_name, order=t_order,
-                    run_language=t_lang, run_code=_script(t_lang, t_key), on_error=t_on_err,
-                    timeout=300, is_required=(t_on_err == "fail"), task_type=t_type,
-                    kind="script", run_condition="always", execution_mode="parallel",
-                ))
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=e2e_api.id,
+                    name="verify-api-contract-gate",
+                    order=1,
+                    kind="gate",
+                    gate_language="bash",
+                    gate_script='#!/bin/bash\necho \'Gate: verifying API contract version matches expected\'\nEXPECTED=\'v2\'\nACTUAL=\'v2\'  # In real usage: read from build artifact\nif [ "$ACTUAL" != "$EXPECTED" ]; then\n  echo "FAIL: API contract version mismatch ($ACTUAL != $EXPECTED)"\n  exit 1\nfi\necho "PASS: API contract version $ACTUAL matches expected"\nexit 0',
+                    on_error="fail",
+                    timeout=30,
+                    is_required=True,
+                    task_type="security-gate",
+                    run_condition="always",
+                    execution_mode="sequential",
+                )
+            )
+            for t_order, (t_name, t_lang, t_key, t_on_err, t_type) in enumerate(
+                [
+                    ("smoke-tests", "bash", "unit_test", "fail", "integration-test"),
+                    ("contract-tests", "python", "integration_test", "fail", "integration-test"),
+                    ("performance-tests", "python", "collect_metrics", "warn", "code-coverage"),
+                ],
+                start=2,
+            ):
+                db.session.add(
+                    Task(
+                        id=resource_id("task"),
+                        stage_id=e2e_api.id,
+                        name=t_name,
+                        order=t_order,
+                        run_language=t_lang,
+                        run_code=_script(t_lang, t_key),
+                        on_error=t_on_err,
+                        timeout=300,
+                        is_required=(t_on_err == "fail"),
+                        task_type=t_type,
+                        kind="script",
+                        run_condition="always",
+                        execution_mode="parallel",
+                    )
+                )
 
             # Stage 4: report (sequential, always runs — even on warning)
             e2e_report = Stage(
-                id=resource_id("stg"), pipeline_id=e2e_pipeline.id,
-                name="report", order=4, run_language="bash", execution_mode="sequential",
+                id=resource_id("stg"),
+                pipeline_id=e2e_pipeline.id,
+                name="report",
+                order=4,
+                run_language="bash",
+                execution_mode="sequential",
                 run_condition="always",
             )
             db.session.add(e2e_report)
             db.session.flush()
-            db.session.add(Task(
-                id=resource_id("task"), stage_id=e2e_report.id, name="merge-results", order=1,
-                run_language="python", run_code=_script("python", "collect_metrics"),
-                on_error="warn", timeout=300, is_required=False,
-                task_type="code-coverage", kind="script", run_condition="always",
-            ))
-            db.session.add(Task(
-                id=resource_id("task"), stage_id=e2e_report.id, name="publish-report", order=2,
-                run_language="bash", run_code=_script("bash", "notify"),
-                on_error="warn", timeout=60, is_required=False,
-                task_type="notify", kind="script", run_condition="always",
-            ))
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=e2e_report.id,
+                    name="merge-results",
+                    order=1,
+                    run_language="python",
+                    run_code=_script("python", "collect_metrics"),
+                    on_error="warn",
+                    timeout=300,
+                    is_required=False,
+                    task_type="code-coverage",
+                    kind="script",
+                    run_condition="always",
+                )
+            )
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=e2e_report.id,
+                    name="publish-report",
+                    order=2,
+                    run_language="bash",
+                    run_code=_script("bash", "notify"),
+                    on_error="warn",
+                    timeout=60,
+                    is_required=False,
+                    task_type="notify",
+                    kind="script",
+                    run_condition="always",
+                )
+            )
             # Approval gate before final sign-off — only when tests passed
-            db.session.add(Task(
-                id=resource_id("task"), stage_id=e2e_report.id, name="qa-sign-off", order=3,
-                kind="approval",
-                approval_approvers=_ejson.dumps([
-                    {"type": "role", "ref": "product-admin"},
-                    {"type": "user", "ref": "admin"},
-                ]),
-                approval_required_count=1,
-                approval_timeout=3600,
-                on_error="warn", timeout=3600, is_required=False,
-                task_type="deploy", run_condition="on_success",
-            ))
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=e2e_report.id,
+                    name="qa-sign-off",
+                    order=3,
+                    kind="approval",
+                    approval_approvers=_ejson.dumps(
+                        [
+                            {"type": "role", "ref": "product-admin"},
+                            {"type": "user", "ref": "admin"},
+                        ]
+                    ),
+                    approval_required_count=1,
+                    approval_timeout=3600,
+                    on_error="warn",
+                    timeout=3600,
+                    is_required=False,
+                    task_type="deploy",
+                    run_condition="on_success",
+                )
+            )
             db.session.commit()
         else:
             print("  Pipeline already exists: e2e-tests")
@@ -969,7 +1077,10 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
 
         # ── Gated Deploy Pipeline (gates + approvals demo) ───────────────────
         import json as _json  # noqa: PLC0415
-        gated_pipeline = Pipeline.query.filter_by(product_id=product.id, name="gated-deploy").first()
+
+        gated_pipeline = Pipeline.query.filter_by(
+            product_id=product.id, name="gated-deploy"
+        ).first()
         if not gated_pipeline:
             gated_pipeline = Pipeline(
                 id=resource_id("pipe"),
@@ -995,51 +1106,59 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
                 run_language="bash",
                 execution_mode="sequential",
                 run_condition="always",
-                entry_gate=_json.dumps({
-                    "enabled": True,
-                    "language": "bash",
-                    "timeout": 30,
-                    "script": "#!/bin/bash\n# Entry gate: verify previous test run passed\necho 'Checking quality threshold...'\n# In real usage: query your quality gate API\necho 'Coverage: 87% (threshold: 80%)'\nexit 0",
-                }),
-                exit_gate=_json.dumps({
-                    "enabled": True,
-                    "language": "bash",
-                    "timeout": 30,
-                    "script": "#!/bin/bash\n# Exit gate: verify artifacts were published\necho 'Verifying artifact registry...'\necho 'Artifact found in registry'\nexit 0",
-                }),
+                entry_gate=_json.dumps(
+                    {
+                        "enabled": True,
+                        "language": "bash",
+                        "timeout": 30,
+                        "script": "#!/bin/bash\n# Entry gate: verify previous test run passed\necho 'Checking quality threshold...'\n# In real usage: query your quality gate API\necho 'Coverage: 87% (threshold: 80%)'\nexit 0",
+                    }
+                ),
+                exit_gate=_json.dumps(
+                    {
+                        "enabled": True,
+                        "language": "bash",
+                        "timeout": 30,
+                        "script": "#!/bin/bash\n# Exit gate: verify artifacts were published\necho 'Verifying artifact registry...'\necho 'Artifact found in registry'\nexit 0",
+                    }
+                ),
             )
             db.session.add(s_quality)
             db.session.flush()
 
             # Gate task inside stage
-            db.session.add(Task(
-                id=resource_id("task"),
-                stage_id=s_quality.id,
-                name="check-test-coverage",
-                order=1,
-                kind="gate",
-                gate_language="bash",
-                gate_script="#!/bin/bash\necho 'Checking coverage report...'\nCOVERAGE=87\nMIN=80\nif [ $COVERAGE -lt $MIN ]; then\n  echo \"FAIL: coverage $COVERAGE% below minimum $MIN%\"\n  exit 1\nfi\necho \"PASS: coverage $COVERAGE% above minimum $MIN%\"\nexit 0",
-                on_error="fail",
-                timeout=60,
-                is_required=True,
-                task_type="security-gate",
-                run_condition="always",
-            ))
-            db.session.add(Task(
-                id=resource_id("task"),
-                stage_id=s_quality.id,
-                name="check-vulnerability-score",
-                order=2,
-                kind="gate",
-                gate_language="python",
-                gate_script="import sys\nprint('Checking vulnerability scan results...')\ncritical_vulns = 0  # In real usage: query your scanner API\nif critical_vulns > 0:\n    print(f'FAIL: {critical_vulns} critical vulnerabilities found')\n    sys.exit(1)\nprint('PASS: No critical vulnerabilities')\nsys.exit(0)",
-                on_error="fail",
-                timeout=60,
-                is_required=True,
-                task_type="security-gate",
-                run_condition="always",
-            ))
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=s_quality.id,
+                    name="check-test-coverage",
+                    order=1,
+                    kind="gate",
+                    gate_language="bash",
+                    gate_script='#!/bin/bash\necho \'Checking coverage report...\'\nCOVERAGE=87\nMIN=80\nif [ $COVERAGE -lt $MIN ]; then\n  echo "FAIL: coverage $COVERAGE% below minimum $MIN%"\n  exit 1\nfi\necho "PASS: coverage $COVERAGE% above minimum $MIN%"\nexit 0',
+                    on_error="fail",
+                    timeout=60,
+                    is_required=True,
+                    task_type="security-gate",
+                    run_condition="always",
+                )
+            )
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=s_quality.id,
+                    name="check-vulnerability-score",
+                    order=2,
+                    kind="gate",
+                    gate_language="python",
+                    gate_script="import sys\nprint('Checking vulnerability scan results...')\ncritical_vulns = 0  # In real usage: query your scanner API\nif critical_vulns > 0:\n    print(f'FAIL: {critical_vulns} critical vulnerabilities found')\n    sys.exit(1)\nprint('PASS: No critical vulnerabilities')\nsys.exit(0)",
+                    on_error="fail",
+                    timeout=60,
+                    is_required=True,
+                    task_type="security-gate",
+                    run_condition="always",
+                )
+            )
 
             # Stage 2: Production approval (runs only on success)
             s_approval = Stage(
@@ -1054,24 +1173,28 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
             db.session.add(s_approval)
             db.session.flush()
 
-            db.session.add(Task(
-                id=resource_id("task"),
-                stage_id=s_approval.id,
-                name="await-production-sign-off",
-                order=1,
-                kind="approval",
-                approval_approvers=_json.dumps([
-                    {"type": "role", "ref": "product-admin"},
-                    {"type": "user", "ref": "admin"},
-                ]),
-                approval_required_count=1,
-                approval_timeout=86400,  # 24 hours
-                on_error="fail",
-                timeout=86400,
-                is_required=True,
-                task_type="deploy",
-                run_condition="always",
-            ))
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=s_approval.id,
+                    name="await-production-sign-off",
+                    order=1,
+                    kind="approval",
+                    approval_approvers=_json.dumps(
+                        [
+                            {"type": "role", "ref": "product-admin"},
+                            {"type": "user", "ref": "admin"},
+                        ]
+                    ),
+                    approval_required_count=1,
+                    approval_timeout=86400,  # 24 hours
+                    on_error="fail",
+                    timeout=86400,
+                    is_required=True,
+                    task_type="deploy",
+                    run_condition="always",
+                )
+            )
 
             # Stage 3: Deploy (runs only on success)
             s_deploy = Stage(
@@ -1086,34 +1209,38 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
             db.session.add(s_deploy)
             db.session.flush()
 
-            db.session.add(Task(
-                id=resource_id("task"),
-                stage_id=s_deploy.id,
-                name="deploy-to-production",
-                order=1,
-                kind="script",
-                run_language="bash",
-                run_code="#!/bin/bash\nset -euo pipefail\necho \"Deploying to production...\"\necho \"Artifact: $CDT_ARTIFACT_ID\"\necho \"Triggered by: $CDT_TRIGGERED_BY\"\necho \"Deploy complete\"\nexit 0",
-                on_error="fail",
-                timeout=300,
-                is_required=True,
-                task_type="deploy",
-                run_condition="always",
-            ))
-            db.session.add(Task(
-                id=resource_id("task"),
-                stage_id=s_deploy.id,
-                name="notify-on-failure",
-                order=2,
-                kind="script",
-                run_language="bash",
-                run_code="#!/bin/bash\necho \"Sending failure notification...\"\nexit 0",
-                on_error="warn",
-                timeout=60,
-                is_required=False,
-                task_type="notify",
-                run_condition="on_failure",
-            ))
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=s_deploy.id,
+                    name="deploy-to-production",
+                    order=1,
+                    kind="script",
+                    run_language="bash",
+                    run_code='#!/bin/bash\nset -euo pipefail\necho "Deploying to production..."\necho "Artifact: $CDT_ARTIFACT_ID"\necho "Triggered by: $CDT_TRIGGERED_BY"\necho "Deploy complete"\nexit 0',
+                    on_error="fail",
+                    timeout=300,
+                    is_required=True,
+                    task_type="deploy",
+                    run_condition="always",
+                )
+            )
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=s_deploy.id,
+                    name="notify-on-failure",
+                    order=2,
+                    kind="script",
+                    run_language="bash",
+                    run_code='#!/bin/bash\necho "Sending failure notification..."\nexit 0',
+                    on_error="warn",
+                    timeout=60,
+                    is_required=False,
+                    task_type="notify",
+                    run_condition="on_failure",
+                )
+            )
 
             db.session.commit()
         else:
@@ -1124,10 +1251,10 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
         # Each app gets previous build version entries so the dictionary shows
         # a realistic history of deployments.
         historical_versions = {
-            "api":      ["2.3.0", "2.2.1", "2.2.0", "2.1.3", "2.0.0"],
+            "api": ["2.3.0", "2.2.1", "2.2.0", "2.1.3", "2.0.0"],
             "frontend": ["1.8.0", "1.7.5", "1.7.0", "1.6.2", "1.5.0"],
-            "worker":   ["1.1.2", "1.1.0", "1.0.4", "1.0.0"],
-            "data":     ["0.7.5", "0.6.0", "0.5.0"],
+            "worker": ["1.1.2", "1.1.0", "1.0.4", "1.0.0"],
+            "data": ["0.7.5", "0.6.0", "0.5.0"],
         }
         # We store history as a JSON field on the application artifact.
         # If the model gains a proper history table, this can be moved there.
@@ -1290,28 +1417,89 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
         db.session.commit()
 
         # ── Roles ─────────────────────────────────────────────────────────────
-        _ALL_PERMS = ",".join([
-            "products:view","products:create","products:edit","products:delete",
-            "applications:view","applications:create","applications:edit","applications:delete",
-            "pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:execute","pipelines:run",
-            "releases:view","releases:create","releases:edit","releases:delete","releases:execute","releases:approve",
-            "tasks:view","tasks:create","tasks:edit","tasks:delete","tasks:execute",
-            "stages:view","stages:create","stages:edit","stages:delete","stages:execute",
-            "environments:view","environments:create","environments:edit","environments:delete",
-            "templates:view","templates:create","templates:edit","templates:delete",
-            "webhooks:view","webhooks:create","webhooks:edit","webhooks:delete",
-            "plugins:view","plugins:install","plugins:configure","plugins:delete",
-            "agent-pools:view","agent-pools:create","agent-pools:edit","agent-pools:delete",
-            "vault:view","vault:create","vault:reveal","vault:delete",
-            "compliance:view","compliance:edit","compliance:approve",
-            "app-dictionary:view","app-dictionary:edit",
-            "monitoring:view","monitoring:configure",
-            "users:view","users:create","users:edit","users:delete",
-            "groups:view","groups:create","groups:edit","groups:delete",
-            "roles:view","roles:create","roles:edit","roles:delete",
-            "permissions:view","permissions:grant","permissions:revoke","permissions:change",
-            "global-vars:view","global-vars:edit",
-        ])
+        _ALL_PERMS = ",".join(
+            [
+                "products:view",
+                "products:create",
+                "products:edit",
+                "products:delete",
+                "applications:view",
+                "applications:create",
+                "applications:edit",
+                "applications:delete",
+                "pipelines:view",
+                "pipelines:create",
+                "pipelines:edit",
+                "pipelines:delete",
+                "pipelines:execute",
+                "pipelines:run",
+                "releases:view",
+                "releases:create",
+                "releases:edit",
+                "releases:delete",
+                "releases:execute",
+                "releases:approve",
+                "tasks:view",
+                "tasks:create",
+                "tasks:edit",
+                "tasks:delete",
+                "tasks:execute",
+                "stages:view",
+                "stages:create",
+                "stages:edit",
+                "stages:delete",
+                "stages:execute",
+                "environments:view",
+                "environments:create",
+                "environments:edit",
+                "environments:delete",
+                "templates:view",
+                "templates:create",
+                "templates:edit",
+                "templates:delete",
+                "webhooks:view",
+                "webhooks:create",
+                "webhooks:edit",
+                "webhooks:delete",
+                "plugins:view",
+                "plugins:install",
+                "plugins:configure",
+                "plugins:delete",
+                "agent-pools:view",
+                "agent-pools:create",
+                "agent-pools:edit",
+                "agent-pools:delete",
+                "vault:view",
+                "vault:create",
+                "vault:reveal",
+                "vault:delete",
+                "compliance:view",
+                "compliance:edit",
+                "compliance:approve",
+                "app-dictionary:view",
+                "app-dictionary:edit",
+                "monitoring:view",
+                "monitoring:configure",
+                "users:view",
+                "users:create",
+                "users:edit",
+                "users:delete",
+                "groups:view",
+                "groups:create",
+                "groups:edit",
+                "groups:delete",
+                "roles:view",
+                "roles:create",
+                "roles:edit",
+                "roles:delete",
+                "permissions:view",
+                "permissions:grant",
+                "permissions:revoke",
+                "permissions:change",
+                "global-vars:view",
+                "global-vars:edit",
+            ]
+        )
         role_specs = [
             # Built-in — cannot be deleted
             {
@@ -1323,60 +1511,147 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
             # Test/demo custom roles — deletable
             {
                 "name": "product-admin",
-                "permissions": ",".join([
-                    "products:view","products:create","products:edit","products:delete",
-                    "applications:view","applications:create","applications:edit","applications:delete",
-                    "pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:execute","pipelines:run",
-                    "releases:view","releases:create","releases:edit","releases:delete","releases:execute","releases:approve",
-                    "tasks:view","tasks:create","tasks:edit","tasks:delete","tasks:execute",
-                    "stages:view","stages:create","stages:edit","stages:delete","stages:execute",
-                    "environments:view","templates:view","templates:create","templates:edit",
-                    "webhooks:view","webhooks:create","webhooks:edit",
-                    "vault:view","compliance:view","compliance:edit",
-                    "monitoring:view","global-vars:view",
-                    "permissions:view","permissions:grant","permissions:revoke","permissions:change",
-                    "users:view","groups:view","roles:view","roles:create","roles:edit",
-                ]),
+                "permissions": ",".join(
+                    [
+                        "products:view",
+                        "products:create",
+                        "products:edit",
+                        "products:delete",
+                        "applications:view",
+                        "applications:create",
+                        "applications:edit",
+                        "applications:delete",
+                        "pipelines:view",
+                        "pipelines:create",
+                        "pipelines:edit",
+                        "pipelines:delete",
+                        "pipelines:execute",
+                        "pipelines:run",
+                        "releases:view",
+                        "releases:create",
+                        "releases:edit",
+                        "releases:delete",
+                        "releases:execute",
+                        "releases:approve",
+                        "tasks:view",
+                        "tasks:create",
+                        "tasks:edit",
+                        "tasks:delete",
+                        "tasks:execute",
+                        "stages:view",
+                        "stages:create",
+                        "stages:edit",
+                        "stages:delete",
+                        "stages:execute",
+                        "environments:view",
+                        "templates:view",
+                        "templates:create",
+                        "templates:edit",
+                        "webhooks:view",
+                        "webhooks:create",
+                        "webhooks:edit",
+                        "vault:view",
+                        "compliance:view",
+                        "compliance:edit",
+                        "monitoring:view",
+                        "global-vars:view",
+                        "permissions:view",
+                        "permissions:grant",
+                        "permissions:revoke",
+                        "permissions:change",
+                        "users:view",
+                        "groups:view",
+                        "roles:view",
+                        "roles:create",
+                        "roles:edit",
+                    ]
+                ),
                 "description": "Built-in product super-user — full control over all product resources and member access",
                 "is_builtin": True,
             },
             {
                 "name": "product-developer",
-                "permissions": ",".join([
-                    "products:view",
-                    "applications:view","applications:create","applications:edit",
-                    "pipelines:view","pipelines:create","pipelines:edit","pipelines:execute","pipelines:run",
-                    "releases:view","releases:create","releases:execute",
-                    "tasks:view","tasks:create","tasks:edit","tasks:execute",
-                    "stages:view","stages:execute",
-                    "environments:view","templates:view","templates:create",
-                    "webhooks:view","vault:view","compliance:view",
-                    "monitoring:view","global-vars:view",
-                ]),
+                "permissions": ",".join(
+                    [
+                        "products:view",
+                        "applications:view",
+                        "applications:create",
+                        "applications:edit",
+                        "pipelines:view",
+                        "pipelines:create",
+                        "pipelines:edit",
+                        "pipelines:execute",
+                        "pipelines:run",
+                        "releases:view",
+                        "releases:create",
+                        "releases:execute",
+                        "tasks:view",
+                        "tasks:create",
+                        "tasks:edit",
+                        "tasks:execute",
+                        "stages:view",
+                        "stages:execute",
+                        "environments:view",
+                        "templates:view",
+                        "templates:create",
+                        "webhooks:view",
+                        "vault:view",
+                        "compliance:view",
+                        "monitoring:view",
+                        "global-vars:view",
+                    ]
+                ),
                 "description": "Create and run pipelines, create releases within a product",
                 "is_builtin": False,
             },
             {
                 "name": "product-auditor",
-                "permissions": ",".join([
-                    "products:view","applications:view","pipelines:view","releases:view",
-                    "tasks:view","stages:view",
-                    "environments:view","templates:view","compliance:view","compliance:approve",
-                    "monitoring:view","vault:view",
-                ]),
+                "permissions": ",".join(
+                    [
+                        "products:view",
+                        "applications:view",
+                        "pipelines:view",
+                        "releases:view",
+                        "tasks:view",
+                        "stages:view",
+                        "environments:view",
+                        "templates:view",
+                        "compliance:view",
+                        "compliance:approve",
+                        "monitoring:view",
+                        "vault:view",
+                    ]
+                ),
                 "description": "Read-only auditor for a specific product — can approve compliance",
                 "is_builtin": False,
             },
             {
                 "name": "system-auditor",
-                "permissions": ",".join([
-                    "products:view","applications:view","pipelines:view","releases:view",
-                    "tasks:view","stages:view",
-                    "environments:view","templates:view","webhooks:view","plugins:view",
-                    "agent-pools:view","vault:view","compliance:view","compliance:approve",
-                    "app-dictionary:view","monitoring:view","users:view","groups:view",
-                    "roles:view","permissions:view","global-vars:view",
-                ]),
+                "permissions": ",".join(
+                    [
+                        "products:view",
+                        "applications:view",
+                        "pipelines:view",
+                        "releases:view",
+                        "tasks:view",
+                        "stages:view",
+                        "environments:view",
+                        "templates:view",
+                        "webhooks:view",
+                        "plugins:view",
+                        "agent-pools:view",
+                        "vault:view",
+                        "compliance:view",
+                        "compliance:approve",
+                        "app-dictionary:view",
+                        "monitoring:view",
+                        "users:view",
+                        "groups:view",
+                        "roles:view",
+                        "permissions:view",
+                        "global-vars:view",
+                    ]
+                ),
                 "description": "Platform-wide read and compliance approval — no write access",
                 "is_builtin": False,
             },
@@ -1385,9 +1660,13 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
         for spec in role_specs:
             r = Role.query.filter_by(name=spec["name"]).first()
             if not r:
-                r = Role(id=resource_id("role"), name=spec["name"],
-                         permissions=spec["permissions"], description=spec["description"],
-                         is_builtin=spec.get("is_builtin", False))
+                r = Role(
+                    id=resource_id("role"),
+                    name=spec["name"],
+                    permissions=spec["permissions"],
+                    description=spec["description"],
+                    is_builtin=spec.get("is_builtin", False),
+                )
                 db.session.add(r)
                 print(f"  Created role: {spec['name']}")
             else:
@@ -1401,7 +1680,9 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
         # ── RoleBindings ──────────────────────────────────────────────────────
         _ensure_binding(users["admin"], None, roles["system-administrator"], "organization")
         _ensure_binding(users["alice"], None, roles["product-developer"], f"product:{product.id}")
-        _ensure_binding(None, groups["dev-team"], roles["product-developer"], f"product:{product.id}")
+        _ensure_binding(
+            None, groups["dev-team"], roles["product-developer"], f"product:{product.id}"
+        )
         _ensure_binding(None, groups["security-team"], roles["system-auditor"], "organization")
         db.session.commit()
 
@@ -1523,10 +1804,16 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
 
         # ── Agent Pools ───────────────────────────────────────────────────────
         pool_specs = [
+            # ── Infrastructure pools ───────────────────────────────────────
             {
                 "name": "default",
                 "description": "Shared pool for all standard tasks",
                 "pool_type": "builtin",
+                "agent_role": "general",
+                "skills": json.dumps(["bash", "python", "git"]),
+                "mcp_config": json.dumps(
+                    {"transport": "stdio", "command": ["conduit-mcp", "--role", "general"]}
+                ),
                 "cpu_limit": "500m",
                 "memory_limit": "512Mi",
                 "max_agents": 10,
@@ -1536,6 +1823,11 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
                 "name": "heavy-builds",
                 "description": "High-resource pool for container image builds",
                 "pool_type": "custom",
+                "agent_role": "deployer",
+                "skills": json.dumps(["docker", "podman", "buildah", "helm", "kubectl"]),
+                "mcp_config": json.dumps(
+                    {"transport": "stdio", "command": ["conduit-mcp", "--role", "deployer"]}
+                ),
                 "cpu_limit": "2000m",
                 "memory_limit": "4Gi",
                 "max_agents": 3,
@@ -1545,10 +1837,310 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
                 "name": "secure-scan",
                 "description": "Air-gapped pool for security scanning",
                 "pool_type": "custom",
+                "agent_role": "sast-scanner",
+                "skills": json.dumps(["semgrep", "bandit", "sonarqube", "trivy"]),
+                "mcp_config": json.dumps(
+                    {"transport": "stdio", "command": ["conduit-mcp", "--role", "sast-scanner"]}
+                ),
                 "cpu_limit": "1000m",
                 "memory_limit": "2Gi",
                 "max_agents": 2,
                 "sandbox_network": False,
+            },
+            # ── Role-specific agent pools ──────────────────────────────────
+            {
+                "name": "developer",
+                "description": "Agent pool for code generation, refactoring, and implementation tasks",
+                "pool_type": "custom",
+                "agent_role": "developer",
+                "skills": json.dumps(
+                    [
+                        "python",
+                        "javascript",
+                        "typescript",
+                        "bash",
+                        "unit-test",
+                        "code-gen",
+                        "refactor",
+                        "lint",
+                        "dependency-update",
+                        "dockerfile",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "sse",
+                        "url": "http://conduit-mcp-developer:8080/sse",
+                        "env": {"ROLE": "developer", "TOOLS": "fs,git,code,lint"},
+                    }
+                ),
+                "cpu_limit": "1000m",
+                "memory_limit": "2Gi",
+                "max_agents": 5,
+                "sandbox_network": True,
+            },
+            {
+                "name": "tester",
+                "description": "Agent pool for writing and executing automated test suites",
+                "pool_type": "custom",
+                "agent_role": "tester",
+                "skills": json.dumps(
+                    [
+                        "pytest",
+                        "jest",
+                        "selenium",
+                        "playwright",
+                        "unit-test",
+                        "integration-test",
+                        "e2e-test",
+                        "code-coverage",
+                        "test-gen",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "sse",
+                        "url": "http://conduit-mcp-tester:8080/sse",
+                        "env": {"ROLE": "tester", "TOOLS": "fs,git,test-runner,coverage"},
+                    }
+                ),
+                "cpu_limit": "1000m",
+                "memory_limit": "2Gi",
+                "max_agents": 5,
+                "sandbox_network": True,
+            },
+            {
+                "name": "business-analyst",
+                "description": "Agent pool for requirements analysis, acceptance criteria, and story generation",
+                "pool_type": "custom",
+                "agent_role": "business-analyst",
+                "skills": json.dumps(
+                    [
+                        "requirements-analysis",
+                        "acceptance-criteria",
+                        "user-story",
+                        "bdd",
+                        "gherkin",
+                        "stakeholder-report",
+                        "gap-analysis",
+                        "process-mapping",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "sse",
+                        "url": "http://conduit-mcp-ba:8080/sse",
+                        "env": {"ROLE": "business-analyst", "TOOLS": "docs,jira,confluence,slack"},
+                    }
+                ),
+                "cpu_limit": "500m",
+                "memory_limit": "1Gi",
+                "max_agents": 3,
+                "sandbox_network": True,
+            },
+            {
+                "name": "orchestrator",
+                "description": "Agent pool for pipeline coordination, dependency resolution, and workflow decisions",
+                "pool_type": "custom",
+                "agent_role": "orchestrator",
+                "skills": json.dumps(
+                    [
+                        "pipeline-coordination",
+                        "dependency-resolution",
+                        "workflow-decision",
+                        "gate-evaluation",
+                        "approval-routing",
+                        "stage-scheduling",
+                        "notify",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "sse",
+                        "url": "http://conduit-mcp-orchestrator:8080/sse",
+                        "env": {
+                            "ROLE": "orchestrator",
+                            "TOOLS": "conduit-api,slack,pagerduty,jira",
+                        },
+                    }
+                ),
+                "cpu_limit": "500m",
+                "memory_limit": "1Gi",
+                "max_agents": 2,
+                "sandbox_network": True,
+            },
+            {
+                "name": "deployer",
+                "description": "Agent pool for container builds, Helm deployments, and Kubernetes operations",
+                "pool_type": "custom",
+                "agent_role": "deployer",
+                "skills": json.dumps(
+                    [
+                        "docker-build",
+                        "helm-deploy",
+                        "kubectl",
+                        "canary",
+                        "blue-green",
+                        "rollback",
+                        "terraform",
+                        "ansible",
+                        "argocd",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "sse",
+                        "url": "http://conduit-mcp-deployer:8080/sse",
+                        "env": {"ROLE": "deployer", "TOOLS": "kubectl,helm,terraform,vault"},
+                    }
+                ),
+                "cpu_limit": "2000m",
+                "memory_limit": "4Gi",
+                "max_agents": 4,
+                "sandbox_network": True,
+            },
+            {
+                "name": "sca-scanner",
+                "description": "Agent pool for software composition analysis — dependency CVEs and licence checks",
+                "pool_type": "custom",
+                "agent_role": "sca-scanner",
+                "skills": json.dumps(
+                    [
+                        "sca",
+                        "dependency-check",
+                        "trivy",
+                        "grype",
+                        "license-check",
+                        "sbom",
+                        "cve-triage",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "stdio",
+                        "command": ["conduit-mcp", "--role", "sca-scanner"],
+                        "env": {"SCANNERS": "trivy,grype,cyclonedx", "NETWORK": "false"},
+                    }
+                ),
+                "cpu_limit": "1000m",
+                "memory_limit": "2Gi",
+                "max_agents": 3,
+                "sandbox_network": False,
+            },
+            {
+                "name": "dast-scanner",
+                "description": "Agent pool for dynamic application security testing against live environments",
+                "pool_type": "custom",
+                "agent_role": "dast-scanner",
+                "skills": json.dumps(
+                    [
+                        "dast",
+                        "zap",
+                        "nikto",
+                        "nuclei",
+                        "api-fuzzing",
+                        "auth-testing",
+                        "owasp-top10",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "sse",
+                        "url": "http://conduit-mcp-dast:8080/sse",
+                        "env": {"ROLE": "dast-scanner", "TOOLS": "zap,nuclei,burp-rest"},
+                    }
+                ),
+                "cpu_limit": "1000m",
+                "memory_limit": "2Gi",
+                "max_agents": 2,
+                "sandbox_network": True,
+            },
+            {
+                "name": "sast-scanner",
+                "description": "Agent pool for static application security testing — source code analysis",
+                "pool_type": "custom",
+                "agent_role": "sast-scanner",
+                "skills": json.dumps(
+                    [
+                        "sast",
+                        "semgrep",
+                        "bandit",
+                        "sonarqube",
+                        "codeql",
+                        "secret-scan",
+                        "iac-scan",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "stdio",
+                        "command": ["conduit-mcp", "--role", "sast-scanner"],
+                        "env": {"SCANNERS": "semgrep,bandit,gitleaks", "NETWORK": "false"},
+                    }
+                ),
+                "cpu_limit": "1000m",
+                "memory_limit": "2Gi",
+                "max_agents": 3,
+                "sandbox_network": False,
+            },
+            {
+                "name": "code-reviewer",
+                "description": "Agent pool for automated code review — style, logic, security, and best-practice feedback",
+                "pool_type": "custom",
+                "agent_role": "code-reviewer",
+                "skills": json.dumps(
+                    [
+                        "code-review",
+                        "diff-analysis",
+                        "style-check",
+                        "complexity-analysis",
+                        "security-pattern-review",
+                        "pr-comment",
+                        "change-summary",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "sse",
+                        "url": "http://conduit-mcp-reviewer:8080/sse",
+                        "env": {"ROLE": "code-reviewer", "TOOLS": "github,gitlab,fs,git"},
+                    }
+                ),
+                "cpu_limit": "500m",
+                "memory_limit": "1Gi",
+                "max_agents": 4,
+                "sandbox_network": True,
+            },
+            {
+                "name": "git-committer",
+                "description": "Agent pool for committing reviewed changes and pushing to remote Git repositories",
+                "pool_type": "custom",
+                "agent_role": "git-committer",
+                "skills": json.dumps(
+                    [
+                        "git-commit",
+                        "git-push",
+                        "git-tag",
+                        "branch-management",
+                        "changelog-gen",
+                        "conventional-commits",
+                        "release-cut",
+                    ]
+                ),
+                "mcp_config": json.dumps(
+                    {
+                        "transport": "sse",
+                        "url": "http://conduit-mcp-git:8080/sse",
+                        "env": {
+                            "ROLE": "git-committer",
+                            "TOOLS": "git,github,gitlab,ssh-key-vault",
+                        },
+                    }
+                ),
+                "cpu_limit": "500m",
+                "memory_limit": "512Mi",
+                "max_agents": 3,
+                "sandbox_network": True,
             },
         ]
         for spec in pool_specs:
@@ -2006,6 +2598,479 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
                 )
                 print(f"  Created vault secret: {name}")
         db.session.commit()
+
+        db.session.commit()
+
+        # ── X6 Canvas Showcase Pipeline ───────────────────────────────────────
+        # A visually rich pipeline that exercises every X6 canvas feature:
+        #   • accent colours on every stage
+        #   • parallel stage group (integration-testing trio)
+        #   • gate tasks + approval task
+        #   • sequential stages with run conditions
+        import json as _xjson  # noqa: PLC0415
+
+        x6_pipeline = Pipeline.query.filter_by(product_id=product.id, name="x6-canvas-demo").first()
+        if not x6_pipeline:
+            x6_pipeline = Pipeline(
+                id=resource_id("pipe"),
+                product_id=product.id,
+                application_id=apps["api"].id,
+                name="x6-canvas-demo",
+                kind="ci",
+                git_repo="https://github.com/acme/api-service.git",
+                git_branch="main",
+                compliance_score=91.0,
+                compliance_rating=ComplianceRating.GOLD,
+            )
+            db.session.add(x6_pipeline)
+            db.session.flush()
+            print("  Created pipeline: x6-canvas-demo")
+
+            # Stage 1 — checkout (sequential, blue, entry gate)
+            s1 = Stage(
+                id=resource_id("stg"),
+                pipeline_id=x6_pipeline.id,
+                name="checkout",
+                order=1,
+                run_language="bash",
+                execution_mode="sequential",
+                accent_color="#3b82f6",
+                run_condition="always",
+                entry_gate=_xjson.dumps(
+                    {
+                        "enabled": True,
+                        "language": "bash",
+                        "timeout": 15,
+                        "script": "#!/bin/bash\necho 'Gate: verify workspace is clean'\ngit status --porcelain | wc -l | xargs -I{} test {} -eq 0\necho 'Workspace OK'\nexit 0",
+                    }
+                ),
+            )
+            db.session.add(s1)
+            db.session.flush()
+            for order, (name, lang, key, err, ttype) in enumerate(
+                [
+                    ("clone-repo", "bash", "checkout", "fail", "build"),
+                    ("restore-cache", "bash", "lint", "warn", "build"),
+                ],
+                1,
+            ):
+                db.session.add(
+                    Task(
+                        id=resource_id("task"),
+                        stage_id=s1.id,
+                        name=name,
+                        order=order,
+                        run_language=lang,
+                        run_code=_script(lang, key),
+                        on_error=err,
+                        timeout=120,
+                        is_required=(err == "fail"),
+                        task_type=ttype,
+                        kind="script",
+                    )
+                )
+
+            # Stage 2 — build (sequential, amber)
+            s2 = Stage(
+                id=resource_id("stg"),
+                pipeline_id=x6_pipeline.id,
+                name="build",
+                order=2,
+                run_language="bash",
+                execution_mode="sequential",
+                accent_color="#f59e0b",
+                run_condition="on_success",
+            )
+            db.session.add(s2)
+            db.session.flush()
+            for order, (name, lang, key, err, ttype) in enumerate(
+                [
+                    ("compile", "bash", "lint", "fail", "compile"),
+                    ("docker-build", "bash", "build_image", "fail", "docker-build"),
+                    ("push-image", "bash", "tag_release", "warn", "docker-build"),
+                ],
+                1,
+            ):
+                db.session.add(
+                    Task(
+                        id=resource_id("task"),
+                        stage_id=s2.id,
+                        name=name,
+                        order=order,
+                        run_language=lang,
+                        run_code=_script(lang, key),
+                        on_error=err,
+                        timeout=300,
+                        is_required=(err == "fail"),
+                        task_type=ttype,
+                        kind="script",
+                    )
+                )
+
+            # Stage 3 — sast-gate (sequential, red — gate task demo)
+            s3 = Stage(
+                id=resource_id("stg"),
+                pipeline_id=x6_pipeline.id,
+                name="security-gate",
+                order=3,
+                run_language="python",
+                execution_mode="sequential",
+                accent_color="#ef4444",
+                run_condition="on_success",
+                is_protected=True,
+            )
+            db.session.add(s3)
+            db.session.flush()
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=s3.id,
+                    name="sast-scan",
+                    order=1,
+                    kind="gate",
+                    gate_language="python",
+                    gate_script=_script("python", "security_scan"),
+                    on_error="fail",
+                    timeout=600,
+                    is_required=True,
+                    task_type="sast",
+                    run_condition="always",
+                )
+            )
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=s3.id,
+                    name="generate-sbom",
+                    order=2,
+                    kind="script",
+                    run_language="python",
+                    run_code=_script("python", "generate_sbom"),
+                    on_error="warn",
+                    timeout=300,
+                    is_required=False,
+                    task_type="sca",
+                    run_condition="always",
+                )
+            )
+
+            # Stages 4a, 4b, 4c — parallel integration tests (indigo)
+            for par_order, (par_name, par_color) in enumerate(
+                [
+                    ("unit-test-suite", "#6366f1"),
+                    ("integration-test-suite", "#8b5cf6"),
+                    ("e2e-test-suite", "#06b6d4"),
+                ],
+                4,
+            ):
+                sp = Stage(
+                    id=resource_id("stg"),
+                    pipeline_id=x6_pipeline.id,
+                    name=par_name,
+                    order=par_order,
+                    run_language="bash",
+                    execution_mode="parallel",
+                    accent_color=par_color,
+                    run_condition="on_success",
+                )
+                db.session.add(sp)
+                db.session.flush()
+                for t_order, (t_name, t_lang, t_key, t_err, t_type) in enumerate(
+                    [
+                        ("run-tests", "bash", "unit_test", "fail", "unit-test"),
+                        ("collect-report", "python", "collect_metrics", "warn", "code-coverage"),
+                    ],
+                    1,
+                ):
+                    db.session.add(
+                        Task(
+                            id=resource_id("task"),
+                            stage_id=sp.id,
+                            name=t_name,
+                            order=t_order,
+                            run_language=t_lang,
+                            run_code=_script(t_lang, t_key),
+                            on_error=t_err,
+                            timeout=300,
+                            is_required=(t_err == "fail"),
+                            task_type=t_type,
+                            kind="script",
+                            execution_mode="sequential",
+                        )
+                    )
+
+            # Stage 7 — compliance approval (sequential, green, approval task)
+            s7 = Stage(
+                id=resource_id("stg"),
+                pipeline_id=x6_pipeline.id,
+                name="sign-off",
+                order=7,
+                run_language="bash",
+                execution_mode="sequential",
+                accent_color="#10b981",
+                run_condition="on_success",
+                exit_gate=_xjson.dumps(
+                    {
+                        "enabled": True,
+                        "language": "bash",
+                        "timeout": 15,
+                        "script": "#!/bin/bash\necho 'Exit gate: all approvals collected'\nexit 0",
+                    }
+                ),
+            )
+            db.session.add(s7)
+            db.session.flush()
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=s7.id,
+                    name="compliance-approval",
+                    order=1,
+                    kind="approval",
+                    approval_approvers=_xjson.dumps(
+                        [
+                            {"type": "role", "ref": "product-admin"},
+                            {"type": "user", "ref": "alice"},
+                        ]
+                    ),
+                    approval_required_count=1,
+                    approval_timeout=3600,
+                    on_error="fail",
+                    timeout=3600,
+                    is_required=True,
+                    task_type="deploy",
+                    run_condition="always",
+                )
+            )
+            db.session.add(
+                Task(
+                    id=resource_id("task"),
+                    stage_id=s7.id,
+                    name="notify-slack",
+                    order=2,
+                    kind="script",
+                    run_language="bash",
+                    run_code=_script("bash", "notify"),
+                    on_error="warn",
+                    timeout=60,
+                    is_required=False,
+                    task_type="notify",
+                    run_condition="always",
+                )
+            )
+
+            # Stage 8 — deploy (sequential, orange, run condition on_success)
+            s8 = Stage(
+                id=resource_id("stg"),
+                pipeline_id=x6_pipeline.id,
+                name="deploy-staging",
+                order=8,
+                run_language="bash",
+                execution_mode="sequential",
+                accent_color="#f97316",
+                run_condition="on_success",
+            )
+            db.session.add(s8)
+            db.session.flush()
+            for order, (name, lang, key, err, ttype) in enumerate(
+                [
+                    ("helm-upgrade", "bash", "build_image", "fail", "helm-deploy"),
+                    ("smoke-test", "bash", "unit_test", "warn", "integration-test"),
+                    ("tag-release", "bash", "tag_release", "warn", "deploy"),
+                ],
+                1,
+            ):
+                db.session.add(
+                    Task(
+                        id=resource_id("task"),
+                        stage_id=s8.id,
+                        name=name,
+                        order=order,
+                        run_language=lang,
+                        run_code=_script(lang, key),
+                        on_error=err,
+                        timeout=300,
+                        is_required=(err == "fail"),
+                        task_type=ttype,
+                        kind="script",
+                    )
+                )
+
+            db.session.commit()
+            print("  Created X6 canvas demo pipeline with 8 stages")
+        else:
+            print("  Pipeline already exists: x6-canvas-demo")
+
+        # ── Pipeline runs for x6-canvas-demo ─────────────────────────────────
+        _seed_pipeline_runs(x6_pipeline)
+
+        # ── YAML editor demo pipeline ─────────────────────────────────────────
+        import json as _xjson2  # noqa: PLC0415 (already imported above as _xjson)
+
+        yaml_pipeline = Pipeline.query.filter_by(
+            product_id=product.id, name="yaml-editor-demo"
+        ).first()
+        if not yaml_pipeline:
+            yaml_pipeline = Pipeline(
+                id=resource_id("pl"),
+                product_id=product.id,
+                name="yaml-editor-demo",
+                kind="ci",
+                git_repo="https://github.com/acme/yaml-demo.git",
+                git_branch="main",
+                compliance_score=72.0,
+                compliance_rating=ComplianceRating.SILVER,
+                accent_color="#0ea5e9",
+            )
+            db.session.add(yaml_pipeline)
+            db.session.flush()
+
+            _yaml_stages = [
+                # (name, order, exec_mode, accent, run_cond, tasks)
+                # tasks: (name, kind, lang, type_tag, on_err)
+                (
+                    "lint-and-format",
+                    1,
+                    "sequential",
+                    "#64748b",
+                    "always",
+                    [
+                        ("ruff-check", "script", "bash", "lint", "warn"),
+                        ("ruff-format", "script", "bash", "lint", "warn"),
+                        ("mypy-typecheck", "script", "python", "lint", "warn"),
+                    ],
+                ),
+                (
+                    "unit-tests",
+                    2,
+                    "sequential",
+                    "#3b82f6",
+                    "on_success",
+                    [
+                        ("pytest-unit", "script", "python", "unit-test", "fail"),
+                        ("coverage-report", "script", "python", "code-coverage", "warn"),
+                    ],
+                ),
+                (
+                    "security-scan",
+                    3,
+                    "sequential",
+                    "#ef4444",
+                    "on_success",
+                    [
+                        ("bandit-sast", "script", "python", "sast", "warn"),
+                        ("safety-check", "script", "bash", "security-scan", "warn"),
+                        ("trivy-image", "script", "bash", "security-scan", "fail"),
+                    ],
+                ),
+                (
+                    "build",
+                    4,
+                    "sequential",
+                    "#f59e0b",
+                    "on_success",
+                    [
+                        ("docker-build", "script", "bash", "docker-build", "fail"),
+                        ("push-registry", "script", "bash", "docker-build", "fail"),
+                    ],
+                ),
+                (
+                    "gate-check",
+                    5,
+                    "sequential",
+                    "#f97316",
+                    "on_success",
+                    [
+                        ("quality-gate", "gate", "bash", "build", "fail"),
+                    ],
+                ),
+                (
+                    "approval",
+                    6,
+                    "sequential",
+                    "#8b5cf6",
+                    "on_success",
+                    [
+                        ("release-approval", "approval", "bash", "deploy", "fail"),
+                        ("notify-team", "script", "bash", "notify", "warn"),
+                    ],
+                ),
+                (
+                    "deploy-prod",
+                    7,
+                    "sequential",
+                    "#10b981",
+                    "on_success",
+                    [
+                        ("helm-upgrade", "script", "bash", "helm-deploy", "fail"),
+                        ("smoke-tests", "script", "bash", "integration-test", "warn"),
+                        ("tag-release", "script", "bash", "deploy", "warn"),
+                    ],
+                ),
+            ]
+
+            for s_name, s_ord, s_exec, s_color, s_cond, s_tasks in _yaml_stages:
+                ys = Stage(
+                    id=resource_id("stg"),
+                    pipeline_id=yaml_pipeline.id,
+                    name=s_name,
+                    order=s_ord,
+                    run_language="bash",
+                    execution_mode=s_exec,
+                    accent_color=s_color,
+                    run_condition=s_cond,
+                )
+                db.session.add(ys)
+                db.session.flush()
+                for t_ord, (t_name, t_kind, t_lang, t_type, t_err) in enumerate(s_tasks, 1):
+                    t_kwargs: dict = dict(
+                        id=resource_id("task"),
+                        stage_id=ys.id,
+                        name=t_name,
+                        order=t_ord,
+                        kind=t_kind,
+                        on_error=t_err,
+                        timeout=300,
+                        is_required=(t_err == "fail"),
+                        task_type=t_type,
+                        run_condition="always",
+                        execution_mode="sequential",
+                    )
+                    if t_kind == "gate":
+                        t_kwargs["gate_language"] = t_lang
+                        t_kwargs["gate_script"] = (
+                            "#!/bin/bash\n# Quality gate\n"
+                            "coverage=$(cat coverage.txt | grep TOTAL | awk '{print $NF}' | tr -d '%')\n"
+                            '[ "${coverage:-0}" -ge 80 ] && echo "Gate passed: ${coverage}%" && exit 0\n'
+                            'echo "Gate failed: coverage ${coverage}% < 80%"; exit 1\n'
+                        )
+                    elif t_kind == "approval":
+                        t_kwargs["approval_approvers"] = _xjson2.dumps(
+                            [
+                                {"type": "role", "ref": "product-admin"},
+                                {"type": "user", "ref": "alice"},
+                            ]
+                        )
+                        t_kwargs["approval_required_count"] = 1
+                        t_kwargs["approval_timeout"] = 3600
+                    else:
+                        t_kwargs["run_language"] = t_lang
+                        t_kwargs["run_code"] = _script(
+                            t_lang,
+                            {
+                                "ruff-check": "lint",
+                                "ruff-format": "lint",
+                                "mypy-typecheck": "lint",
+                            }.get(t_name, t_type.replace("-", "_").replace(" ", "_")),
+                        )
+                    db.session.add(Task(**t_kwargs))
+
+            db.session.commit()
+            print("  Created yaml-editor-demo pipeline with 7 stages")
+        else:
+            print("  Pipeline already exists: yaml-editor-demo")
+
+        _seed_pipeline_runs(yaml_pipeline)
 
         db.session.commit()
         print("\nSeed complete.")

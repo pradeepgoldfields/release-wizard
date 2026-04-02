@@ -50,10 +50,10 @@ def create_app(config=None) -> Flask:
         AgentPool,
         ApplicationArtifact,
         ApprovalDecision,
-        FeatureToggle,
         AuditEvent,
         ComplianceRule,
         Environment,
+        FeatureToggle,
         Group,
         ParameterValue,
         Pipeline,
@@ -77,11 +77,11 @@ def create_app(config=None) -> Flask:
         WebhookDelivery,
     )
     from app.routes.agents import agents_bp
-    from app.routes.feature_toggles import feature_toggles_bp
     from app.routes.auth import _current_user, auth_bp, ensure_admin_user
     from app.routes.chat import chat_bp
     from app.routes.compliance import compliance_bp
     from app.routes.environments import environments_bp
+    from app.routes.feature_toggles import feature_toggles_bp
     from app.routes.framework_controls import framework_controls_bp
     from app.routes.health import health_bp
     from app.routes.main import main_bp
@@ -90,6 +90,7 @@ def create_app(config=None) -> Flask:
     from app.routes.pipelines import pipelines_bp
     from app.routes.plugins import plugins_bp
     from app.routes.products import products_bp
+    from app.routes.prop_yaml import prop_yaml_bp
     from app.routes.properties import properties_bp
     from app.routes.releases import releases_bp
     from app.routes.runs import runs_bp
@@ -120,6 +121,7 @@ def create_app(config=None) -> Flask:
     app.register_blueprint(maturity_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(yaml_bp)
+    app.register_blueprint(prop_yaml_bp)
     app.register_blueprint(plugins_bp)
     app.register_blueprint(vault_bp)
     app.register_blueprint(feature_toggles_bp)
@@ -269,13 +271,13 @@ def _apply_schema_migrations() -> None:
     # ── Migration 006: tasks — kind, gate, approval, run_condition ───────────
     task_cols = {c["name"] for c in inspector.get_columns("tasks")}
     new_task_cols = {
-        "kind":                    "VARCHAR(32) DEFAULT 'script'",
-        "gate_script":             "TEXT DEFAULT ''",
-        "gate_language":           "VARCHAR(32) DEFAULT 'bash'",
-        "approval_approvers":      "TEXT DEFAULT '[]'",
+        "kind": "VARCHAR(32) DEFAULT 'script'",
+        "gate_script": "TEXT DEFAULT ''",
+        "gate_language": "VARCHAR(32) DEFAULT 'bash'",
+        "approval_approvers": "TEXT DEFAULT '[]'",
         "approval_required_count": "INTEGER DEFAULT 0",
-        "approval_timeout":        "INTEGER DEFAULT 0",
-        "run_condition":           "VARCHAR(32) DEFAULT 'always'",
+        "approval_timeout": "INTEGER DEFAULT 0",
+        "run_condition": "VARCHAR(32) DEFAULT 'always'",
     }
     for col, col_def in new_task_cols.items():
         if col not in task_cols:
@@ -287,8 +289,8 @@ def _apply_schema_migrations() -> None:
     # ── Migration 007: stages — entry_gate, exit_gate, run_condition ─────────
     stage_cols_all = {c["name"] for c in inspector.get_columns("stages")}
     new_stage_cols = {
-        "entry_gate":    "TEXT DEFAULT '{}'",
-        "exit_gate":     "TEXT DEFAULT '{}'",
+        "entry_gate": "TEXT DEFAULT '{}'",
+        "exit_gate": "TEXT DEFAULT '{}'",
         "run_condition": "VARCHAR(32) DEFAULT 'always'",
     }
     for col, col_def in new_stage_cols.items():
@@ -302,7 +304,8 @@ def _apply_schema_migrations() -> None:
     existing_tables = set(inspector.get_table_names())
     if "approval_decisions" not in existing_tables:
         with engine.connect() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE approval_decisions (
                     id VARCHAR(64) PRIMARY KEY,
                     task_run_id VARCHAR(64) NOT NULL REFERENCES task_runs(id),
@@ -311,7 +314,8 @@ def _apply_schema_migrations() -> None:
                     comment TEXT,
                     decided_at DATETIME
                 )
-            """))
+            """)
+            )
             conn.commit()
         log.info("schema_migration", extra={"migration": "approval_decisions table created"})
 
@@ -319,7 +323,8 @@ def _apply_schema_migrations() -> None:
     existing_tables = set(inspector.get_table_names())
     if "feature_toggles" not in existing_tables:
         with engine.connect() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE TABLE feature_toggles (
                     id VARCHAR(64) PRIMARY KEY,
                     key VARCHAR(128) UNIQUE NOT NULL,
@@ -330,9 +335,18 @@ def _apply_schema_migrations() -> None:
                     created_at DATETIME,
                     updated_at DATETIME
                 )
-            """))
+            """)
+            )
             conn.commit()
         log.info("schema_migration", extra={"migration": "feature_toggles table created"})
+
+    # ── Migration 010: pipelines.accent_color ───────────────────────────────
+    pipeline_cols = {c["name"] for c in inspector.get_columns("pipelines")}
+    if "accent_color" not in pipeline_cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE pipelines ADD COLUMN accent_color VARCHAR(64)"))
+            conn.commit()
+        log.info("schema_migration", extra={"migration": "pipelines.accent_color added"})
 
     # ── Migration 005: users.persona (orphaned — nulled out, not dropped) ────
     # The persona column is no longer used by the application.  SQLite <3.35
@@ -345,6 +359,74 @@ def _apply_schema_migrations() -> None:
             conn.commit()
         log.info("schema_migration", extra={"migration": "users.persona nulled (deprecated)"})
 
+    # ── Migration 011: task_runs.task_id — make nullable for scratch runs ────
+    # Scratch/ad-hoc runs (in-editor test runs) have no associated Task record.
+    # SQLite does not support ALTER COLUMN so we check the notnull flag and
+    # recreate the table only when it is still NOT NULL.
+    tr_cols = {c["name"]: c for c in inspector.get_columns("task_runs")}
+    if tr_cols.get("task_id", {}).get("nullable") is False:
+        db_url = str(engine.url)
+        if "sqlite" in db_url:
+            # Build column list from existing table so we don't assume schema version
+            existing_col_names = [c["name"] for c in inspector.get_columns("task_runs")]
+            col_csv = ", ".join(existing_col_names)
+            with engine.connect() as conn:
+                conn.execute(text("PRAGMA foreign_keys = OFF"))
+                # Recreate with task_id nullable; preserve all existing columns
+                conn.execute(
+                    text(f"""
+                    CREATE TABLE task_runs_new AS
+                    SELECT {col_csv} FROM task_runs WHERE 0
+                """)
+                )
+                conn.execute(text("DROP TABLE task_runs_new"))
+                # Explicit DDL so task_id is nullable
+                conn.execute(
+                    text("""
+                    CREATE TABLE task_runs_new (
+                        id VARCHAR(64) NOT NULL PRIMARY KEY,
+                        task_id VARCHAR(64),
+                        stage_run_id VARCHAR(64),
+                        status VARCHAR(32),
+                        return_code INTEGER,
+                        logs TEXT,
+                        output_json TEXT,
+                        user_input TEXT,
+                        context_env TEXT,
+                        agent_pool_id VARCHAR(64),
+                        started_at DATETIME,
+                        finished_at DATETIME
+                    )
+                """)
+                )
+                conn.execute(
+                    text(f"INSERT INTO task_runs_new ({col_csv}) SELECT {col_csv} FROM task_runs")
+                )
+                conn.execute(text("DROP TABLE task_runs"))
+                conn.execute(text("ALTER TABLE task_runs_new RENAME TO task_runs"))
+                conn.execute(text("PRAGMA foreign_keys = ON"))
+                conn.commit()
+        else:
+            # PostgreSQL / other ANSI-SQL databases support ALTER COLUMN
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE task_runs ALTER COLUMN task_id DROP NOT NULL"))
+                conn.commit()
+        log.info("schema_migration", extra={"migration": "task_runs.task_id made nullable"})
+
+    # ── Migration 012: agent_pools — agent_role, skills, mcp_config ─────────
+    pool_cols = {c["name"] for c in inspector.get_columns("agent_pools")}
+    new_pool_cols = {
+        "agent_role": "VARCHAR(64) DEFAULT 'general'",
+        "skills": "TEXT",
+        "mcp_config": "TEXT",
+    }
+    for col, col_def in new_pool_cols.items():
+        if col not in pool_cols:
+            with engine.connect() as conn:
+                conn.execute(text(f"ALTER TABLE agent_pools ADD COLUMN {col} {col_def}"))
+                conn.commit()
+            log.info("schema_migration", extra={"migration": f"agent_pools.{col} added"})
+
 
 def _ensure_builtin_roles() -> None:
     """Upsert the two built-in roles on every startup.
@@ -356,41 +438,139 @@ def _ensure_builtin_roles() -> None:
     from app.services.id_service import resource_id  # noqa: PLC0415
 
     _ALL_PERMS = [
-        "products:view","products:create","products:edit","products:delete",
-        "applications:view","applications:create","applications:edit","applications:delete",
-        "pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:execute","pipelines:run",
-        "releases:view","releases:create","releases:edit","releases:delete","releases:execute","releases:approve",
-        "tasks:view","tasks:create","tasks:edit","tasks:delete","tasks:execute",
-        "stages:view","stages:create","stages:edit","stages:delete","stages:execute",
-        "environments:view","environments:create","environments:edit","environments:delete",
-        "templates:view","templates:create","templates:edit","templates:delete",
-        "webhooks:view","webhooks:create","webhooks:edit","webhooks:delete",
-        "plugins:view","plugins:install","plugins:configure","plugins:delete",
-        "agent-pools:view","agent-pools:create","agent-pools:edit","agent-pools:delete",
-        "vault:view","vault:create","vault:reveal","vault:delete",
-        "compliance:view","compliance:edit","compliance:approve",
-        "app-dictionary:view","app-dictionary:edit",
-        "monitoring:view","monitoring:configure",
-        "users:view","users:create","users:edit","users:delete",
-        "groups:view","groups:create","groups:edit","groups:delete",
-        "roles:view","roles:create","roles:edit","roles:delete",
-        "permissions:view","permissions:grant","permissions:revoke","permissions:change",
-        "global-vars:view","global-vars:edit",
+        "products:view",
+        "products:create",
+        "products:edit",
+        "products:delete",
+        "applications:view",
+        "applications:create",
+        "applications:edit",
+        "applications:delete",
+        "pipelines:view",
+        "pipelines:create",
+        "pipelines:edit",
+        "pipelines:delete",
+        "pipelines:execute",
+        "pipelines:run",
+        "releases:view",
+        "releases:create",
+        "releases:edit",
+        "releases:delete",
+        "releases:execute",
+        "releases:approve",
+        "tasks:view",
+        "tasks:create",
+        "tasks:edit",
+        "tasks:delete",
+        "tasks:execute",
+        "stages:view",
+        "stages:create",
+        "stages:edit",
+        "stages:delete",
+        "stages:execute",
+        "environments:view",
+        "environments:create",
+        "environments:edit",
+        "environments:delete",
+        "templates:view",
+        "templates:create",
+        "templates:edit",
+        "templates:delete",
+        "webhooks:view",
+        "webhooks:create",
+        "webhooks:edit",
+        "webhooks:delete",
+        "plugins:view",
+        "plugins:install",
+        "plugins:configure",
+        "plugins:delete",
+        "agent-pools:view",
+        "agent-pools:create",
+        "agent-pools:edit",
+        "agent-pools:delete",
+        "vault:view",
+        "vault:create",
+        "vault:reveal",
+        "vault:delete",
+        "compliance:view",
+        "compliance:edit",
+        "compliance:approve",
+        "app-dictionary:view",
+        "app-dictionary:edit",
+        "monitoring:view",
+        "monitoring:configure",
+        "users:view",
+        "users:create",
+        "users:edit",
+        "users:delete",
+        "groups:view",
+        "groups:create",
+        "groups:edit",
+        "groups:delete",
+        "roles:view",
+        "roles:create",
+        "roles:edit",
+        "roles:delete",
+        "permissions:view",
+        "permissions:grant",
+        "permissions:revoke",
+        "permissions:change",
+        "global-vars:view",
+        "global-vars:edit",
     ]
 
     _PRODUCT_ADMIN_PERMS = [
-        "products:view","products:create","products:edit","products:delete",
-        "applications:view","applications:create","applications:edit","applications:delete",
-        "pipelines:view","pipelines:create","pipelines:edit","pipelines:delete","pipelines:execute","pipelines:run",
-        "releases:view","releases:create","releases:edit","releases:delete","releases:execute","releases:approve",
-        "tasks:view","tasks:create","tasks:edit","tasks:delete","tasks:execute",
-        "stages:view","stages:create","stages:edit","stages:delete","stages:execute",
-        "environments:view","templates:view","templates:create","templates:edit",
-        "webhooks:view","webhooks:create","webhooks:edit",
-        "vault:view","compliance:view","compliance:edit",
-        "monitoring:view","global-vars:view",
-        "permissions:view","permissions:grant","permissions:revoke","permissions:change",
-        "users:view","groups:view","roles:view","roles:create","roles:edit",
+        "products:view",
+        "products:create",
+        "products:edit",
+        "products:delete",
+        "applications:view",
+        "applications:create",
+        "applications:edit",
+        "applications:delete",
+        "pipelines:view",
+        "pipelines:create",
+        "pipelines:edit",
+        "pipelines:delete",
+        "pipelines:execute",
+        "pipelines:run",
+        "releases:view",
+        "releases:create",
+        "releases:edit",
+        "releases:delete",
+        "releases:execute",
+        "releases:approve",
+        "tasks:view",
+        "tasks:create",
+        "tasks:edit",
+        "tasks:delete",
+        "tasks:execute",
+        "stages:view",
+        "stages:create",
+        "stages:edit",
+        "stages:delete",
+        "stages:execute",
+        "environments:view",
+        "templates:view",
+        "templates:create",
+        "templates:edit",
+        "webhooks:view",
+        "webhooks:create",
+        "webhooks:edit",
+        "vault:view",
+        "compliance:view",
+        "compliance:edit",
+        "monitoring:view",
+        "global-vars:view",
+        "permissions:view",
+        "permissions:grant",
+        "permissions:revoke",
+        "permissions:change",
+        "users:view",
+        "groups:view",
+        "roles:view",
+        "roles:create",
+        "roles:edit",
     ]
 
     builtin_specs = [

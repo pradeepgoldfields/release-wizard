@@ -1,0 +1,160 @@
+{
+  "mcpServers": {
+
+    "release-wizard": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["app/mcp_server.py"],
+      "cwd": "c:/Users/prade/release-wizard",
+      "description": "Conduit platform — query products, pipelines, stages, tasks, and run history"
+    },
+
+    "developer": {
+      "type": "sse",
+      "url": "http://conduit-mcp-developer:8080/sse",
+      "description": "Code generation, refactoring, linting, and dependency management",
+      "env": {
+        "ROLE": "developer",
+        "TOOLS": "fs,git,code,lint"
+      },
+      "skills": [
+        "python", "javascript", "typescript", "bash",
+        "unit-test", "code-gen", "refactor", "lint",
+        "dependency-update", "dockerfile"
+      ]
+    },
+
+    "tester": {
+      "type": "sse",
+      "url": "http://conduit-mcp-tester:8080/sse",
+      "description": "Automated test generation and execution — unit, integration, e2e",
+      "env": {
+        "ROLE": "tester",
+        "TOOLS": "fs,git,test-runner,coverage"
+      },
+      "skills": [
+        "pytest", "jest", "selenium", "playwright",
+        "unit-test", "integration-test", "e2e-test",
+        "code-coverage", "test-gen"
+      ]
+    },
+
+    "business-analyst": {
+      "type": "sse",
+      "url": "http://conduit-mcp-ba:8080/sse",
+      "description": "Requirements analysis, acceptance criteria, user story and BDD scenario generation",
+      "env": {
+        "ROLE": "business-analyst",
+        "TOOLS": "docs,jira,confluence,slack"
+      },
+      "skills": [
+        "requirements-analysis", "acceptance-criteria",
+        "user-story", "bdd", "gherkin", "stakeholder-report",
+        "gap-analysis", "process-mapping"
+      ]
+    },
+
+    "orchestrator": {
+      "type": "sse",
+      "url": "http://conduit-mcp-orchestrator:8080/sse",
+      "description": "Pipeline coordination, gate evaluation, approval routing, and workflow decisions",
+      "env": {
+        "ROLE": "orchestrator",
+        "TOOLS": "conduit-api,slack,pagerduty,jira"
+      },
+      "skills": [
+        "pipeline-coordination", "dependency-resolution",
+        "workflow-decision", "gate-evaluation",
+        "approval-routing", "stage-scheduling", "notify"
+      ]
+    },
+
+    "deployer": {
+      "type": "sse",
+      "url": "http://conduit-mcp-deployer:8080/sse",
+      "description": "Container builds, Helm chart deployments, kubectl operations, and rollbacks",
+      "env": {
+        "ROLE": "deployer",
+        "TOOLS": "kubectl,helm,terraform,vault"
+      },
+      "skills": [
+        "docker-build", "helm-deploy", "kubectl",
+        "canary", "blue-green", "rollback",
+        "terraform", "ansible", "argocd"
+      ]
+    },
+
+    "sca-scanner": {
+      "type": "stdio",
+      "command": ["conduit-mcp", "--role", "sca-scanner"],
+      "description": "Software composition analysis — dependency CVEs, SBOM generation, and licence checks",
+      "env": {
+        "SCANNERS": "trivy,grype,cyclonedx",
+        "NETWORK": "false"
+      },
+      "skills": [
+        "sca", "dependency-check", "trivy", "grype",
+        "license-check", "sbom", "cve-triage"
+      ]
+    },
+
+    "dast-scanner": {
+      "type": "sse",
+      "url": "http://conduit-mcp-dast:8080/sse",
+      "description": "Dynamic application security testing against live or staging environments",
+      "env": {
+        "ROLE": "dast-scanner",
+        "TOOLS": "zap,nuclei,burp-rest"
+      },
+      "skills": [
+        "dast", "zap", "nikto", "nuclei",
+        "api-fuzzing", "auth-testing", "owasp-top10"
+      ]
+    },
+
+    "sast-scanner": {
+      "type": "stdio",
+      "command": ["conduit-mcp", "--role", "sast-scanner"],
+      "description": "Static application security testing — source code, secrets, and IaC scanning",
+      "env": {
+        "SCANNERS": "semgrep,bandit,gitleaks",
+        "NETWORK": "false"
+      },
+      "skills": [
+        "sast", "semgrep", "bandit", "sonarqube",
+        "codeql", "secret-scan", "iac-scan"
+      ]
+    },
+
+    "code-reviewer": {
+      "type": "sse",
+      "url": "http://conduit-mcp-reviewer:8080/sse",
+      "description": "Automated code review — style, logic, security patterns, complexity analysis, and PR comments",
+      "env": {
+        "ROLE": "code-reviewer",
+        "TOOLS": "github,gitlab,fs,git"
+      },
+      "skills": [
+        "code-review", "diff-analysis", "style-check",
+        "complexity-analysis", "security-pattern-review",
+        "pr-comment", "change-summary"
+      ]
+    },
+
+    "git-committer": {
+      "type": "sse",
+      "url": "http://conduit-mcp-git:8080/sse",
+      "description": "Commit reviewed changes, push to remote, manage tags, and generate changelogs",
+      "env": {
+        "ROLE": "git-committer",
+        "TOOLS": "git,github,gitlab,ssh-key-vault"
+      },
+      "skills": [
+        "git-commit", "git-push", "git-tag",
+        "branch-management", "changelog-gen",
+        "conventional-commits", "release-cut"
+      ]
+    }
+
+  }
+}

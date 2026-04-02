@@ -31,7 +31,7 @@ _PW_MIN_LEN = 8
 _PW_RULES = [
     (re.compile(r"[A-Z]"), "at least one uppercase letter"),
     (re.compile(r"[a-z]"), "at least one lowercase letter"),
-    (re.compile(r"\d"),    "at least one digit"),
+    (re.compile(r"\d"), "at least one digit"),
     (re.compile(r"[^A-Za-z0-9]"), "at least one special character"),
 ]
 
@@ -154,7 +154,9 @@ def delete_user(user_id: str):
     """Permanently delete a user and all their role bindings. Built-in users cannot be deleted."""
     user = db.get_or_404(User, user_id)
     if user.is_builtin:
-        return jsonify({"error": f"User '{user.username}' is a built-in system user and cannot be deleted."}), 409
+        return jsonify(
+            {"error": f"User '{user.username}' is a built-in system user and cannot be deleted."}
+        ), 409
     db.session.delete(user)
     db.session.commit()
     return "", 204
@@ -508,7 +510,9 @@ def delete_role(role_id: str):
     """Delete a custom role. Built-in roles cannot be deleted."""
     role = db.get_or_404(Role, role_id)
     if role.is_builtin:
-        return jsonify({"error": f"Role '{role.name}' is a built-in role and cannot be deleted."}), 403
+        return jsonify(
+            {"error": f"Role '{role.name}' is a built-in role and cannot be deleted."}
+        ), 403
     db.session.delete(role)
     db.session.commit()
     return "", 204

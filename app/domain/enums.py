@@ -54,4 +54,3 @@ class AuditDecision(StrEnum):
 
     ALLOW = "ALLOW"
     DENY = "DENY"
-

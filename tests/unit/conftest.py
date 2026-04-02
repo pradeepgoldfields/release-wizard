@@ -22,7 +22,7 @@ def app():
     application = create_app(TestConfig)
     with application.app_context():
         _db.create_all()
-        _ensure_builtin_roles()   # skipped by create_app under TESTING; seed manually
+        _ensure_builtin_roles()  # skipped by create_app under TESTING; seed manually
         yield application
         _db.drop_all()
 
@@ -55,7 +55,9 @@ def admin_client(app):
 
         # Bind system-administrator role
         sys_admin = Role.query.filter_by(name="system-administrator").first()
-        assert sys_admin is not None, "system-administrator role not found after _ensure_builtin_roles()"
+        assert sys_admin is not None, (
+            "system-administrator role not found after _ensure_builtin_roles()"
+        )
         binding = RoleBinding(
             id=resource_id("rb"),
             role_id=sys_admin.id,

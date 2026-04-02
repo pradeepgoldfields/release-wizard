@@ -11,6 +11,7 @@ from app.extensions import db
 from app.models.environment import Environment
 from app.models.pipeline import Pipeline, Stage
 from app.models.product import Product
+from app.models.property import Property
 from app.models.release import Release
 from app.models.task import AgentPool, Task
 from app.services.id_service import resource_id
@@ -20,6 +21,39 @@ yaml_bp = Blueprint("yaml_io", __name__, url_prefix="/api/v1")
 
 def _yaml_response(data: dict) -> Response:
     return Response(yaml.dump(data, allow_unicode=True, sort_keys=False), mimetype="text/yaml")
+
+
+def _props_for(owner_type: str, owner_id: str) -> list[dict]:
+    """Return a list of property dicts for the given owner, or [] if none."""
+    props = Property.query.filter_by(owner_type=owner_type, owner_id=owner_id).all()
+    return [
+        {
+            "name": p.name,
+            "type": p.value_type,
+            "value": p.value,
+            "description": p.description or "",
+            "required": bool(p.is_required),
+        }
+        for p in props
+    ]
+
+
+def _apply_properties(owner_type: str, owner_id: str, prop_specs: list[dict]) -> None:
+    """Upsert properties from a YAML spec list onto the given owner (no commit)."""
+    for spec in prop_specs:
+        name = (spec.get("name") or "").strip()
+        if not name:
+            continue
+        prop = Property.query.filter_by(owner_type=owner_type, owner_id=owner_id, name=name).first()
+        if not prop:
+            prop = Property(
+                id=resource_id("prop"), owner_type=owner_type, owner_id=owner_id, name=name
+            )
+            db.session.add(prop)
+        prop.value_type = spec.get("type", prop.value_type or "string")
+        prop.value = spec.get("value", prop.value)
+        prop.description = spec.get("description", prop.description) or None
+        prop.is_required = bool(spec.get("required", prop.is_required or False))
 
 
 def _task_dict(t: Task) -> dict:
@@ -45,6 +79,9 @@ def _task_dict(t: Task) -> dict:
         base["approval_approvers"] = _json.loads(t.approval_approvers or "[]")
         base["approval_required_count"] = t.approval_required_count or 0
         base["approval_timeout"] = t.approval_timeout or 0
+    props = _props_for("task", t.id)
+    if props:
+        base["properties"] = props
     return base
 
 
@@ -67,6 +104,7 @@ def _stage_dict(s: Stage) -> dict:
         },
         "entry_gate": _json.loads(s.entry_gate or "{}"),
         "exit_gate": _json.loads(s.exit_gate or "{}"),
+        "properties": _props_for("stage", s.id),
         "tasks": [_task_dict(t) for t in s.tasks],
     }
 
@@ -103,6 +141,7 @@ def export_product(product_id: str):
                     "kind": pl.kind,
                     "git_repo": pl.git_repo,
                     "git_branch": pl.git_branch,
+                    "properties": _props_for("pipeline", pl.id),
                     "stages": [_stage_dict(s) for s in pl.stages],
                 }
                 for pl in pipelines
@@ -159,10 +198,199 @@ def export_pipeline(product_id: str, pipeline_id: str):
             "kind": pipeline.kind,
             "git_repo": pipeline.git_repo,
             "git_branch": pipeline.git_branch,
+            "properties": _props_for("pipeline", pipeline.id),
             "stages": [_stage_dict(s) for s in pipeline.stages],
         },
     }
     return _yaml_response(data)
+
+
+_VALID_TASK_KINDS = {"script", "gate", "approval", "notification"}
+_VALID_LANGUAGES = {"bash", "python", "sh", "powershell", "javascript", "ruby"}
+_VALID_EXEC_MODES = {"sequential", "parallel"}
+_VALID_ON_ERROR = {"fail", "continue", "skip", "warn"}
+_VALID_CONDITIONS = {"always", "on_success", "on_failure", "on_warning"}
+
+
+@yaml_bp.post("/products/<product_id>/pipelines/<pipeline_id>/validate")
+def validate_pipeline_yaml(product_id: str, pipeline_id: str):
+    """Dry-run validate a pipeline YAML body — no DB writes.
+
+    Returns {"valid": true, "errors": [], "warnings": [], "summary": {...}}
+    """
+    Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # Parse YAML
+    try:
+        data = _parse_yaml_body()
+    except Exception as exc:
+        return jsonify(
+            {"valid": False, "errors": [f"YAML parse error: {exc}"], "warnings": [], "summary": {}}
+        ), 200
+
+    if not isinstance(data, dict):
+        return jsonify(
+            {
+                "valid": False,
+                "errors": ["Document must be a YAML mapping"],
+                "warnings": [],
+                "summary": {},
+            }
+        ), 200
+
+    spec = data.get("spec", data)
+    stage_specs = spec.get("stages", [])
+
+    if not isinstance(stage_specs, list):
+        errors.append("`stages` must be a list")
+        stage_specs = []
+
+    if not stage_specs:
+        warnings.append("No stages defined — pipeline will not execute")
+
+    stage_names: set[str] = set()
+    total_tasks = 0
+
+    for s_idx, s_spec in enumerate(stage_specs):
+        loc = f"Stage[{s_idx + 1}]"
+        if not isinstance(s_spec, dict):
+            errors.append(f"{loc}: must be a mapping")
+            continue
+
+        s_name = (s_spec.get("name") or "").strip()
+        if not s_name:
+            errors.append(f"{loc}: missing `name`")
+        elif s_name in stage_names:
+            errors.append(f"{loc}: duplicate stage name '{s_name}'")
+        else:
+            stage_names.add(s_name)
+            loc = f"Stage '{s_name}'"
+
+        exec_mode = s_spec.get("execution_mode", "sequential")
+        if exec_mode not in _VALID_EXEC_MODES:
+            errors.append(
+                f"{loc}: invalid execution_mode '{exec_mode}' — must be one of {sorted(_VALID_EXEC_MODES)}"
+            )
+
+        run_cond = s_spec.get("run_condition", "always")
+        if run_cond not in _VALID_CONDITIONS:
+            errors.append(f"{loc}: invalid run_condition '{run_cond}'")
+
+        sandbox = s_spec.get("sandbox")
+        if sandbox is not None and not isinstance(sandbox, dict):
+            errors.append(f"{loc}: `sandbox` must be a mapping")
+
+        for gate_key in ("entry_gate", "exit_gate"):
+            gate = s_spec.get(gate_key)
+            if gate is not None and not isinstance(gate, dict):
+                errors.append(f"{loc}: `{gate_key}` must be a mapping")
+            elif isinstance(gate, dict) and gate.get("enabled"):
+                if not gate.get("script"):
+                    warnings.append(f"{loc}: `{gate_key}` is enabled but has no `script`")
+
+        stage_props = s_spec.get("properties")
+        if stage_props is not None and not isinstance(stage_props, (list, dict)):
+            errors.append(f"{loc}: `properties` must be a list or mapping")
+
+        task_specs = s_spec.get("tasks", [])
+        if not isinstance(task_specs, list):
+            errors.append(f"{loc}: `tasks` must be a list")
+            task_specs = []
+
+        if not task_specs:
+            warnings.append(f"{loc}: has no tasks")
+
+        task_names: set[str] = set()
+        for t_idx, t_spec in enumerate(task_specs):
+            t_loc = f"{loc} > Task[{t_idx + 1}]"
+            if not isinstance(t_spec, dict):
+                errors.append(f"{t_loc}: must be a mapping")
+                continue
+
+            t_name = (t_spec.get("name") or "").strip()
+            if not t_name:
+                errors.append(f"{t_loc}: missing `name`")
+            elif t_name in task_names:
+                errors.append(f"{t_loc}: duplicate task name '{t_name}'")
+            else:
+                task_names.add(t_name)
+                t_loc = f"{loc} > Task '{t_name}'"
+
+            kind = t_spec.get("kind", "script")
+            if kind not in _VALID_TASK_KINDS:
+                errors.append(
+                    f"{t_loc}: invalid kind '{kind}' — must be one of {sorted(_VALID_TASK_KINDS)}"
+                )
+
+            lang = t_spec.get("run_language", "bash")
+            if lang not in _VALID_LANGUAGES:
+                warnings.append(f"{t_loc}: unrecognised run_language '{lang}'")
+
+            on_err = t_spec.get("on_error", "fail")
+            if on_err not in _VALID_ON_ERROR:
+                errors.append(
+                    f"{t_loc}: invalid on_error '{on_err}' — must be one of {sorted(_VALID_ON_ERROR)}"
+                )
+
+            t_cond = t_spec.get("run_condition", "always")
+            if t_cond not in _VALID_CONDITIONS:
+                errors.append(f"{t_loc}: invalid run_condition '{t_cond}'")
+
+            timeout = t_spec.get("timeout", 300)
+            if not isinstance(timeout, int | float) or int(timeout) <= 0:
+                errors.append(f"{t_loc}: `timeout` must be a positive number")
+
+            if kind == "gate":
+                gate_script = t_spec.get("gate_script", "")
+                if not gate_script:
+                    warnings.append(f"{t_loc}: gate task has no `gate_script` — it will always pass")
+                gate_lang = t_spec.get("gate_language", "bash")
+                if gate_lang not in _VALID_LANGUAGES:
+                    warnings.append(f"{t_loc}: unrecognised gate_language '{gate_lang}'")
+
+            if kind == "approval":
+                approvers = t_spec.get("approval_approvers", [])
+                if not isinstance(approvers, list):
+                    errors.append(f"{t_loc}: `approval_approvers` must be a list")
+                else:
+                    for a in approvers:
+                        if not isinstance(a, dict) or "type" not in a or "ref" not in a:
+                            warnings.append(f"{t_loc}: each approver should have 'type' and 'ref' keys")
+                            break
+                req = t_spec.get("approval_required_count", 0)
+                if not isinstance(req, int) or req < 0:
+                    errors.append(
+                        f"{t_loc}: `approval_required_count` must be a non-negative integer"
+                    )
+                at = t_spec.get("approval_timeout", 0)
+                if not isinstance(at, int | float) or at < 0:
+                    errors.append(f"{t_loc}: `approval_timeout` must be a non-negative number")
+
+            # Validate properties block if present
+            props = t_spec.get("properties")
+            if props is not None and not isinstance(props, (list, dict)):
+                errors.append(f"{t_loc}: `properties` must be a list or mapping")
+
+            total_tasks += 1
+
+    summary = {
+        "stages": len(stage_specs),
+        "tasks": total_tasks,
+        "errors": len(errors),
+        "warnings": len(warnings),
+    }
+
+    return jsonify(
+        {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "summary": summary,
+        }
+    )
 
 
 # ── Release export ──────────────────────────────────────────────────────────
@@ -252,7 +480,9 @@ def _apply_task_spec(task: Task, t_spec: dict, fallback_order: int) -> None:
     task.execution_mode = t_spec.get("execution_mode", task.execution_mode or "sequential")
     task.on_error = t_spec.get("on_error", task.on_error or "fail")
     task.timeout = int(t_spec.get("timeout", task.timeout or 300))
-    task.is_required = bool(t_spec.get("is_required", task.is_required if task.is_required is not None else True))
+    task.is_required = bool(
+        t_spec.get("is_required", task.is_required if task.is_required is not None else True)
+    )
     task.run_condition = t_spec.get("run_condition", task.run_condition or "always")
     # Gate fields
     task.gate_language = t_spec.get("gate_language", task.gate_language or "bash")
@@ -261,7 +491,9 @@ def _apply_task_spec(task: Task, t_spec: dict, fallback_order: int) -> None:
     if "approval_approvers" in t_spec:
         raw = t_spec["approval_approvers"]
         task.approval_approvers = _json.dumps(raw) if isinstance(raw, list) else (raw or "[]")
-    task.approval_required_count = int(t_spec.get("approval_required_count", task.approval_required_count or 0))
+    task.approval_required_count = int(
+        t_spec.get("approval_required_count", task.approval_required_count or 0)
+    )
     task.approval_timeout = int(t_spec.get("approval_timeout", task.approval_timeout or 0))
 
 
@@ -311,6 +543,10 @@ def import_pipeline(product_id: str, pipeline_id: str):
     if "git_branch" in spec:
         pipeline.git_branch = spec["git_branch"] or None
 
+    # Pipeline-level properties
+    if "properties" in spec:
+        _apply_properties("pipeline", pipeline_id, spec["properties"])
+
     stage_specs = spec.get("stages", [])
     kept_stage_ids = []
 
@@ -326,6 +562,9 @@ def import_pipeline(product_id: str, pipeline_id: str):
         db.session.flush()
         kept_stage_ids.append(stage.id)
 
+        if "properties" in s_spec:
+            _apply_properties("stage", stage.id, s_spec["properties"])
+
         kept_task_ids = []
         for t_order, t_spec in enumerate(s_spec.get("tasks", []), start=1):
             t_name = (t_spec.get("name") or "").strip()
@@ -338,6 +577,9 @@ def import_pipeline(product_id: str, pipeline_id: str):
             _apply_task_spec(task, t_spec, t_order)
             db.session.flush()
             kept_task_ids.append(task.id)
+
+            if "properties" in t_spec:
+                _apply_properties("task", task.id, t_spec["properties"])
 
         # Remove tasks not in the YAML
         Task.query.filter(
@@ -411,6 +653,9 @@ def git_pull_pipeline(product_id: str, pipeline_id: str):
     if "git_branch" in spec_inner:
         pipeline.git_branch = spec_inner["git_branch"] or None
 
+    if "properties" in spec_inner:
+        _apply_properties("pipeline", pipeline_id, spec_inner["properties"])
+
     stage_specs = spec_inner.get("stages", [])
     kept_stage_ids = []
     for s_spec in stage_specs:
@@ -424,6 +669,8 @@ def git_pull_pipeline(product_id: str, pipeline_id: str):
         _apply_stage_spec(stage, s_spec)
         db.session.flush()
         kept_stage_ids.append(stage.id)
+        if "properties" in s_spec:
+            _apply_properties("stage", stage.id, s_spec["properties"])
         kept_task_ids = []
         for t_order, t_spec in enumerate(s_spec.get("tasks", []), start=1):
             t_name = (t_spec.get("name") or "").strip()
@@ -436,6 +683,8 @@ def git_pull_pipeline(product_id: str, pipeline_id: str):
             _apply_task_spec(task, t_spec, t_order)
             db.session.flush()
             kept_task_ids.append(task.id)
+            if "properties" in t_spec:
+                _apply_properties("task", task.id, t_spec["properties"])
         Task.query.filter(
             Task.stage_id == stage.id,
             Task.id.notin_(kept_task_ids),
@@ -471,6 +720,7 @@ def git_push_pipeline(product_id: str, pipeline_id: str):
             "kind": pipeline.kind,
             "git_repo": pipeline.git_repo,
             "git_branch": pipeline.git_branch,
+            "properties": _props_for("pipeline", pipeline.id),
             "stages": [_stage_dict(s) for s in pipeline.stages],
         },
     }

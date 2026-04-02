@@ -75,7 +75,15 @@ def update_pipeline(product_id: str, pipeline_id: str):
         return err
     pipeline = Pipeline.query.filter_by(id=pipeline_id, product_id=product_id).first_or_404()
     data = request.get_json(silent=True) or {}
-    for field in ("name", "kind", "git_repo", "git_branch", "definition_sha", "application_id"):
+    for field in (
+        "name",
+        "kind",
+        "git_repo",
+        "git_branch",
+        "definition_sha",
+        "application_id",
+        "accent_color",
+    ):
         if field in data:
             setattr(pipeline, field, data[field])
     db.session.commit()
@@ -247,10 +255,12 @@ def update_stage(product_id: str, pipeline_id: str, stage_id: str):
         stage.run_condition = data["run_condition"] or "always"
     if "entry_gate" in data:
         import json as _json  # noqa: PLC0415
+
         val = data["entry_gate"]
         stage.entry_gate = _json.dumps(val) if isinstance(val, dict) else (val or "{}")
     if "exit_gate" in data:
         import json as _json  # noqa: PLC0415
+
         val = data["exit_gate"]
         stage.exit_gate = _json.dumps(val) if isinstance(val, dict) else (val or "{}")
     db.session.commit()
@@ -298,6 +308,7 @@ def create_task(product_id: str, pipeline_id: str, stage_id: str):
     if not name:
         return jsonify({"error": "name is required"}), 400
     import json as _json  # noqa: PLC0415
+
     approval_approvers = data.get("approval_approvers", [])
     if isinstance(approval_approvers, list):
         approval_approvers = _json.dumps(approval_approvers)
@@ -350,8 +361,19 @@ def update_task(product_id: str, pipeline_id: str, stage_id: str, task_id: str):
     task = Task.query.filter_by(id=task_id, stage_id=stage_id).first_or_404()
     data = request.get_json(silent=True) or {}
     import json as _json  # noqa: PLC0415
-    for field in ("name", "description", "run_language", "run_code", "execution_mode",
-                  "on_error", "kind", "gate_script", "gate_language", "run_condition"):
+
+    for field in (
+        "name",
+        "description",
+        "run_language",
+        "run_code",
+        "execution_mode",
+        "on_error",
+        "kind",
+        "gate_script",
+        "gate_language",
+        "run_condition",
+    ):
         if field in data:
             setattr(task, field, data[field])
     if "order" in data:

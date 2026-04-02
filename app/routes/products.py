@@ -47,6 +47,7 @@ def create_product_endpoint():
     if uid is None:
         return jsonify({"error": "Authentication required"}), 401
     from app.services.authz_service import get_permissions_for_user  # noqa: PLC0415
+
     perms = get_permissions_for_user(uid, "organization")
     if "products:create" not in perms:
         return jsonify({"error": "Access denied", "code": "FORBIDDEN"}), 403

@@ -37,8 +37,13 @@ def _require_admin():
     if not user:
         return jsonify({"error": "Authentication required"}), 401
     from app.services.authz_service import get_permissions_for_user
+
     perms = get_permissions_for_user(user.id, "organization")
-    if "webhooks:create" not in perms and "webhooks:edit" not in perms and "webhooks:delete" not in perms:
+    if (
+        "webhooks:create" not in perms
+        and "webhooks:edit" not in perms
+        and "webhooks:delete" not in perms
+    ):
         return jsonify({"error": "Insufficient permissions"}), 403
     return None
 

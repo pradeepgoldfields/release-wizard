@@ -8,7 +8,9 @@ from __future__ import annotations
 
 
 def test_create_and_list_product(admin_client):
-    r = admin_client.post("/api/v1/products", json={"name": "API Service", "description": "Core API"})
+    r = admin_client.post(
+        "/api/v1/products", json={"name": "API Service", "description": "Core API"}
+    )
     assert r.status_code == 201
     data = r.get_json()
     assert data["name"] == "API Service"
@@ -86,8 +88,12 @@ def test_attach_environment_to_product(admin_client):
 
 def test_detach_environment_from_product(admin_client):
     prod = admin_client.post("/api/v1/products", json={"name": "Prod"}).get_json()
-    env = admin_client.post("/api/v1/environments", json={"name": "Dev", "env_type": "dev"}).get_json()
-    admin_client.post(f"/api/v1/products/{prod['id']}/environments", json={"environment_id": env["id"]})
+    env = admin_client.post(
+        "/api/v1/environments", json={"name": "Dev", "env_type": "dev"}
+    ).get_json()
+    admin_client.post(
+        f"/api/v1/products/{prod['id']}/environments", json={"environment_id": env["id"]}
+    )
 
     r = admin_client.delete(f"/api/v1/products/{prod['id']}/environments/{env['id']}")
     assert r.status_code == 204

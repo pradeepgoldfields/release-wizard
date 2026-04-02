@@ -68,6 +68,7 @@ def require_admin(user_id: str | None):
     if user_id is None:
         return jsonify({"error": "Authentication required", "code": "UNAUTHENTICATED"}), 401
     from app.models.auth import User  # noqa: PLC0415
+
     user = User.query.get(user_id)
     if not user or not user.is_admin:
         return jsonify({"error": "Admin access required", "code": "FORBIDDEN"}), 403

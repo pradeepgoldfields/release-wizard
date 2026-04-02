@@ -37,7 +37,7 @@ class Task(db.Model):
     kind = db.Column(db.String(32), default="script")
 
     # ── Gate task fields ──────────────────────────────────────────────────────
-    gate_script = db.Column(db.Text, default="")       # script body
+    gate_script = db.Column(db.Text, default="")  # script body
     gate_language = db.Column(db.String(32), default="bash")  # bash | python
 
     # ── Approval task fields ──────────────────────────────────────────────────
@@ -63,6 +63,7 @@ class Task(db.Model):
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-safe dictionary."""
         import json as _json
+
         return {
             "id": self.id,
             "stage_id": self.stage_id,
@@ -95,7 +96,9 @@ class TaskRun(db.Model):
     id = db.Column(db.String(64), primary_key=True)
     task_id = db.Column(db.String(64), db.ForeignKey("tasks.id"), nullable=False)
     stage_run_id = db.Column(db.String(64), db.ForeignKey("stage_runs.id"), nullable=True)
-    status = db.Column(db.String(32), default="Pending")  # Pending|Running|Succeeded|Warning|Failed|AwaitingApproval|Skipped
+    status = db.Column(
+        db.String(32), default="Pending"
+    )  # Pending|Running|Succeeded|Warning|Failed|AwaitingApproval|Skipped
     return_code = db.Column(db.Integer)
     logs = db.Column(db.Text, default="")
     output_json = db.Column(db.Text)  # JSON string captured from last stdout line
@@ -165,7 +168,14 @@ class ApprovalDecision(db.Model):
 
 
 class AgentPool(db.Model):
-    """An execution environment pool for running task containers."""
+    """An execution environment pool for running task containers.
+
+    ``agent_role`` identifies the functional role this pool is optimised for
+    (e.g. "developer", "sast-scanner").  ``skills`` is a JSON array of skill
+    tag strings the pool advertises — pipeline tasks can be matched to a pool
+    by skill.  ``mcp_config`` is a JSON object with the MCP server connection
+    spec for this pool (transport, url/command, env vars).
+    """
 
     __tablename__ = "agent_pools"
 
@@ -173,6 +183,15 @@ class AgentPool(db.Model):
     name = db.Column(db.String(128), nullable=False)
     description = db.Column(db.Text)
     pool_type = db.Column(db.String(32), default="custom")  # builtin | custom
+    # ── Role & skills ─────────────────────────────────────────────────────────
+    # Role tag: developer | tester | business-analyst | orchestrator | deployer
+    #           sca-scanner | dast-scanner | sast-scanner | qa
+    agent_role = db.Column(db.String(64), default="general")
+    # JSON array of skill tags, e.g. ["python","pytest","git","docker"]
+    skills = db.Column(db.Text, default="[]")
+    # JSON object: {"transport":"sse","url":"http://…"} or {"transport":"stdio","command":["…"]}
+    mcp_config = db.Column(db.Text, default="{}")
+    # ── Resources ─────────────────────────────────────────────────────────────
     cpu_limit = db.Column(db.String(16), default="500m")
     memory_limit = db.Column(db.String(16), default="256Mi")
     max_agents = db.Column(db.Integer, default=5)
@@ -181,15 +200,20 @@ class AgentPool(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(UTC))
 
     def __repr__(self) -> str:
-        return f"<AgentPool id={self.id!r} name={self.name!r} type={self.pool_type!r}>"
+        return f"<AgentPool id={self.id!r} name={self.name!r} role={self.agent_role!r}>"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-safe dictionary."""
+        import json as _json  # noqa: PLC0415
+
         return {
             "id": self.id,
             "name": self.name,
             "description": self.description,
             "pool_type": self.pool_type,
+            "agent_role": self.agent_role or "general",
+            "skills": _json.loads(self.skills or "[]"),
+            "mcp_config": _json.loads(self.mcp_config or "{}"),
             "cpu_limit": self.cpu_limit,
             "memory_limit": self.memory_limit,
             "max_agents": self.max_agents,

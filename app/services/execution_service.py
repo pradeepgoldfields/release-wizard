@@ -38,6 +38,154 @@ log = logging.getLogger(__name__)
 _K8S_SA_TOKEN = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
 _K8S_NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
 
+# ── Sandbox image ─────────────────────────────────────────────────────────────
+# Image name used for in-editor scratch runs.  Built from Dockerfile.sandbox
+# which lives alongside the main Dockerfile in the project root.
+SANDBOX_IMAGE = "conduit-sandbox:latest"
+_SANDBOX_BUILD_LOCK = threading.Lock()
+_sandbox_ready: bool = False  # set to True once the image exists
+
+
+def _project_root() -> Path:
+    """Return the project root directory (parent of app/)."""
+    return Path(__file__).resolve().parents[2]
+
+
+def _container_runtime() -> str | None:
+    """Return 'docker' or 'podman' if available on PATH, else None."""
+    import shutil
+
+    for rt in ("docker", "podman"):
+        if shutil.which(rt):
+            return rt
+    return None
+
+
+def ensure_sandbox_image() -> tuple[bool, str]:
+    """Build the sandbox image if it doesn't exist yet.
+
+    Returns (success, message).  Thread-safe — only one build runs at a time.
+    """
+    global _sandbox_ready  # noqa: PLW0603
+    if _sandbox_ready:
+        return True, "ready"
+
+    rt = _container_runtime()
+    if not rt:
+        return False, "No container runtime (docker/podman) found on PATH"
+
+    with _SANDBOX_BUILD_LOCK:
+        if _sandbox_ready:
+            return True, "ready"
+
+        # Check if image already exists
+        check = subprocess.run(
+            [rt, "image", "inspect", SANDBOX_IMAGE],
+            capture_output=True,
+            timeout=10,
+        )
+        if check.returncode == 0:
+            _sandbox_ready = True
+            return True, "ready"
+
+        # Build from Dockerfile.sandbox
+        dockerfile = _project_root() / "Dockerfile.sandbox"
+        if not dockerfile.exists():
+            return False, f"Dockerfile.sandbox not found at {dockerfile}"
+
+        log.info("sandbox_image_build_start", extra={"image": SANDBOX_IMAGE})
+        result = subprocess.run(
+            [rt, "build", "-t", SANDBOX_IMAGE, "-f", str(dockerfile), str(_project_root())],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+        )
+        if result.returncode != 0:
+            msg = (result.stderr or result.stdout or "unknown error").strip()
+            log.error("sandbox_image_build_failed", extra={"error": msg})
+            return False, f"Image build failed: {msg}"
+
+        _sandbox_ready = True
+        log.info("sandbox_image_build_complete", extra={"image": SANDBOX_IMAGE})
+        return True, "built"
+
+
+def _run_script_sandbox(
+    language: str,
+    code: str,
+    timeout: int,
+    task_run_id: str,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[int, str]:
+    """Run a script inside the bundled UBI9 sandbox container.
+
+    The script is passed via stdin — no volume mounts — so this works on
+    Windows (avoids the Docker Desktop RPC handle error with bind mounts).
+    Returns (return_code, combined_logs).
+    """
+    rt = _container_runtime()
+    if not rt:
+        return 1, "[error] No container runtime (docker/podman) found on PATH\n"
+
+    ok, msg = ensure_sandbox_image()
+    if not ok:
+        return 1, f"[error] Sandbox image unavailable: {msg}\n"
+
+    container_name = f"conduit-scratch-{task_run_id}"
+
+    # Prepend shebang/set for bash so errors abort early
+    if language == "bash":
+        script_input = "set -euo pipefail\n" + code if not code.startswith("#!") else code
+        interpreter_cmd = ["bash"]
+    else:
+        script_input = code
+        interpreter_cmd = ["python3"]
+
+    cmd = [
+        rt,
+        "run",
+        "--rm",
+        "-i",  # -i keeps stdin open; no -t (no TTY)
+        "--name",
+        container_name,
+        "--memory",
+        "256m",
+        "--cpus",
+        "0.5",
+        "--network",
+        "none",
+    ]
+
+    if extra_env:
+        for k, v in extra_env.items():
+            cmd += ["-e", f"{k}={v}"]
+
+    cmd += [SANDBOX_IMAGE] + interpreter_cmd
+
+    try:
+        result = subprocess.run(
+            cmd,
+            input=script_input,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout + 15,
+        )
+        logs = result.stdout or ""
+        if result.stderr:
+            logs += "\n[stderr]\n" + result.stderr
+        return result.returncode, logs
+    except subprocess.TimeoutExpired:
+        subprocess.run([rt, "kill", container_name], capture_output=True, timeout=10)
+        return 124, f"[error] Sandbox timed out after {timeout}s\n"
+    except FileNotFoundError:
+        return 127, f"[error] Container runtime '{rt}' not found\n"
+    except Exception as exc:
+        return 1, f"[error] Sandbox execution failed: {exc}\n"
+
 
 def _in_kubernetes() -> bool:
     """Return True when the process is running inside a Kubernetes Pod."""
@@ -339,9 +487,20 @@ def _run_script_subprocess(
 
 
 def run_task_async(  # noqa: PLR0913
-    app: Any, task_run_id: str, language: str, code: str, timeout: int, on_error: str
+    app: Any,
+    task_run_id: str,
+    language: str,
+    code: str,
+    timeout: int,
+    on_error: str,
+    extra_env: dict[str, str] | None = None,
+    scratch: bool = False,
 ) -> None:
-    """Kick off script execution in a background thread and update the TaskRun."""
+    """Kick off script execution in a background thread and update the TaskRun.
+
+    When ``scratch=True`` (in-editor test run) the script always runs inside
+    the bundled UBI9 sandbox container regardless of platform settings.
+    """
 
     def _worker() -> None:
         with app.app_context():
@@ -352,29 +511,37 @@ def run_task_async(  # noqa: PLR0913
             task_run.status = "Running"
             db.session.commit()
 
-            # Resolve runner preference from platform settings
-            from app.models.setting import PlatformSetting  # noqa: PLC0415
-
-            runner_setting = PlatformSetting.query.get("TASK_RUNNER")
-            runner_type = (runner_setting.value if runner_setting else None) or "subprocess"
-            image_setting = PlatformSetting.query.get("TASK_RUNNER_IMAGE")
-            runner_image = image_setting.value if image_setting else None
-
-            if _in_kubernetes():
-                log.info("Executing task %s via K8s Job", task_run_id)
-                return_code, logs = _run_script_k8s(language, code, timeout, task_run_id)
-            elif runner_type in ("docker", "podman"):
-                log.info("Executing task %s via %s container", task_run_id, runner_type)
-                return_code, logs = _run_script_container(
-                    language,
-                    code,
-                    timeout,
-                    task_run_id,
-                    runtime=runner_type,
-                    image=runner_image,
+            if scratch:
+                # In-editor test run — always use the bundled sandbox container
+                log.info("scratch_run_start", extra={"task_run_id": task_run_id})
+                return_code, logs = _run_script_sandbox(
+                    language, code, timeout, task_run_id, extra_env
                 )
             else:
-                return_code, logs = _run_script_subprocess(language, code, timeout)
+                # Production task run — respect platform runner setting
+                from app.models.setting import PlatformSetting  # noqa: PLC0415
+
+                runner_setting = PlatformSetting.query.get("TASK_RUNNER")
+                runner_type = (runner_setting.value if runner_setting else None) or "subprocess"
+                image_setting = PlatformSetting.query.get("TASK_RUNNER_IMAGE")
+                runner_image = image_setting.value if image_setting else None
+
+                if _in_kubernetes():
+                    log.info("Executing task %s via K8s Job", task_run_id)
+                    return_code, logs = _run_script_k8s(language, code, timeout, task_run_id)
+                elif runner_type in ("docker", "podman"):
+                    log.info("Executing task %s via %s container", task_run_id, runner_type)
+                    return_code, logs = _run_script_container(
+                        language,
+                        code,
+                        timeout,
+                        task_run_id,
+                        runtime=runner_type,
+                        image=runner_image,
+                    )
+                else:
+                    return_code, logs = _run_script_subprocess(language, code, timeout, extra_env)
+
             output_json = _parse_output_json(logs)
             status = _status_from_code(return_code, on_error)
 
@@ -390,7 +557,7 @@ def run_task_async(  # noqa: PLR0913
 
 
 def create_and_run_task(
-    task_id: str,
+    task_id: str | None,
     language: str,
     code: str,
     timeout: int,
@@ -398,8 +565,12 @@ def create_and_run_task(
     agent_pool_id: str | None,
     stage_run_id: str | None,
     app: Any,
+    extra_env: dict[str, str] | None = None,
 ) -> TaskRun:
-    """Create a TaskRun record and kick off async execution."""
+    """Create a TaskRun record and kick off async execution.
+
+    task_id may be None for scratch/ad-hoc runs (e.g. in-editor testing).
+    """
     task_run = TaskRun(
         id=resource_id("trun"),
         task_id=task_id,
@@ -411,5 +582,14 @@ def create_and_run_task(
     db.session.add(task_run)
     db.session.commit()
 
-    run_task_async(app, task_run.id, language, code, timeout, on_error)
+    run_task_async(
+        app,
+        task_run.id,
+        language,
+        code,
+        timeout,
+        on_error,
+        extra_env=extra_env,
+        scratch=(task_id is None),
+    )
     return task_run

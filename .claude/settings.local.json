@@ -1,12 +1,33 @@
 {
   "permissions": {
     "allow": [
+      "Edit(*)",
       "Bash(python -c \":*)",
       "Bash(source venv/Scripts/activate)",
       "Bash(pip install:*)",
       "Bash(curl -s http://localhost:8080/healthz)",
       "Bash(ruff check:*)",
-      "Bash(pytest -q)"
+      "Bash(pytest -q)",
+      "Bash(git add:*)",
+      "Bash(git reset:*)",
+      "Bash(xargs git:*)",
+      "Bash(git push:*)",
+      "Bash(pytest)",
+      "Bash(curl -s \"https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js\" -o \"/c/Users/prade/release-wizard/app/static/js/codemirror-yaml.min.js\")",
+      "Bash(ls -la /c/Users/prade/release-wizard/app/static/js/codemirror-*.min.js /c/Users/prade/release-wizard/app/static/css/codemirror-*.min.css)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/log_prompt.py"
+          }
+        ]
+      }
     ]
   }
 }

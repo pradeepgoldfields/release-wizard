@@ -51,6 +51,26 @@ def create_rule():
     return jsonify(rule.to_dict()), 201
 
 
+@compliance_bp.patch("/rules/<rule_id>")
+def update_rule(rule_id: str):
+    """Update a compliance rule's description, scope, or min_rating."""
+    rule = db.get_or_404(ComplianceRule, rule_id)
+    data = request.get_json(silent=True) or {}
+    if "description" in data:
+        rule.description = data["description"]
+    if "scope" in data:
+        scope = (data["scope"] or "").strip()
+        if not scope:
+            return jsonify({"error": "scope cannot be empty"}), 400
+        rule.scope = scope
+    if "min_rating" in data:
+        if data["min_rating"] not in VALID_RATINGS:
+            return jsonify({"error": f"min_rating must be one of: {sorted(VALID_RATINGS)}"}), 400
+        rule.min_rating = data["min_rating"]
+    db.session.commit()
+    return jsonify(rule.to_dict())
+
+
 @compliance_bp.delete("/rules/<rule_id>")
 def disable_rule(rule_id: str):
     """Soft-delete (disable) a compliance rule — it is not physically removed."""

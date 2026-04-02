@@ -98,6 +98,9 @@ class Pipeline(db.Model):
     git_repo = db.Column(db.String(512))
     git_branch = db.Column(db.String(128), default="main")
     definition_sha = db.Column(db.String(64))  # last synced Git commit
+    accent_color = db.Column(
+        db.String(64)
+    )  # user-chosen hex for the pipeline container, e.g. "#3b82f6"
     protected_segment_version = db.Column(db.Integer, default=0)
     compliance_score = db.Column(db.Float, default=0.0)
     compliance_rating = db.Column(db.String(32), default=ComplianceRating.NON_COMPLIANT)
@@ -129,6 +132,7 @@ class Pipeline(db.Model):
             "git_repo": self.git_repo,
             "git_branch": self.git_branch,
             "definition_sha": self.definition_sha,
+            "accent_color": self.accent_color or None,
             "protected_segment_version": self.protected_segment_version,
             "compliance_score": self.compliance_score,
             "compliance_rating": self.compliance_rating,

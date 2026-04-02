@@ -80,19 +80,258 @@ const router = {
 
 let _pollTimer = null;
 let _currentUser = null;
+let _navGen = 0;  // incremented on every navigation; routes use this to detect stale renders
 
 function navigate(hash) {
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  _navGen++;
   router.navigate(hash);
+}
+
+// ── Nav section toggle + collapsed flyout ─────────────────────────────────
+
+// Data describing each collapsible section.  Keeps the HTML as the single
+// source of truth for SVG icons — we read them from the DOM at init time.
+const _NAV_SECTIONS = {
+  "governance-section": {
+    label: "Governance",
+    items: [
+      { href: "compliance",      label: "Compliance" },
+      { href: "admission-rules", label: "Admission Rules" },
+      { href: "maturity",        label: "Maturity" },
+      { href: "app-dictionary",  label: "App Dictionary" },
+    ],
+  },
+  "admin-section": {
+    label: "Administration",
+    items: [
+      { href: "admin/users",      label: "User Management" },
+      { href: "admin/rbac",       label: "Permissions" },
+      { href: "admin/keys",       label: "Key Management" },
+      { href: "admin/toggles",    label: "Feature Toggles" },
+      { href: "admin/variables",  label: "Global Variables" },
+      { href: "admin/system",     label: "System" },
+      { href: "admin/frameworks", label: "Framework Controls" },
+      { href: "monitoring",       label: "Monitoring" },
+    ],
+  },
+  "docs-section": {
+    label: "Documentation",
+    items: [
+      { href: "docs/technical",   label: "Technical Docs" },
+      { href: "docs",             label: "API Reference" },
+      { href: "docs/admin-guide", label: "Admin Guide" },
+      { href: "tutorial",         label: "Training" },
+    ],
+  },
+};
+
+// Cache icon SVG strings from the rendered DOM once at startup.
+const _sectionIconCache = {}; // sectionId → { href → svgHTML }
+
+function _cacheSectionIcons() {
+  Object.keys(_NAV_SECTIONS).forEach(sectionId => {
+    _sectionIconCache[sectionId] = {};
+    const subGroup = document.getElementById(sectionId);
+    if (!subGroup) return;
+    subGroup.querySelectorAll("a").forEach(a => {
+      const href = (a.getAttribute("href") || "").replace("#", "");
+      const iconEl = a.querySelector(".nav-icon");
+      if (iconEl) _sectionIconCache[sectionId][href] = iconEl.innerHTML;
+    });
+  });
+}
+
+// ── Flyout state ───────────────────────────────────────────────────────────
+let _flyoutSectionId = null;
+let _flyoutCloseTimer = null;
+
+function _isSidebarCollapsed() {
+  const sb = document.getElementById("sidebar");
+  return sb && sb.classList.contains("collapsed");
+}
+
+function _openFlyout(sectionId, headerEl) {
+  const panel = document.getElementById("sidebar-flyout");
+  if (!panel || !headerEl) return;
+
+  _flyoutSectionId = sectionId;
+  const currentHash = (location.hash || "#dashboard").replace("#", "");
+
+  // Read icons directly from the live DOM sub-group — no pre-cache needed
+  const subGroup = document.getElementById(sectionId);
+  const titleEl  = headerEl.querySelector(".nav-label");
+  const title    = titleEl ? titleEl.textContent.trim() : sectionId;
+
+  const rows = [];
+  if (subGroup) {
+    subGroup.querySelectorAll("a").forEach(a => {
+      const href     = (a.getAttribute("href") || "").replace("#", "");
+      const navIcon  = a.querySelector(".nav-icon");
+      const iconHtml = navIcon
+        ? navIcon.outerHTML.replace(/\bnav-icon\b/g, "flyout-icon")
+        : '<svg class="flyout-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="4"/></svg>';
+      // Extract text nodes only (skip icon element text)
+      let label = "";
+      a.childNodes.forEach(n => {
+        if (n.nodeType === Node.TEXT_NODE) label += n.textContent;
+      });
+      label = label.trim() || href;
+      const isActive  = currentHash === href || currentHash.startsWith(href + "/");
+      rows.push(
+        `<a href="#${href}" class="${isActive ? "active" : ""}"` +
+        ` onclick="navigate('${href}');_closeFlyout();return false;">` +
+        `${iconHtml}<span>${label}</span></a>`
+      );
+    });
+  }
+
+  panel.innerHTML = `<div class="flyout-title">${title}</div>` + rows.join("");
+
+  // Position: align top of flyout with top of the clicked header row
+  const rect   = headerEl.getBoundingClientRect();
+  const panelH = rows.length * 36 + 36;
+  const maxTop = window.innerHeight - panelH - 8;
+  panel.style.top = Math.min(rect.top, maxTop) + "px";
+
+  panel.classList.add("open");
+}
+
+function _closeFlyout() {
+  const panel = document.getElementById("sidebar-flyout");
+  if (panel) panel.classList.remove("open");
+  _flyoutSectionId = null;
+}
+
+function _scheduleFlyoutClose() {
+  _flyoutCloseTimer = setTimeout(_closeFlyout, 120);
+}
+
+function _cancelFlyoutClose() {
+  if (_flyoutCloseTimer) { clearTimeout(_flyoutCloseTimer); _flyoutCloseTimer = null; }
 }
 
 function toggleNavSection(id) {
   const section = document.getElementById(id);
-  const header = section && section.previousElementSibling;
+  const header  = section && section.previousElementSibling;
   if (!section) return;
+
+  if (_isSidebarCollapsed()) {
+    // Collapsed mode: toggle flyout
+    if (_flyoutSectionId === id) {
+      _closeFlyout();
+      if (header) header.classList.remove("open");
+    } else {
+      _closeFlyout();
+      _openFlyout(id, header);
+      if (header) header.classList.add("open");
+    }
+    return;
+  }
+
+  // Expanded mode: normal inline accordion
   const open = section.classList.toggle("open");
   if (header) header.classList.toggle("open", open);
 }
+
+// Initialise flyout mouse-leave wiring after DOM is ready
+document.addEventListener("DOMContentLoaded", () => {
+  _cacheSectionIcons();
+
+  const panel   = document.getElementById("sidebar-flyout");
+  const sidebar = document.getElementById("sidebar");
+
+  if (panel) {
+    panel.addEventListener("mouseenter", _cancelFlyoutClose);
+    panel.addEventListener("mouseleave", _scheduleFlyoutClose);
+  }
+
+  if (sidebar) {
+    // Close flyout when moving from sidebar header into main content
+    sidebar.addEventListener("mouseleave", () => {
+      if (_flyoutSectionId) _scheduleFlyoutClose();
+    });
+  }
+
+  // Close flyout on any outside click
+  document.addEventListener("click", e => {
+    if (!e.target.closest("#sidebar-flyout") && !e.target.closest("#sidebar")) {
+      _closeFlyout();
+    }
+  });
+
+  // Keep flyout active states in sync with navigation
+  document.addEventListener("navchange", () => {
+    if (_flyoutSectionId) _openFlyout(_flyoutSectionId,
+      document.querySelector(`#${_flyoutSectionId}`).previousElementSibling);
+  });
+});
+
+// ── Sidebar collapse / expand ──────────────────────────────────────────────
+
+const _SIDEBAR_IDLE_MS = 10_000; // auto-collapse after 10 s of inactivity
+let   _sidebarIdleTimer = null;
+
+function _setSidebarCollapsed(collapsed) {
+  const sidebar = document.getElementById("sidebar");
+  const main    = document.getElementById("main");
+  if (!sidebar) return;
+  sidebar.classList.toggle("collapsed", collapsed);
+  if (main) main.classList.toggle("sidebar-collapsed", collapsed);
+  try { localStorage.setItem("sidebar-collapsed", collapsed ? "1" : "0"); } catch (_) {}
+}
+
+function collapseSidebar() {
+  _clearIdleTimer();
+  _setSidebarCollapsed(true);
+}
+
+function expandSidebar() {
+  _setSidebarCollapsed(false);
+  _armIdleTimer(); // restart countdown after manual expand
+}
+
+function toggleSidebar() {
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar) return;
+  sidebar.classList.contains("collapsed") ? expandSidebar() : collapseSidebar();
+}
+
+function _clearIdleTimer() {
+  if (_sidebarIdleTimer) { clearTimeout(_sidebarIdleTimer); _sidebarIdleTimer = null; }
+}
+
+function _armIdleTimer() {
+  _clearIdleTimer();
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar || sidebar.classList.contains("collapsed")) return;
+  _sidebarIdleTimer = setTimeout(() => {
+    const sb = document.getElementById("sidebar");
+    if (sb && !sb.matches(":hover")) _setSidebarCollapsed(true);
+  }, _SIDEBAR_IDLE_MS);
+}
+
+(function initSidebar() {
+  document.addEventListener("DOMContentLoaded", () => {
+    const sidebar = document.getElementById("sidebar");
+    const main    = document.getElementById("main");
+    if (!sidebar) return;
+
+    // Restore persisted state
+    let startCollapsed = false;
+    try { startCollapsed = localStorage.getItem("sidebar-collapsed") === "1"; } catch (_) {}
+    if (startCollapsed) {
+      sidebar.classList.add("collapsed");
+      if (main) main.classList.add("sidebar-collapsed");
+    } else {
+      _armIdleTimer(); // start idle countdown on first load
+    }
+
+    // Any mouse movement over the sidebar resets the countdown
+    sidebar.addEventListener("mouseenter", _clearIdleTimer);
+    sidebar.addEventListener("mouseleave", _armIdleTimer);
+  });
+})();
 
 // ── Auth / Login ────────────────────────────────────────────────────────────
 function showLoginPage(errorMsg) {
@@ -167,7 +406,9 @@ async function doLogin() {
     hideLoginPage();
     updateTopbarUser();
     fetchPermissionCatalog();  // non-blocking; replaces default catalog arrays
-    navigate("dashboard");
+    // Restore the page the user was on before being shown the login screen
+    const savedHash = location.hash.replace("#", "").trim();
+    navigate(savedHash && savedHash !== "login" ? savedHash : "dashboard");
   } catch (e) {
     showLoginPage("Login failed — server unreachable");
   }
@@ -352,8 +593,25 @@ document.addEventListener("click", (e) => {
     _closePageMenu();
   }
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") _closePageMenu(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    _closePageMenu();
+    if (_peSidePanel) _peSidePanel.close();
+  }
+});
 document.addEventListener("scroll", () => _closePageMenu(), true);
+
+// ── htmx config: attach JWT on every htmx request ────────────────────────
+document.addEventListener("htmx:configRequest", (e) => {
+  const token = auth.getToken();
+  if (token) e.detail.headers["Authorization"] = `Bearer ${token}`;
+});
+
+// ── Alpine helpers ────────────────────────────────────────────────────────
+// Call after injecting Alpine-annotated HTML into the DOM dynamically.
+function alpineInit(el) {
+  if (window.Alpine) window.Alpine.initTree(el);
+}
 
 function _closePageMenu() {
   _pmenuPanel.style.display = "none";
@@ -602,9 +860,11 @@ router.register("dashboard", async () => {
 
 // ── Products list ──────────────────────────────────────────────────────────
 router.register("products", async () => {
+  const gen = _navGen;
   setBreadcrumb({ label: "Products" });
   setContent(loading());
   const products = await api.getProducts().catch(() => []);
+  if (_navGen !== gen) return;
   setContent(`
     <div class="page-header">
       <div><h1>Products</h1><div class="sub">Organize your releases and pipelines</div></div>
@@ -668,6 +928,7 @@ function showCreateProduct() {
 
 // ── Product detail ─────────────────────────────────────────────────────────
 router.register("products/:id", async (hash, parts) => {
+  const gen = _navGen;
   const productId = parts[1];
   setBreadcrumb({ label: "Products", hash: "products" }, { label: "Loading…" });
   setContent(loading());
@@ -678,6 +939,7 @@ router.register("products/:id", async (hash, parts) => {
     api.getProductEnvironments(productId).catch(() => []),
     api.getApplications(productId).catch(() => []),
   ]);
+  if (_navGen !== gen) return;
   setBreadcrumb({ label: "Products", hash: "products" }, { label: product.name });
 
   setContent(`
@@ -1678,16 +1940,34 @@ function showScoreModal(productId, pipelineId, pipelineName) {
 // ── Pipeline context tabs ──────────────────────────────────────────────────
 function pipelineContextTabs(productId, pipelineId, activeTab) {
   const tabs = [
-    { id: "definition",  label: "📋 Definition",  hash: `products/${productId}/pipelines/${pipelineId}` },
-    { id: "runs",        label: "▶ Runs",          hash: `products/${productId}/pipelines/${pipelineId}/runs` },
-    { id: "properties",  label: "🔧 Properties",   hash: `products/${productId}/pipelines/${pipelineId}/properties` },
-    { id: "webhooks",    label: "🔗 Webhooks",     hash: `products/${productId}/pipelines/${pipelineId}/webhooks` },
+    { id: "definition",  label: "📋 Pipeline Editor",  hash: `products/${productId}/pipelines/${pipelineId}` },
+    { id: "yaml",        label: "✎ Definition",          hash: null, onclick: `_navToYamlMode('${productId}','${pipelineId}')` },
+    { id: "runs",        label: "▶ Runs",               hash: `products/${productId}/pipelines/${pipelineId}/runs` },
+    { id: "properties",  label: "🔧 Properties",        hash: `products/${productId}/pipelines/${pipelineId}/properties` },
+    { id: "webhooks",    label: "🔗 Webhooks",          hash: `products/${productId}/pipelines/${pipelineId}/webhooks` },
   ];
-  return `<div style="display:flex;gap:0;border-bottom:2px solid var(--gray-200);margin-bottom:20px">
+  return `<div style="display:flex;gap:0;border-bottom:2px solid var(--gray-200);margin-bottom:20px" id="pl-ctx-tabs-${pipelineId}">
     ${tabs.map(t => `<button
+      id="pl-ctx-tab-${t.id}-${pipelineId}"
       class="btn" style="border:none;border-bottom:${t.id===activeTab?"2px solid var(--brand)":"2px solid transparent"};border-radius:0;padding:10px 18px;font-size:13px;font-weight:${t.id===activeTab?"600":"400"};color:${t.id===activeTab?"var(--brand)":"var(--gray-600)"};background:none;cursor:pointer;margin-bottom:-2px"
-      onclick="navigate('${t.hash}')">${t.label}</button>`).join("")}
+      onclick="${t.onclick || `navigate('${t.hash}')`}">${t.label}</button>`).join("")}
   </div>`;
+}
+
+// Navigate to pipeline editor and open YAML/Definition mode.
+// If already on the pipeline editor page, just toggle mode; otherwise navigate
+// first and open yaml mode after the page renders.
+function _navToYamlMode(productId, pipelineId) {
+  const normalMode = document.getElementById("pl-normal-mode");
+  if (normalMode) {
+    // Already on the pipeline editor page — just switch mode
+    togglePipelineMode("yaml", productId, pipelineId);
+  } else {
+    // Navigate to pipeline editor; the router will render it.
+    // Store intent so the page can open yaml mode after load.
+    window._pendingYamlMode = { productId, pipelineId };
+    navigate(`products/${productId}/pipelines/${pipelineId}`);
+  }
 }
 
 // ── Pipeline detail ────────────────────────────────────────────────────────
@@ -1786,6 +2066,9 @@ router.register("products/:pid/applications/:id", async (hash, parts) => {
 let _plEditorProductId = null;
 let _plEditorPipelineId = null;
 let _plYamlDebounce = null;
+let _peYamlInstance = null;   // read-only X6 preview in YAML mode
+let _plCmInstance  = null;    // CodeMirror instance for pipeline YAML editor
+let _plYamlPending = null;    // YAML text loaded before CodeMirror was initialized
 
 // ── Active X6 pipeline editor instance ────────────────────────────────────
 let _peInstance    = null;
@@ -1836,7 +2119,6 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
         <button class="btn btn-primary btn-sm" onclick="showCreateRun('${pipelineId}','${productId}')">▶ Run</button>
         ${pageMenu("pl-"+pipelineId, [
           {label: "⇅ Git Sync",      onclick: `showGitSyncModal('${productId}','${pipelineId}','${pipeline.git_repo||""}','${pipeline.name.replace(/'/g,"\\'")}')` },
-          {label: "✎ Edit YAML",     onclick: `togglePipelineMode('yaml','${productId}','${pipelineId}')`},
           {label: "⬇ Download YAML", onclick: `exportYaml('/api/v1/products/${productId}/pipelines/${pipelineId}/export','${pipeline.name.replace(/'/g,"\\'")}pipeline.yaml')`},
           {label: "⬆ Import YAML",   onclick: `showImportYaml('${productId}','${pipelineId}')`},
         ])}
@@ -1848,46 +2130,52 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
     <!-- Normal mode (X6 canvas) -->
     <div id="pl-normal-mode">
 
-      <!-- Pipeline details strip -->
-      <div class="card" style="margin-bottom:12px">
-        <div class="detail-grid" style="padding:8px 16px">
-          <div class="detail-row"><span class="detail-label">ID</span><code style="font-size:12px">${pipeline.id}</code></div>
-          <div class="detail-row"><span class="detail-label">Kind</span><span class="detail-value">${pipeline.kind.toUpperCase()}</span></div>
-          <div class="detail-row"><span class="detail-label">Branch</span><span class="detail-value">${pipeline.git_branch||"main"}</span></div>
-          <div class="detail-row"><span class="detail-label">SHA</span><span class="detail-value">${pipeline.definition_sha||"—"}</span></div>
+      <!-- Pipeline canvas container -->
+      <div class="pe-pipeline-container">
+        <div class="pe-pipeline-container-header">
+          <span class="pe-pipeline-container-label">
+            <span class="pe-pipeline-container-icon">⬡</span>
+            ${pipeline.name}
+          </span>
+          <div class="pe-pipeline-container-meta">
+            <span class="pe-pipeline-container-badge pe-pipeline-container-badge-kind">${pipeline.kind.toUpperCase()}</span>
+            ${pipeline.git_repo ? `<span class="pe-pipeline-container-badge pe-pipeline-container-badge-git">⎇ ${pipeline.git_branch||"main"}</span>` : ""}
+            <span class="pe-pipeline-container-badge pe-pipeline-container-badge-stages">${stages.length} stage${stages.length !== 1 ? "s" : ""}</span>
+          </div>
         </div>
-      </div>
-
-      <!-- X6 interactive canvas -->
-      <div class="pe-canvas-outer" id="pe-canvas-outer-${pipelineId}">
-        <div id="pe-container-${pipelineId}" style="width:100%;height:100%"></div>
+        <!-- X6 interactive canvas -->
+        <div class="pe-canvas-outer" id="pe-canvas-outer-${pipelineId}">
+          <div id="pe-container-${pipelineId}" style="width:100%"></div>
+        </div>
       </div>
 
     </div>
 
     <!-- Split-screen YAML + visual mode -->
     <div id="pl-yaml-mode" style="display:none">
-      <div style="display:flex;gap:0;height:calc(100vh - 180px);min-height:500px">
-        <div style="flex:0 0 45%;display:flex;flex-direction:column;border:1px solid var(--gray-200);border-radius:8px 0 0 8px;overflow:hidden">
+      <div id="pl-split-container" style="display:flex;gap:0;height:calc(100vh - 180px);min-height:500px;user-select:none">
+        <div id="pl-split-left" style="flex:0 0 45%;display:flex;flex-direction:column;border:1px solid var(--gray-200);border-radius:8px 0 0 8px;overflow:hidden;min-width:160px">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--gray-50);border-bottom:1px solid var(--gray-200)">
             <span style="font-size:12px;font-weight:600;color:var(--gray-600)">YAML Editor</span>
             <div style="display:flex;gap:6px">
               <button class="btn btn-secondary btn-sm" onclick="loadPipelineYaml('${productId}','${pipelineId}')">↺</button>
+              <button class="btn btn-secondary btn-sm" onclick="validatePipelineYaml('${productId}','${pipelineId}')" title="Validate YAML without saving">✓ Validate</button>
               <button class="btn btn-primary btn-sm" onclick="savePipelineYaml('${productId}','${pipelineId}')">💾 Save</button>
             </div>
           </div>
-          <textarea id="pipeline-yaml-editor" spellcheck="false"
-            oninput="onPipelineYamlInput()"
-            style="flex:1;width:100%;font-family:monospace;font-size:13px;padding:12px;border:none;resize:none;background:#fff;color:var(--gray-800);line-height:1.5;outline:none"
-            placeholder="Loading YAML…"></textarea>
+          <div id="pipeline-yaml-editor" style="flex:1;overflow:auto;font-size:13px;"></div>
           <div id="pipeline-yaml-status" style="padding:4px 12px;font-size:12px;background:var(--gray-50);border-top:1px solid var(--gray-200)"></div>
         </div>
-        <div style="flex:1;display:flex;flex-direction:column;border:1px solid var(--gray-200);border-left:none;border-radius:0 8px 8px 0;overflow:hidden">
-          <div style="padding:8px 12px;background:var(--gray-50);border-bottom:1px solid var(--gray-200)">
-            <span style="font-size:12px;font-weight:600;color:var(--gray-600)">Visual Preview</span>
+        <div id="pl-split-handle" style="flex:0 0 6px;cursor:col-resize;background:var(--gray-200);display:flex;align-items:center;justify-content:center;z-index:1;transition:background 0.15s" onmouseenter="this.style.background='var(--brand-lt)'" onmouseleave="this.style.background='var(--gray-200)'">
+          <div style="width:2px;height:32px;background:var(--gray-400);border-radius:2px;pointer-events:none"></div>
+        </div>
+        <div id="pl-split-right" style="flex:1;display:flex;flex-direction:column;border:1px solid #1e293b;border-left:none;border-radius:0 8px 8px 0;overflow:hidden;background:#0f172a;min-width:160px">
+          <div style="padding:8px 12px;background:#0f172a;border-bottom:1px solid #1e293b">
+            <span style="font-size:12px;font-weight:600;color:#64748b">⬡ Visual Preview</span>
           </div>
-          <div style="flex:1;overflow:auto;padding:12px;background:#f8fafc">
-            <svg id="pipeline-visual-svg-yaml" style="display:block"></svg>
+          <div class="pe-canvas-outer" id="yaml-pe-canvas-outer-${pipelineId}"
+            style="flex:1;border-radius:0;border:none;box-shadow:none;margin:0;height:auto">
+            <div id="yaml-pe-container-${pipelineId}" style="width:100%;height:100%"></div>
           </div>
         </div>
       </div>
@@ -1902,6 +2190,16 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
   _peInstance = new PipelineEditor(`pe-container-${pipelineId}`, {
     productId,
     pipelineId,
+    pipelineName: pipeline.name,
+    accentColor: pipeline.accent_color || null,
+
+    onColorChange: async (color) => {
+      try {
+        await api.updatePipeline(productId, pipelineId, { accent_color: color });
+      } catch (e) { toast("Failed to save pipeline colour: " + e.message, "error"); }
+    },
+
+    onEditPipeline: () => spShowEditPipelineCanvas(productId, pipelineId, pipeline),
 
     onAddStage: () => spShowCreateStage(productId, pipelineId),
 
@@ -1932,8 +2230,15 @@ router.register("products/:pid/pipelines/:id", async (hash, parts) => {
 
   _peInstance.load(stages);
 
-  // YAML mode still uses the old SVG preview
   loadPipelineYaml(productId, pipelineId);
+
+  // If navigated here via _navToYamlMode, open yaml mode after render
+  if (window._pendingYamlMode &&
+      window._pendingYamlMode.productId === productId &&
+      window._pendingYamlMode.pipelineId === pipelineId) {
+    window._pendingYamlMode = null;
+    setTimeout(() => togglePipelineMode("yaml", productId, pipelineId), 100);
+  }
 });
 
 function togglePipelineMode(mode, productId, pipelineId) {
@@ -1942,14 +2247,146 @@ function togglePipelineMode(mode, productId, pipelineId) {
   if (!normal) return;
   normal.style.display = mode === "normal" ? "" : "none";
   yaml.style.display = mode === "yaml" ? "" : "none";
-  const ddBtn = document.getElementById("yaml-dd-btn");
-  if (ddBtn) {
-    ddBtn.classList.toggle("btn-primary", mode === "yaml");
-    ddBtn.classList.toggle("btn-secondary", mode !== "yaml");
+
+  // Update tab active state
+  const activeId   = mode === "yaml" ? "yaml" : "definition";
+  const inactiveId = mode === "yaml" ? "definition" : "yaml";
+  const activeTab   = document.getElementById(`pl-ctx-tab-${activeId}-${pipelineId}`);
+  const inactiveTab = document.getElementById(`pl-ctx-tab-${inactiveId}-${pipelineId}`);
+  if (activeTab) {
+    activeTab.style.borderBottom = "2px solid var(--brand)";
+    activeTab.style.color = "var(--brand)";
+    activeTab.style.fontWeight = "600";
+  }
+  if (inactiveTab) {
+    inactiveTab.style.borderBottom = "2px solid transparent";
+    inactiveTab.style.color = "var(--gray-600)";
+    inactiveTab.style.fontWeight = "400";
+  }
+
+  // Also wire Pipeline Editor tab to switch back to normal mode
+  if (activeTab && mode === "yaml") {
+    const defTab = document.getElementById(`pl-ctx-tab-definition-${pipelineId}`);
+    if (defTab) defTab.onclick = () => togglePipelineMode("normal", productId, pipelineId);
   }
   if (mode === "yaml") {
-    renderPipelineVisual(pipelineId, "pipeline-visual-svg-yaml");
+    // Initialize CodeMirror in the pipeline YAML editor div
+    const cmDiv = document.getElementById("pipeline-yaml-editor");
+    if (cmDiv && !_plCmInstance && window.CodeMirror) {
+      _plCmInstance = CodeMirror(cmDiv, {
+        mode: "yaml",
+        theme: "dracula",
+        lineNumbers: true,
+        lineWrapping: false,
+        foldGutter: true,
+        gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+        styleActiveLine: true,
+        matchBrackets: true,
+        extraKeys: {
+          "Ctrl-F": "findPersistent",
+          "Ctrl-H": "replace",
+          "Ctrl-Q": (cm) => cm.foldCode(cm.getCursor()),
+          "Alt-F":  (cm) => { cm.operation(() => { for (let i = 0; i < cm.lineCount(); i++) cm.foldCode({line: i, ch: 0}); }); },
+          "Ctrl-/": "toggleComment",
+        },
+      });
+      _plCmInstance.setSize("100%", cmDiv.parentElement ? (cmDiv.parentElement.clientHeight - 40) + "px" : "500px");
+      _plCmInstance.on("change", () => onPipelineYamlInput());
+      // Apply any YAML loaded before CodeMirror was ready
+      if (_plYamlPending) {
+        _plCmInstance.setValue(_plYamlPending);
+        _plCmInstance.clearHistory();
+        _plYamlPending = null;
+      }
+    } else if (_plCmInstance) {
+      _plCmInstance.refresh();
+    }
+    // Mount read-only X6 preview if not already mounted
+    const yamlContainerId = `yaml-pe-container-${pipelineId}`;
+    if (!_peYamlInstance && document.getElementById(yamlContainerId)) {
+      _peYamlInstance = new PipelineEditor(yamlContainerId, {
+        readOnly: true,
+        pipelineName: pipelineId,
+        onEditStage: (stageId) => {
+          // Look up in the yaml preview's own stage list (may have synthetic ids from YAML parse)
+          const stagesSource = _peYamlInstance?._stages || _peInstance?._stages || [];
+          const stage = stagesSource.find(s => s.id === stageId);
+          if (stage) _yamlHighlightStage(stage.name);
+        },
+        onEditTask: (taskId, stageId) => {
+          const stagesSource = _peYamlInstance?._stages || _peInstance?._stages || [];
+          const stage = stagesSource.find(s => s.id === stageId);
+          const task  = (stage?.tasks || []).find(t => t.id === taskId);
+          if (stage && task) _yamlHighlightTask(stage.name, task.name);
+        },
+      });
+      // Load current stages from the main editor instance
+      const stages = _peInstance ? (_peInstance._stages || []) : [];
+      _peYamlInstance.load(stages);
+    } else if (_peYamlInstance) {
+      const stages = _peInstance ? (_peInstance._stages || []) : [];
+      _peYamlInstance.reload(stages);
+    }
+    // Wire split-pane drag handle (once per activation)
+    _initSplitDrag();
+  } else {
+    // Destroy yaml preview when switching back to normal mode
+    if (_peYamlInstance) { _peYamlInstance.destroy(); _peYamlInstance = null; }
+    // Destroy CodeMirror instance
+    if (_plCmInstance) {
+      const wrapper = _plCmInstance.getWrapperElement();
+      if (wrapper && wrapper.parentNode) wrapper.parentNode.innerHTML = "";
+      _plCmInstance = null;
+    }
+    _plYamlPending = null;
   }
+}
+
+function _initSplitDrag() {
+  const handle = document.getElementById("pl-split-handle");
+  const left   = document.getElementById("pl-split-left");
+  const right  = document.getElementById("pl-split-right");
+  const container = document.getElementById("pl-split-container");
+  if (!handle || !left || !right || !container || handle._dragBound) return;
+  handle._dragBound = true;
+
+  let dragging = false;
+  let startX = 0;
+  let startLeftW = 0;
+
+  handle.addEventListener("mousedown", (e) => {
+    dragging = true;
+    startX = e.clientX;
+    startLeftW = left.getBoundingClientRect().width;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const containerW = container.getBoundingClientRect().width;
+    const handleW = handle.getBoundingClientRect().width;
+    const delta = e.clientX - startX;
+    const newLeftW = Math.min(
+      Math.max(startLeftW + delta, 160),   // min 160px
+      containerW - handleW - 160            // leave 160px for right pane
+    );
+    const pct = (newLeftW / containerW * 100).toFixed(2);
+    left.style.flex = `0 0 ${pct}%`;
+    // Resize CodeMirror to fit new width
+    if (_plCmInstance) _plCmInstance.refresh();
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    // Trigger canvas resize for the visual preview
+    if (_peYamlInstance) _peYamlInstance.fitView && _peYamlInstance.fitView();
+    if (_plCmInstance) _plCmInstance.refresh();
+  });
 }
 
 function toggleYamlDropdown() {
@@ -1974,8 +2411,136 @@ function toggleYamlDropdown() {
 function onPipelineYamlInput() {
   clearTimeout(_plYamlDebounce);
   _plYamlDebounce = setTimeout(() => {
-    renderPipelineVisual(_plEditorPipelineId, "pipeline-visual-svg-yaml");
+    if (!_peYamlInstance) return;
+    const yamlText = _plCmInstance ? _plCmInstance.getValue() : "";
+    if (!yamlText.trim()) return;
+    try {
+      // js-yaml exposes window.jsyaml when loaded from CDN
+      const parsed = window.jsyaml ? window.jsyaml.load(yamlText) : null;
+      if (parsed && parsed.spec && Array.isArray(parsed.spec.stages)) {
+        // Convert YAML stage objects to the shape PipelineEditor expects
+        const stages = parsed.spec.stages.map((s, idx) => ({
+          id:             s.id || `yaml-stage-${idx}`,
+          name:           s.name || `Stage ${idx + 1}`,
+          order:          s.order ?? (idx + 1),
+          execution_mode: s.execution_mode || "sequential",
+          accent_color:   s.accent_color || null,
+          run_language:   s.run_language || "bash",
+          run_condition:  s.run_condition || "always",
+          is_protected:   !!s.is_protected,
+          entry_gate:     s.entry_gate || {},
+          exit_gate:      s.exit_gate  || {},
+          sandbox:        s.sandbox    || {},
+          tasks: (s.tasks || []).map((t, ti) => ({
+            id:             t.id || `yaml-task-${idx}-${ti}`,
+            stage_id:       s.id || `yaml-stage-${idx}`,
+            name:           t.name || `Task ${ti + 1}`,
+            order:          t.order ?? (ti + 1),
+            kind:           t.kind || "script",
+            task_type:      t.task_type || "",
+            execution_mode: t.execution_mode || "sequential",
+            on_error:       t.on_error || "fail",
+            is_required:    t.is_required !== false,
+            run_condition:  t.run_condition || "always",
+            timeout:        t.timeout || 300,
+            approval_approvers: t.approval_approvers || [],
+            approval_required_count: t.approval_required_count || 0,
+            approval_timeout: t.approval_timeout || 0,
+            gate_language:  t.gate_language || "bash",
+            gate_script:    t.gate_script || "",
+          })),
+        }));
+        _peYamlInstance.reload(stages);
+      }
+    } catch { /* invalid YAML — leave canvas as-is */ }
   }, 800);
+}
+
+/* ── YAML editor block highlight helpers ────────────────────────────────────
+   Find a stage (or task within a stage) in the YAML textarea by name,
+   select the block, scroll to it, and flash the border.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+function _yamlFindBlock(yamlText, stageName, taskName) {
+  // Find the line index of "- name: <stageName>" inside the stages: array
+  const lines = yamlText.split("\n");
+  let stageLineIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    // Match "  - name: stageName" (any leading spaces, then "- name:")
+    if (/^\s*-\s+name:\s*/.test(lines[i]) && lines[i].includes(stageName)) {
+      // Verify it's exactly stageName (not a substring match)
+      const val = lines[i].replace(/^\s*-\s+name:\s*/, "").trim().replace(/^['"]|['"]$/g, "");
+      if (val === stageName) { stageLineIdx = i; break; }
+    }
+  }
+  if (stageLineIdx === -1) return null;
+
+  // Find the end of the stage block = next line at the same or lower indent level
+  // that also starts with "- " (next sibling stage)
+  const stageIndent = lines[stageLineIdx].match(/^(\s*)/)[1].length;
+  let stageEnd = lines.length;
+  for (let i = stageLineIdx + 1; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    if (!trimmed) continue; // blank lines don't end the block
+    const ind = lines[i].match(/^(\s*)/)[1].length;
+    if (ind <= stageIndent && trimmed.startsWith("- ")) { stageEnd = i; break; }
+  }
+
+  if (!taskName) {
+    // Return the stage block range
+    const start = lines.slice(0, stageLineIdx).join("\n").length + (stageLineIdx > 0 ? 1 : 0);
+    const end   = lines.slice(0, stageEnd).join("\n").length + (stageEnd > 0 ? 1 : 0);
+    return { start, end, lineIdx: stageLineIdx };
+  }
+
+  // Find the task within the stage block
+  let taskLineIdx = -1;
+  for (let i = stageLineIdx + 1; i < stageEnd; i++) {
+    if (/^\s*-\s+name:\s*/.test(lines[i]) && lines[i].includes(taskName)) {
+      const val = lines[i].replace(/^\s*-\s+name:\s*/, "").trim().replace(/^['"]|['"]$/g, "");
+      if (val === taskName) { taskLineIdx = i; break; }
+    }
+  }
+  if (taskLineIdx === -1) return null;
+
+  // Find end of task block
+  const taskIndent = lines[taskLineIdx].match(/^(\s*)/)[1].length;
+  let taskEnd = stageEnd;
+  for (let i = taskLineIdx + 1; i < stageEnd; i++) {
+    const trimmed = lines[i].trimStart();
+    if (!trimmed) continue;
+    const ind = lines[i].match(/^(\s*)/)[1].length;
+    if (ind <= taskIndent && trimmed.startsWith("- ")) { taskEnd = i; break; }
+  }
+
+  const start = lines.slice(0, taskLineIdx).join("\n").length + (taskLineIdx > 0 ? 1 : 0);
+  const end   = lines.slice(0, taskEnd).join("\n").length + (taskEnd > 0 ? 1 : 0);
+  return { start, end, lineIdx: taskLineIdx };
+}
+
+function _yamlScrollAndSelect(start, end, lineIdx) {
+  if (!_plCmInstance) return;
+  const doc = _plCmInstance.getDoc();
+  const from = doc.posFromIndex(start);
+  const to   = doc.posFromIndex(end);
+  doc.setSelection(from, to);
+  _plCmInstance.scrollIntoView({ line: Math.max(0, lineIdx - 3), ch: 0 }, 60);
+  _plCmInstance.focus();
+}
+
+function _yamlHighlightStage(stageName) {
+  if (!_plCmInstance) return;
+  const result = _yamlFindBlock(_plCmInstance.getValue(), stageName, null);
+  if (!result) return;
+  _yamlScrollAndSelect(result.start, result.end, result.lineIdx);
+}
+
+function _yamlHighlightTask(stageName, taskName) {
+  if (!_plCmInstance) return;
+  const result = _yamlFindBlock(_plCmInstance.getValue(), stageName, taskName);
+  if (!result) return;
+  _yamlScrollAndSelect(result.start, result.end, result.lineIdx);
 }
 
 function toggleStageBlock(stageId) {
@@ -2486,147 +3051,615 @@ router.register("products/:pid/pipelines/:id/webhooks", async (hash, parts) => {
 });
 
 // ── Pipeline Properties page ──────────────────────────────────────────────
+// Module-level state for the properties explorer (avoids full-page reloads)
+const _propState = {
+  productId: null, pipelineId: null,
+  pipeline: null, stages: null,
+  propsByScope: {},          // key: "pipeline:id" | "stage:id" | "task:id" | "product:id"
+  selectedScope: null,       // e.g. "pipeline:abc123"
+  searchQuery: "",
+};
 
 router.register("products/:pid/pipelines/:id/properties", async (hash, parts) => {
   const [,productId,,pipelineId] = parts;
   setContent(loading());
   try {
-  const [product, pipeline] = await Promise.all([
-    api.getProduct(productId),
-    api.getPipeline(productId, pipelineId),
-  ]);
-  const stages = pipeline.stages || [];
-  setBreadcrumb(
-    { label: "Products", hash: "products" },
-    { label: product.name, hash: `products/${productId}` },
-    { label: pipeline.name, hash: `products/${productId}/pipelines/${pipelineId}` },
-    { label: "Properties" }
-  );
+    const [product, pipeline] = await Promise.all([
+      api.getProduct(productId),
+      api.getPipeline(productId, pipelineId),
+    ]);
+    setBreadcrumb(
+      { label: "Products", hash: "products" },
+      { label: product.name, hash: `products/${productId}` },
+      { label: pipeline.name, hash: `products/${productId}/pipelines/${pipelineId}` },
+      { label: "Properties" }
+    );
 
-  // Load all property sets in parallel — pipeline + all stages + all tasks
-  const stageIds = (stages || []).map(s => s.id);
-  const allTasks = (stages || []).flatMap(s => (s.tasks || []).map(t => ({ ...t, stageId: s.id })));
-  const taskIds = allTasks.map(t => t.id);
+    const stages = pipeline.stages || [];
+    const stageIds = stages.map(s => s.id);
+    const allTasks = stages.flatMap(s => (s.tasks || []).map(t => ({ ...t, stageId: s.id })));
+    const taskIds = allTasks.map(t => t.id);
 
-  const [pipelineProps, ...restPropSets] = await Promise.all([
-    api.listProperties("pipeline", pipelineId),
-    ...stageIds.map(sid => api.listProperties("stage", sid)),
-    ...taskIds.map(tid => api.listProperties("task", tid)),
-  ]);
+    // Load all scopes in parallel, including product level
+    const [productProps, pipelineProps, ...restPropSets] = await Promise.all([
+      api.listProperties("product", productId).catch(() => []),
+      api.listProperties("pipeline", pipelineId),
+      ...stageIds.map(sid => api.listProperties("stage", sid)),
+      ...taskIds.map(tid => api.listProperties("task", tid)),
+    ]);
 
-  const stagePropSets = restPropSets.slice(0, stageIds.length);
-  const taskPropSets  = restPropSets.slice(stageIds.length);
+    const stagePropSets = restPropSets.slice(0, stageIds.length);
+    const taskPropSets  = restPropSets.slice(stageIds.length);
 
-  const stagePropsMap = {};
-  stageIds.forEach((sid, i) => { stagePropsMap[sid] = stagePropSets[i] || []; });
-  const taskPropsMap = {};
-  taskIds.forEach((tid, i) => { taskPropsMap[tid] = taskPropSets[i] || []; });
+    // Store in module-level state
+    _propState.productId   = productId;
+    _propState.pipelineId  = pipelineId;
+    _propState.pipeline    = pipeline;
+    _propState.stages      = stages;
+    _propState.propsByScope = {
+      [`product:${productId}`]: productProps,
+      [`pipeline:${pipelineId}`]: pipelineProps,
+    };
+    stageIds.forEach((sid, i) => { _propState.propsByScope[`stage:${sid}`] = stagePropSets[i] || []; });
+    taskIds.forEach((tid, i)  => { _propState.propsByScope[`task:${tid}`]  = taskPropSets[i]  || []; });
 
-  setContent(`
-    <div class="page-header">
-      <div><h1>${pipeline.name}</h1><div class="sub">Property hierarchy — pipeline, stage &amp; task level</div></div>
-      <button class="btn btn-primary btn-sm" onclick="showAddProperty('pipeline','${pipelineId}',null,null)">＋ Add Pipeline Property</button>
-    </div>
-    ${pipelineContextTabs(productId, pipelineId, "properties")}
+    // Default selection: pipeline scope
+    if (!_propState.selectedScope || !_propState.propsByScope[_propState.selectedScope]) {
+      _propState.selectedScope = `pipeline:${pipelineId}`;
+    }
+    _propState.searchQuery = "";
 
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header">
-        <h2>Pipeline Properties</h2>
-        <span style="font-size:12px;color:var(--gray-400)">Inherited by all stages and tasks in this pipeline</span>
-      </div>
-      ${_renderPropertiesTable(pipelineProps, "pipeline", pipelineId, productId, pipelineId)}
-    </div>
+    setContent(`
+      ${pipelineContextTabs(productId, pipelineId, "properties")}
+      <div style="display:grid;grid-template-columns:200px 1fr 300px;gap:16px;margin-top:16px;align-items:start">
 
-    ${(stages||[]).map(s => `
-    <div class="card" style="margin-bottom:12px">
-      <div class="card-header">
-        <div>
-          <h2 style="font-size:14px">#${s.order} ${s.name} <span style="font-size:11px;font-weight:400;color:var(--gray-400)">Stage Properties</span></h2>
-          <div style="font-size:11px;color:var(--gray-400)">Override pipeline properties for this stage and its tasks</div>
+        <!-- LEFT: scope tree -->
+        <div class="card" style="padding:0;overflow:hidden">
+          <div style="padding:10px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray-400);border-bottom:1px solid var(--gray-100)">Scope</div>
+          <div id="prop-scope-tree" style="padding:6px 0"></div>
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="showAddProperty('stage','${s.id}','${productId}','${pipelineId}')">＋ Add</button>
-      </div>
-      ${_renderPropertiesTable(stagePropsMap[s.id]||[], "stage", s.id, productId, pipelineId)}
 
-      ${(s.tasks||[]).length ? `
-      <div style="border-top:1px solid var(--gray-100);padding:0 16px 12px">
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-400);padding:10px 0 6px">Tasks</div>
-        ${(s.tasks||[]).map(t => `
-        <div style="margin-bottom:8px">
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;margin-bottom:4px">
-            <div style="font-size:12px;font-weight:600;color:var(--gray-700)">
-              <span style="color:var(--gray-400);margin-right:6px">#${t.order}</span>${t.name}
-              <span style="font-size:10px;font-weight:400;color:var(--gray-400);margin-left:6px">Task Properties</span>
-            </div>
-            <button class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px" onclick="showAddProperty('task','${t.id}','${productId}','${pipelineId}')">＋ Add</button>
+        <!-- MIDDLE: properties at selected scope -->
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <input id="prop-search" class="form-control" style="flex:1;font-size:13px" placeholder="Filter properties…"
+              oninput="_propState.searchQuery=this.value;_propRenderMiddle()">
+            <button class="btn btn-primary btn-sm" onclick="_propShowAdd()">＋ Add</button>
+            <button class="btn btn-secondary btn-sm" onclick="_propShowYamlEditor()" title="Edit all properties as YAML">&#x7B;&#x7D; YAML</button>
           </div>
-          ${_renderPropertiesTable(taskPropsMap[t.id]||[], "task", t.id, productId, pipelineId, true)}
-        </div>`).join("")}
-      </div>` : ""}
-    </div>`).join("")}
+          <div id="prop-middle"></div>
+        </div>
 
-    <div class="card" style="background:var(--gray-50)">
-      <div style="padding:12px 16px;font-size:12px;color:var(--gray-600)">
-        <strong>Resolution order</strong> (first match wins):<br>
-        <code style="font-size:11px">Runtime override (task_run → stage_run → pipeline_run) → Task → Stage → Pipeline → Product</code><br><br>
-        In task scripts, resolved properties are available as <code>$CDT_PROPS</code> (JSON) and individually via
-        <code>$CDT_RUNTIME</code> under the <code>properties</code> key.
+        <!-- RIGHT: resolved effective set -->
+        <div class="card" style="padding:0;overflow:hidden;position:sticky;top:16px">
+          <div style="padding:10px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray-400);border-bottom:1px solid var(--gray-100)">
+            Effective at scope
+          </div>
+          <div id="prop-resolved" style="padding:8px 0;max-height:calc(100vh - 220px);overflow-y:auto"></div>
+        </div>
+
       </div>
-    </div>
-  `);
+      <div class="card" style="margin-top:16px;padding:12px 16px;background:var(--gray-50);font-size:12px;color:var(--gray-600)">
+        <strong>Resolution order</strong> (first match wins):
+        <code style="font-size:11px;margin-left:8px">Runtime override (task_run → stage_run → pipeline_run) → Task → Stage → Pipeline → Product</code>
+        &nbsp;·&nbsp; In scripts: <code>$CDT_PROPS</code> (JSON) · <code>$CDT_RUNTIME.properties</code>
+      </div>
+    `);
+
+    _propRenderTree();
+    _propRenderMiddle();
+    _propRenderResolved();
   } catch(e) { setContent(`<div class="alert alert-danger">Failed to load properties: ${e.message}</div>`); }
 });
 
-function _renderPropertiesTable(props, ownerType, ownerId, productId, pipelineId, compact = false) {
-  if (!props.length) {
-    const msg = compact
-      ? `<div style="padding:6px 10px;font-size:11px;color:var(--gray-400);font-style:italic">No task properties — <a href="#" onclick="event.preventDefault();showAddProperty('${ownerType}','${ownerId}','${productId}','${pipelineId}')">add one</a></div>`
-      : `<div class="empty-state" style="padding:20px 0"><div class="empty-icon">🔧</div><p style="font-size:13px">No properties defined. Add one to make it available to tasks.</p></div>`;
-    return msg;
+// ── helpers ──────────────────────────────────────────────────────────────────
+const _PROP_TYPE_COLOR = { string:"#6366f1", number:"#0369a1", boolean:"#15803d", secret:"#dc2626", json:"#b45309" };
+const _PROP_TYPE_ICON  = { string:"Aa", number:"#", boolean:"✓", secret:"🔒", json:"{}" };
+
+function _propScopeLabel(scopeKey) {
+  const { pipeline, stages, productId, pipelineId } = _propState;
+  if (scopeKey === `product:${productId}`)   return { icon:"📦", label: "Product", sub: "shared across all pipelines" };
+  if (scopeKey === `pipeline:${pipelineId}`) return { icon:"⚙", label: pipeline?.name || "Pipeline", sub: "inherited by all stages/tasks" };
+  const [type, id] = scopeKey.split(":");
+  if (type === "stage") {
+    const s = (stages||[]).find(s => s.id === id);
+    return s ? { icon:"📋", label: s.name, sub: `Stage #${s.order}` } : { icon:"📋", label: id, sub:"stage" };
   }
-  const typeColor = { string: "#6366f1", number: "#0369a1", boolean: "#15803d", secret: "#dc2626", json: "#b45309" };
-  const typeIcon  = { string: "Aa", number: "#", boolean: "✓", secret: "🔒", json: "{}" };
-  return `<div style="display:flex;flex-direction:column;gap:8px;padding:12px 16px">
-    ${props.map(p => {
-      const color = typeColor[p.value_type] || "#6366f1";
-      const icon  = typeIcon[p.value_type]  || "Aa";
-      const displayVal = p.value_type === "secret"
-        ? `<span style="letter-spacing:3px;color:var(--gray-400)">••••••••</span>`
-        : p.value !== null && p.value !== undefined && p.value !== ""
-          ? `<code style="background:var(--gray-100);padding:2px 8px;border-radius:4px;font-size:12px;word-break:break-all">${p.value}</code>`
-          : `<em style="color:var(--gray-400);font-size:12px">not set</em>`;
-      const requiredBadge = p.is_required
-        ? `<span style="font-size:10px;font-weight:600;color:#dc2626;background:#fef2f2;padding:1px 6px;border-radius:8px;border:1px solid #fecaca">required</span>`
-        : "";
-      return `
-      <div style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px;background:#fff;border:1px solid var(--gray-200);border-radius:8px;border-left:3px solid ${color}">
-        <div style="width:28px;height:28px;border-radius:6px;background:${color}15;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${color};flex-shrink:0;margin-top:1px">${icon}</div>
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-            <strong style="font-family:monospace;font-size:13px;color:var(--gray-800)">${p.name}</strong>
-            <span style="font-size:10px;font-weight:600;color:${color};background:${color}18;padding:1px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.3px">${p.value_type}</span>
-            ${requiredBadge}
+  if (type === "task") {
+    const t = (stages||[]).flatMap(s => s.tasks||[]).find(t => t.id === id);
+    return t ? { icon:"▸", label: t.name, sub:"task" } : { icon:"▸", label: id, sub:"task" };
+  }
+  return { icon:"?", label: scopeKey, sub:"" };
+}
+
+function _propRenderTree() {
+  const { productId, pipelineId, stages, propsByScope, selectedScope } = _propState;
+  const tree = document.getElementById("prop-scope-tree");
+  if (!tree) return;
+
+  const scopes = [
+    `product:${productId}`,
+    `pipeline:${pipelineId}`,
+    ...(stages||[]).flatMap(s => [
+      `stage:${s.id}`,
+      ...(s.tasks||[]).map(t => `task:${t.id}`),
+    ]),
+  ];
+
+  tree.innerHTML = scopes.map(key => {
+    const { icon, label, sub } = _propScopeLabel(key);
+    const count = (propsByScope[key]||[]).length;
+    const active = key === selectedScope;
+    const isTask = key.startsWith("task:");
+    const indent = isTask ? "padding-left:28px" : key.startsWith("stage:") ? "padding-left:16px" : "";
+    return `<div onclick="_propSelectScope('${key}')" style="
+        display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;
+        ${indent};
+        background:${active ? "var(--primary-light,#eff6ff)" : "transparent"};
+        border-left:3px solid ${active ? "var(--primary)" : "transparent"};
+        transition:background .1s">
+      <span style="font-size:14px;flex-shrink:0">${icon}</span>
+      <div style="flex:1;min-width:0;overflow:hidden">
+        <div style="font-size:13px;font-weight:${active?"600":"400"};color:var(--gray-800);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>
+        <div style="font-size:10px;color:var(--gray-400)">${sub}</div>
+      </div>
+      ${count ? `<span style="font-size:10px;font-weight:600;background:var(--primary);color:#fff;border-radius:10px;padding:1px 6px;flex-shrink:0">${count}</span>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function _propSelectScope(scopeKey) {
+  _propState.selectedScope = scopeKey;
+  _propState.searchQuery = "";
+  const si = document.getElementById("prop-search");
+  if (si) si.value = "";
+  _propRenderTree();
+  _propRenderMiddle();
+  _propRenderResolved();
+}
+
+function _propRenderMiddle() {
+  const { selectedScope, propsByScope, searchQuery } = _propState;
+  const mid = document.getElementById("prop-middle");
+  if (!mid || !selectedScope) return;
+
+  const { label } = _propScopeLabel(selectedScope);
+  let props = propsByScope[selectedScope] || [];
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    props = props.filter(p => p.name.toLowerCase().includes(q) || (p.description||"").toLowerCase().includes(q));
+  }
+
+  // Build inherited map: names already defined at ancestor scopes
+  const inherited = _propBuildInheritedMap(selectedScope);
+
+  if (!props.length) {
+    mid.innerHTML = `<div class="card"><div class="empty-state" style="padding:28px 0">
+      <div class="empty-icon">🔧</div>
+      <p style="font-size:13px;color:var(--gray-500)">${searchQuery ? `No properties match "${searchQuery}"` : `No properties at ${label} scope`}</p>
+      ${!searchQuery ? `<button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="_propShowAdd()">＋ Add one</button>` : ""}
+    </div></div>`;
+    return;
+  }
+
+  mid.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">
+    ${props.map(p => _propCard(p, selectedScope, inherited)).join("")}
+  </div>`;
+  if (window.Alpine) window.Alpine.initTree(mid);
+}
+
+function _propBuildInheritedMap(scopeKey) {
+  // Returns { name: { value, source_label } } for all ancestor scopes
+  const { productId, pipelineId, stages, propsByScope } = _propState;
+  const chain = [];
+  const [type, id] = scopeKey.split(":");
+
+  if (type === "task") {
+    // find parent stage
+    const stage = (stages||[]).find(s => (s.tasks||[]).some(t => t.id === id));
+    if (stage) {
+      chain.push({ key: `stage:${stage.id}`, label: stage.name + " (stage)" });
+    }
+    chain.push({ key: `pipeline:${pipelineId}`, label: "pipeline" });
+    chain.push({ key: `product:${productId}`, label: "product" });
+  } else if (type === "stage") {
+    chain.push({ key: `pipeline:${pipelineId}`, label: "pipeline" });
+    chain.push({ key: `product:${productId}`, label: "product" });
+  } else if (type === "pipeline") {
+    chain.push({ key: `product:${productId}`, label: "product" });
+  }
+
+  const result = {};
+  for (const { key, label } of chain) {
+    for (const p of (propsByScope[key] || [])) {
+      if (!result[p.name]) result[p.name] = { value: p.value, value_type: p.value_type, source_label: label };
+    }
+  }
+  return result;
+}
+
+function _propTypeValueHtml(p) {
+  if (p.value_type === "secret") return `<span style="letter-spacing:3px;color:var(--gray-400)">••••••••</span>`;
+  if (p.value === null || p.value === undefined || p.value === "") return `<em style="color:var(--gray-400);font-size:12px">not set</em>`;
+  return `<code style="background:var(--gray-100);padding:2px 8px;border-radius:4px;font-size:12px;word-break:break-all">${p.value}</code>`;
+}
+
+// ── Alpine-powered property card ─────────────────────────────────────────
+// Each card is a self-contained Alpine component. No global element IDs,
+// no manual display toggling. Alpine owns edit state per card.
+// Save/delete mutate _propState in place and re-render only changed panels.
+
+function _propCard(p, scopeKey, inherited) {
+  const color = _PROP_TYPE_COLOR[p.value_type] || "#6366f1";
+  const icon  = _PROP_TYPE_ICON[p.value_type]  || "Aa";
+  const inheritedInfo = inherited[p.name];
+
+  const inheritedHint = inheritedInfo
+    ? `<div style="font-size:11px;color:var(--gray-400);margin-bottom:4px">
+        overrides ← ${inheritedInfo.source_label}:
+        <code style="font-size:11px;background:var(--gray-100);padding:1px 5px;border-radius:3px">${inheritedInfo.value_type==="secret" ? "••••••••" : (inheritedInfo.value||"not set")}</code>
+       </div>`
+    : "";
+
+  const requiredBadge = p.is_required
+    ? `<span style="font-size:10px;font-weight:600;color:#dc2626;background:#fef2f2;padding:1px 6px;border-radius:8px;border:1px solid #fecaca">required</span>`
+    : "";
+
+  // Encode dynamic values safely for the x-data JSON attribute
+  const initData = JSON.stringify({
+    editing:     false,
+    saving:      false,
+    showSecret:  false,
+    valueType:   p.value_type || "string",
+    value:       p.value      || "",
+    description: p.description || "",
+    required:    !!p.is_required,
+  }).replace(/'/g, "&#39;");   // single-quote safe for the attribute
+
+  // Escape scope/name for use in Alpine @click string literals
+  const safeScope = scopeKey.replace(/'/g, "\\'");
+  const safeName  = p.name.replace(/'/g, "\\'");
+
+  return `
+  <div x-data='${initData}'
+       @keydown.escape.window="editing = false"
+       style="background:#fff;border:1px solid var(--gray-200);border-radius:8px;border-left:3px solid ${color};overflow:hidden;transition:box-shadow .15s"
+       :style="editing ? 'box-shadow:0 0 0 2px ${color}55' : ''">
+
+    <!-- ── VIEW row ──────────────────────────────── -->
+    <div x-show="!editing" style="display:flex;align-items:flex-start;gap:12px;padding:12px 14px">
+      <div style="width:28px;height:28px;border-radius:6px;background:${color}18;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${color};flex-shrink:0;margin-top:1px">${icon}</div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px">
+          <strong style="font-family:monospace;font-size:13px;color:var(--gray-800)">${p.name}</strong>
+          <span x-text="valueType" style="font-size:10px;font-weight:600;color:${color};background:${color}18;padding:1px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.3px"></span>
+          ${requiredBadge}
+        </div>
+        ${inheritedHint}
+        <div x-show="description" x-text="description" style="font-size:12px;color:var(--gray-500);margin-bottom:4px"></div>
+        <div>${_propTypeValueHtml(p)}</div>
+      </div>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        <button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px"
+          @click="editing = true" title="Edit (e)">✏</button>
+        <button class="btn btn-danger btn-sm" style="padding:3px 8px;font-size:11px"
+          @click="_propAlpineDelete('${safeScope}', '${safeName}')" title="Delete">✕</button>
+      </div>
+    </div>
+
+    <!-- ── EDIT form ─────────────────────────────── -->
+    <div x-show="editing" x-cloak
+         style="padding:14px;background:var(--gray-50);border-top:1px solid var(--gray-100)">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="form-group" style="margin:0">
+          <label style="font-size:11px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:4px">Type</label>
+          <select x-model="valueType" class="form-control form-control-sm">
+            <option value="string">string</option>
+            <option value="number">number</option>
+            <option value="boolean">boolean</option>
+            <option value="secret">secret</option>
+            <option value="json">json</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label style="font-size:11px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:4px">Required</label>
+          <select x-model="required" class="form-control form-control-sm">
+            <option :value="false">No</option>
+            <option :value="true">Yes</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom:10px">
+        <label style="font-size:11px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:4px">Value</label>
+
+        <template x-if="valueType === 'string'">
+          <input type="text" x-model="value" class="form-control form-control-sm" placeholder="e.g. production">
+        </template>
+
+        <template x-if="valueType === 'number'">
+          <input type="number" x-model="value" class="form-control form-control-sm">
+        </template>
+
+        <template x-if="valueType === 'boolean'">
+          <label style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;padding:5px 0">
+            <input type="checkbox"
+              :checked="value === 'true'"
+              @change="value = $event.target.checked ? 'true' : 'false'"
+              style="width:16px;height:16px;accent-color:var(--primary)">
+            <span x-text="value === 'true' ? 'true' : 'false'"
+              style="font-family:monospace;font-size:13px;color:var(--gray-700)"></span>
+          </label>
+        </template>
+
+        <template x-if="valueType === 'secret'">
+          <div style="position:relative">
+            <input :type="showSecret ? 'text' : 'password'"
+              x-model="value" class="form-control form-control-sm"
+              placeholder="Enter secret value" style="padding-right:36px">
+            <button type="button" @click="showSecret = !showSecret"
+              style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:13px;color:var(--gray-400)"
+              :title="showSecret ? 'Hide' : 'Show'" x-text="showSecret ? '🙈' : '👁'"></button>
           </div>
-          ${p.description ? `<div style="font-size:12px;color:var(--gray-500);margin-bottom:6px">${p.description}</div>` : ""}
-          <div>${displayVal}</div>
-        </div>
-        <div onclick="event.stopPropagation()">
-          ${pageMenu("prop-"+p.id,[
-            {label:"✏ Edit", onclick:`showEditProperty('${ownerType}','${ownerId}','${p.name.replace(/'/g,"\\'")}','${(p.value||"").replace(/'/g,"\\'")}','${p.value_type}','${(p.description||"").replace(/'/g,"\\'")}',${p.is_required},'${productId}','${pipelineId}')`},
-            {divider:true},
-            {label:"🗑 Delete", onclick:`deleteProperty('${ownerType}','${ownerId}','${p.name.replace(/'/g,"\\'")}','${productId}','${pipelineId}')`,danger:true},
-          ])}
-        </div>
-      </div>`;
-    }).join("")}
+        </template>
+
+        <template x-if="valueType === 'json'">
+          <textarea x-model="value" class="form-control form-control-sm" rows="3"
+            style="font-family:monospace;font-size:12px;resize:vertical"
+            placeholder='{"key": "value"}'></textarea>
+        </template>
+      </div>
+
+      <div class="form-group" style="margin-bottom:12px">
+        <label style="font-size:11px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:4px">Description</label>
+        <input type="text" x-model="description" class="form-control form-control-sm"
+          placeholder="What does this property control?">
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary btn-sm" :disabled="saving"
+          @click="_propHtmxSave('${safeScope}', '${safeName}', $data, $el.closest('[x-data]'))">
+          <span x-text="saving ? 'Saving…' : '✓ Save'"></span>
+        </button>
+        <button class="btn btn-secondary btn-sm" @click="editing = false">✗ Cancel</button>
+      </div>
+    </div>
   </div>`;
 }
 
-function showAddProperty(ownerType, ownerId, productId, pipelineId) {
-  openModal("Add Property",
-    `<div class="form-group"><label>Name *</label><input id="pr-name" class="form-control" placeholder="e.g. DEPLOY_TIMEOUT"></div>
+// Called by Alpine @click — uses htmx to PUT the property and swap the updated card HTML.
+// cardEl: the root [x-data] element so htmx knows what to swap.
+async function _propHtmxSave(scopeKey, name, alpineData, cardEl) {
+  alpineData.saving = true;
+  const [type, id] = scopeKey.split(":");
+  const body = JSON.stringify({
+    value:       alpineData.value ?? null,
+    value_type:  alpineData.valueType,
+    description: (alpineData.description || "").trim() || null,
+    is_required: alpineData.required === true || alpineData.required === "true",
+  });
+  try {
+    const resp = await fetch(`/api/v1/properties/${type}/${id}/${encodeURIComponent(name)}/partial`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${auth.getToken()}`,
+      },
+      body,
+    });
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(err || resp.statusText);
+    }
+    const html = await resp.text();
+    // Swap the card's outerHTML with the server-rendered fragment
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html.trim();
+    const newCard = tmp.firstElementChild;
+    if (newCard && cardEl && cardEl.parentNode) {
+      cardEl.parentNode.replaceChild(newCard, cardEl);
+      if (window.Alpine) window.Alpine.initTree(newCard);
+    }
+    // Sync _propState so the resolved panel stays accurate
+    const arr = _propState.propsByScope[scopeKey] || [];
+    const idx = arr.findIndex(p => p.name === name);
+    const updated = { name, value: alpineData.value, value_type: alpineData.valueType,
+                      description: alpineData.description, is_required: alpineData.required === true || alpineData.required === "true" };
+    if (idx >= 0) arr[idx] = updated; else arr.push(updated);
+    toast("Saved", "success");
+    _propRenderTree();
+    _propRenderResolved();
+  } catch(e) {
+    alpineData.saving = false;
+    toast(e.message, "error");
+  }
+}
+
+// Called by the hx-delete button on the card (htmx handles DOM removal automatically).
+// Also called by Alpine when needed. Syncs _propState after htmx fires.
+document.addEventListener("htmx:afterRequest", (e) => {
+  const el = e.detail.elt;
+  if (!el || el.getAttribute("hx-delete") === null) return;
+  const url = el.getAttribute("hx-delete") || "";
+  // /api/v1/properties/{type}/{id}/{name}/partial
+  const m = url.match(/\/api\/v1\/properties\/([^/]+)\/([^/]+)\/(.+)\/partial$/);
+  if (!m) return;
+  const [, type, id, name] = m;
+  const scopeKey = `${type}:${id}`;
+  _propState.propsByScope[scopeKey] = (_propState.propsByScope[scopeKey] || []).filter(p => p.name !== decodeURIComponent(name));
+  toast("Property deleted", "success");
+  _propRenderTree();
+  _propRenderResolved();
+});
+
+// ── Full-screen YAML editor (CodeMirror 5, MIT) ───────────────────────────────
+// Opens a full-screen modal with syntax highlighting, fold gutters, Cmd/Ctrl+F
+// search, active-line highlight, auto-indent, and Validate / Apply actions.
+
+let _yamlCm = null;   // active CodeMirror instance (closed on modal teardown)
+
+async function _propShowYamlEditor() {
+  const { selectedScope } = _propState;
+  if (!selectedScope) { toast("Select a scope first", "warning"); return; }
+  const [type, id] = selectedScope.split(":");
+  const { label } = _propScopeLabel(selectedScope);
+
+  // Load current YAML from server
+  let initialYaml = "";
+  try { initialYaml = await api.exportPropYaml(type, id); } catch(_) {}
+
+  // Tear down any previous instance
+  const OLD_ID = "yaml-fs-modal";
+  document.getElementById(OLD_ID)?.remove();
+  if (_yamlCm) { try { _yamlCm.toTextArea(); } catch(_) {} _yamlCm = null; }
+
+  // ── Build full-screen modal ────────────────────────────────────────────────
+  const modal = document.createElement("div");
+  modal.id = OLD_ID;
+  modal.style.cssText = "position:fixed;inset:0;z-index:10000;background:#1e1e2e;display:flex;flex-direction:column;overflow:hidden;";
+
+  modal.innerHTML = `
+    <!-- toolbar -->
+    <div id="yaml-fs-toolbar" style="display:flex;align-items:center;gap:10px;padding:9px 16px;background:#12121f;border-bottom:1px solid #334155;flex-shrink:0;flex-wrap:wrap">
+      <span style="font-size:13px;font-weight:700;color:#93c5fd;white-space:nowrap">⚙ Properties YAML</span>
+      <span style="font-size:11px;color:#475569;white-space:nowrap">${label}</span>
+      <div style="flex:1"></div>
+
+      <!-- keyboard hint -->
+      <span style="font-size:10px;color:#334155;white-space:nowrap">Ctrl+F search · Ctrl+/ comment · Ctrl+Q fold · Alt+F fold-all</span>
+
+      <!-- replace mode -->
+      <label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap">
+        <input type="checkbox" id="yaml-fs-replace" style="accent-color:#7dd3fc">
+        Replace mode
+      </label>
+
+      <!-- action buttons -->
+      <button id="yaml-fs-validate" style="padding:5px 14px;background:#1e293b;color:#93c5fd;border:1px solid #334155;border-radius:5px;font-size:12px;cursor:pointer">✓ Validate</button>
+      <button id="yaml-fs-apply"    style="padding:5px 16px;background:#2563eb;color:#fff;border:none;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600">↑ Apply</button>
+      <button id="yaml-fs-close"    style="padding:5px 12px;background:transparent;color:#64748b;border:1px solid #334155;border-radius:5px;font-size:12px;cursor:pointer">✕ Close</button>
+    </div>
+
+    <!-- status / error bar -->
+    <div id="yaml-fs-status" style="display:none;padding:6px 16px;font-size:12px;font-family:monospace;white-space:pre-wrap;flex-shrink:0;border-bottom:1px solid #334155"></div>
+
+    <!-- editor mount point -->
+    <div id="yaml-fs-editor-wrap" style="flex:1;overflow:hidden;position:relative;">
+      <textarea id="yaml-fs-ta"></textarea>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  // ── Init CodeMirror ────────────────────────────────────────────────────────
+  const ta = document.getElementById("yaml-fs-ta");
+  ta.value = initialYaml;
+
+  _yamlCm = CodeMirror.fromTextArea(ta, {
+    mode:            "yaml",
+    theme:           "dracula",
+    lineNumbers:     true,
+    indentUnit:      2,
+    tabSize:         2,
+    indentWithTabs:  false,
+    lineWrapping:    false,
+    autofocus:       true,
+    styleActiveLine: true,
+    matchBrackets:   true,
+    foldGutter:      true,
+    gutters:         ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+    extraKeys: {
+      "Tab":         (cm) => cm.execCommand("indentMore"),
+      "Shift-Tab":   (cm) => cm.execCommand("indentLess"),
+      "Ctrl-/":      (cm) => cm.execCommand("toggleComment"),
+      "Cmd-/":       (cm) => cm.execCommand("toggleComment"),
+      "Ctrl-Q":      (cm) => cm.foldCode(cm.getCursor()),
+      "Cmd-Q":       (cm) => cm.foldCode(cm.getCursor()),
+      "Alt-F":       (cm) => {
+        // fold/unfold all top-level keys
+        const folded = cm.getDoc().getValue().split("\n").some((_, i) => {
+          const marks = cm.findMarksAt({ line: i, ch: 0 });
+          return marks.some(m => m.__isFold);
+        });
+        cm.execCommand(folded ? "unfoldAll" : "foldAll");
+      },
+      "Ctrl-F":      "findPersistent",
+      "Cmd-F":       "findPersistent",
+      "Esc":         () => closeYamlEditor(),
+    },
+  });
+
+  _yamlCm.getWrapperElement().style.cssText = "height:100%;font-size:14px;line-height:1.7;";
+  _yamlCm.setSize("100%", "100%");
+  setTimeout(() => _yamlCm.refresh(), 60);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function setStatus(msg, isError) {
+    const bar = document.getElementById("yaml-fs-status");
+    bar.style.display = msg ? "block" : "none";
+    bar.style.background = isError ? "#450a0a" : "#052e16";
+    bar.style.color      = isError ? "#fca5a5" : "#86efac";
+    bar.style.borderTop  = `1px solid ${isError ? "#7f1d1d" : "#14532d"}`;
+    bar.textContent = msg;
+  }
+
+  function closeYamlEditor() {
+    document.removeEventListener("keydown", escHandler);
+    if (_yamlCm) { try { _yamlCm.toTextArea(); } catch(_) {} _yamlCm = null; }
+    modal.remove();
+  }
+
+  function getYaml() { return _yamlCm ? _yamlCm.getValue() : ""; }
+
+  // ── Validate ───────────────────────────────────────────────────────────────
+  document.getElementById("yaml-fs-validate").onclick = async () => {
+    setStatus("Validating…", false);
+    try {
+      const result = await api.validatePropYaml(type, id, getYaml());
+      if (!result.valid) {
+        setStatus("✕  " + result.errors.join("\n"), true);
+      } else {
+        const w = result.warnings.length ? `   ⚠ ${result.warnings.join("; ")}` : "";
+        setStatus(`✓  Valid — ${result.property_count} properties${w}`, false);
+        setTimeout(() => setStatus("", false), 4000);
+      }
+    } catch(e) { setStatus("✕  " + e.message, true); }
+  };
+
+  // ── Apply ──────────────────────────────────────────────────────────────────
+  document.getElementById("yaml-fs-apply").onclick = async () => {
+    const replace = document.getElementById("yaml-fs-replace").checked;
+    setStatus("Applying…", false);
+    try {
+      const result = await api.applyPropYaml(type, id, getYaml(), replace);
+      const updated = await api.listProperties(type, id);
+      _propState.propsByScope[selectedScope] = updated;
+      toast(`Applied — ${result.created} created, ${result.updated} updated`, "success");
+      _propRenderTree();
+      _propRenderMiddle();
+      _propRenderResolved();
+      closeYamlEditor();
+    } catch(e) { setStatus("✕  " + e.message, true); }
+  };
+
+  // ── Close ──────────────────────────────────────────────────────────────────
+  document.getElementById("yaml-fs-close").onclick = closeYamlEditor;
+  const escHandler = (e) => { if (e.key === "Escape" && !e.defaultPrevented) closeYamlEditor(); };
+  document.addEventListener("keydown", escHandler);
+}
+
+function _propShowAdd() {
+  const { selectedScope } = _propState;
+  if (!selectedScope) return;
+  const { label } = _propScopeLabel(selectedScope);
+  const [type, id] = selectedScope.split(":");
+
+  openModal(`Add Property — ${label}`,
+    `<div class="form-group"><label>Name *</label>
+       <input id="pra-name" class="form-control" placeholder="e.g. DEPLOY_TIMEOUT" style="font-family:monospace"></div>
      <div class="form-group"><label>Type</label>
-       <select id="pr-type" class="form-control">
+       <select id="pra-type" class="form-control" onchange="_propUpdateAddValueInput(this.value)">
          <option value="string">string</option>
          <option value="number">number</option>
          <option value="boolean">boolean</option>
@@ -2634,60 +3667,122 @@ function showAddProperty(ownerType, ownerId, productId, pipelineId) {
          <option value="json">json</option>
        </select>
      </div>
-     <div class="form-group"><label>Value</label><input id="pr-value" class="form-control" placeholder="e.g. 300"></div>
-     <div class="form-group"><label>Description</label><input id="pr-desc" class="form-control" placeholder="Optional"></div>
-     <div class="form-group"><label>Required</label>
-       <select id="pr-req" class="form-control">
-         <option value="false">No</option>
-         <option value="true">Yes</option>
-       </select>
-     </div>`,
+     <div class="form-group">
+       <label>Value</label>
+       <div id="pra-val-wrap">${_propValueInputHtml("pra-val", "string", "")}</div>
+     </div>
+     <div class="form-group"><label>Description</label>
+       <input id="pra-desc" class="form-control" placeholder="What does this property control?"></div>
+     <div class="form-group"><label>Required at trigger time</label>
+       <select id="pra-req" class="form-control">
+         <option value="false">No</option><option value="true">Yes</option>
+       </select></div>`,
     async () => {
-      const name = el("pr-name").value.trim();
+      const name = el("pra-name").value.trim().toUpperCase().replace(/\s+/g,"_");
       if (!name) return modalError("Name is required");
+      const valueType = el("pra-type").value;
+      const value = _propGetInputValue("pra-val", valueType);
       try {
-        await api.createProperty(ownerType, ownerId, {
-          name, value: el("pr-value").value || null,
-          value_type: el("pr-type").value,
-          description: el("pr-desc").value.trim() || null,
-          is_required: el("pr-req").value === "true",
+        const created = await api.createProperty(type, id, {
+          name, value: value || null,
+          value_type: valueType,
+          description: el("pra-desc").value.trim() || null,
+          is_required: el("pra-req").value === "true",
         });
-        closeModal(); toast("Property saved", "success");
-        navigate(`products/${productId}/pipelines/${pipelineId}/properties`);
+        _propState.propsByScope[selectedScope] = [
+          ...(_propState.propsByScope[selectedScope] || []),
+          created,
+        ];
+        closeModal();
+        toast("Property added", "success");
+        _propRenderTree();
+        _propRenderMiddle();
+        _propRenderResolved();
       } catch(e) { modalError(e.message); }
-    }
+    },
+    "Add"
   );
 }
 
+function _propUpdateAddValueInput(newType) {
+  const wrap = document.getElementById("pra-val-wrap");
+  if (!wrap) return;
+  wrap.innerHTML = _propValueInputHtml("pra-val", newType, "");
+}
+
+function _propRenderResolved() {
+  const { selectedScope, propsByScope, productId, pipelineId, stages } = _propState;
+  const panel = document.getElementById("prop-resolved");
+  if (!panel || !selectedScope) return;
+
+  // Build full resolution chain from selected scope up to product
+  const chain = [];
+  const [type, id] = selectedScope.split(":");
+
+  if (type === "task") {
+    const stage = (stages||[]).find(s => (s.tasks||[]).some(t => t.id === id));
+    chain.push(
+      { key: selectedScope },
+      ...(stage ? [{ key: `stage:${stage.id}` }] : []),
+      { key: `pipeline:${pipelineId}` },
+      { key: `product:${productId}` },
+    );
+  } else if (type === "stage") {
+    chain.push({ key: selectedScope }, { key: `pipeline:${pipelineId}` }, { key: `product:${productId}` });
+  } else if (type === "pipeline") {
+    chain.push({ key: selectedScope }, { key: `product:${productId}` });
+  } else {
+    chain.push({ key: selectedScope });
+  }
+
+  // Resolve: first definition wins
+  const seen = new Set();
+  const resolved = [];
+  for (const { key } of chain) {
+    const { label: src } = _propScopeLabel(key);
+    const isSelected = key === selectedScope;
+    for (const p of (propsByScope[key] || [])) {
+      if (!seen.has(p.name)) {
+        seen.add(p.name);
+        resolved.push({ ...p, _source: src, _isSelected: isSelected });
+      }
+    }
+  }
+
+  if (!resolved.length) {
+    panel.innerHTML = `<div style="padding:16px;font-size:12px;color:var(--gray-400);text-align:center">No properties in scope hierarchy</div>`;
+    return;
+  }
+
+  panel.innerHTML = resolved.map(p => {
+    const color = _PROP_TYPE_COLOR[p.value_type] || "#6366f1";
+    const displayVal = p.value_type === "secret"
+      ? `<span style="letter-spacing:2px;color:var(--gray-300)">••••</span>`
+      : p.value
+        ? `<code style="font-size:11px;background:var(--gray-100);padding:1px 5px;border-radius:3px;word-break:break-all">${p.value}</code>`
+        : `<em style="color:var(--gray-400);font-size:11px">not set</em>`;
+    const fromHere = p._isSelected;
+    return `<div style="padding:8px 14px;border-bottom:1px solid var(--gray-100);${fromHere?"background:#f0fdf4":""}">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+        <span style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0"></span>
+        <code style="font-size:12px;font-weight:600;color:var(--gray-800)">${p.name}</code>
+        ${p.is_required ? `<span style="font-size:9px;color:#dc2626;font-weight:700">REQ</span>` : ""}
+      </div>
+      <div style="padding-left:14px">${displayVal}</div>
+      <div style="padding-left:14px;font-size:10px;color:${fromHere?"#15803d":"var(--gray-400)"};margin-top:2px">
+        ← ${fromHere ? "this scope" : p._source}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+// Legacy stubs kept for any remaining callers (webhooks, pipeline editor context menus)
+function showAddProperty(ownerType, ownerId, productId, pipelineId) {
+  navigate(`products/${productId}/pipelines/${pipelineId}/properties`);
+}
 function showEditProperty(ownerType, ownerId, name, value, valueType, description, isRequired, productId, pipelineId) {
-  const typeOpts = ["string","number","boolean","secret","json"].map(t =>
-    `<option value="${t}"${t===valueType?" selected":""}>${t}</option>`).join("");
-  openModal("Edit Property",
-    `<div class="form-group"><label>Name</label><input class="form-control" value="${name}" readonly style="background:var(--gray-50)"></div>
-     <div class="form-group"><label>Type</label><select id="pr-type" class="form-control">${typeOpts}</select></div>
-     <div class="form-group"><label>Value</label><input id="pr-value" class="form-control" value="${value}"></div>
-     <div class="form-group"><label>Description</label><input id="pr-desc" class="form-control" value="${description}"></div>
-     <div class="form-group"><label>Required</label>
-       <select id="pr-req" class="form-control">
-         <option value="false"${!isRequired?" selected":""}>No</option>
-         <option value="true"${isRequired?" selected":""}>Yes</option>
-       </select>
-     </div>`,
-    async () => {
-      try {
-        await api.updateProperty(ownerType, ownerId, name, {
-          value: el("pr-value").value || null,
-          value_type: el("pr-type").value,
-          description: el("pr-desc").value.trim() || null,
-          is_required: el("pr-req").value === "true",
-        });
-        closeModal(); toast("Property updated", "success");
-        navigate(`products/${productId}/pipelines/${pipelineId}/properties`);
-      } catch(e) { modalError(e.message); }
-    }
-  );
+  navigate(`products/${productId}/pipelines/${pipelineId}/properties`);
 }
-
 async function deleteProperty(ownerType, ownerId, name, productId, pipelineId) {
   if (!confirm(`Delete property "${name}"?`)) return;
   try {
@@ -3457,9 +4552,11 @@ async function saveTemplateYaml(tmplId) {
 
 // ── Environments list (top-level) ─────────────────────────────────────────
 router.register("environments", async () => {
+  const gen = _navGen;
   setBreadcrumb({ label: "Environments" });
   setContent(loading());
   const envs = await api.getEnvironments().catch(() => []);
+  if (_navGen !== gen) return;
   setContent(`
     <div class="page-header">
       <div><h1>Environments</h1><div class="sub">Deployment targets shared across products</div></div>
@@ -3541,7 +4638,8 @@ router.register("admission-rules", async () => {
                 <td>${r.description || "<span style='color:var(--gray-400)'>—</span>"}</td>
                 <td><code style="font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:4px">${r.scope}</code></td>
                 <td>${ratingBadge(r.min_rating)}</td>
-                <td>
+                <td style="display:flex;gap:4px">
+                  <button class="btn btn-secondary btn-sm" onclick="showEditRule('${r.id}','${(r.description||"").replace(/'/g,"\\'")}','${r.scope}','${r.min_rating}')">✏ Edit</button>
                   <button class="btn btn-danger btn-sm" onclick="deleteRule('${r.id}')">Disable</button>
                 </td>
               </tr>`).join("")}
@@ -3775,6 +4873,35 @@ function showCreateRule() {
         navigate("compliance");
       } catch (e) { modalError(e.message); }
     }
+  );
+}
+
+function showEditRule(ruleId, description, scope, minRating) {
+  const ratingOpts = ["Bronze", "Silver", "Gold", "Platinum"]
+    .map(r => `<option value="${r}" ${r === minRating ? "selected" : ""}>${r}</option>`)
+    .join("");
+  openModal("Edit Compliance Rule",
+    `<div class="form-group"><label>Description</label>
+       <input id="cr-edit-desc" class="form-control" value="${description.replace(/"/g, "&quot;")}" placeholder="e.g. Gold required for prod"></div>
+     <div class="form-group"><label>Scope *</label>
+       <input id="cr-edit-scope" class="form-control" value="${scope.replace(/"/g, "&quot;")}" placeholder="e.g. environment:prod or organization"></div>
+     <div class="form-group"><label>Minimum Rating *</label>
+       <select id="cr-edit-rating" class="form-control">${ratingOpts}</select></div>`,
+    async () => {
+      const newScope = el("cr-edit-scope").value.trim();
+      if (!newScope) return modalError("Scope is required");
+      try {
+        await api.updateComplianceRule(ruleId, {
+          description: el("cr-edit-desc").value.trim() || null,
+          scope: newScope,
+          min_rating: el("cr-edit-rating").value,
+        });
+        closeModal(); toast("Rule updated", "success");
+        _iso27001Loaded = false;
+        navigate("admission-rules");
+      } catch (e) { modalError(e.message); }
+    },
+    "Save"
   );
 }
 
@@ -4568,6 +5695,7 @@ router.register("webhooks", async () => {
               <td style="display:flex;gap:4px;flex-wrap:wrap">
                 <button class="btn btn-primary btn-sm" onclick="showTestWebhook('${w.id}','${w.name.replace(/'/g,"\\'")}')">⚡ Test</button>
                 <button class="btn btn-secondary btn-sm" onclick="showWebhookDeliveries('${w.id}','${w.name.replace(/'/g,"\\'")}')">Deliveries</button>
+                <button class="btn btn-secondary btn-sm" onclick="showEditWebhook('${w.id}','${w.name.replace(/'/g,"\\'")}','${(w.description||"").replace(/'/g,"\\'")}',${w.is_active})">✏ Edit</button>
                 <button class="btn btn-secondary btn-sm" onclick="toggleWebhook('${w.id}',${w.is_active})">${w.is_active ? "Disable" : "Enable"}</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${w.id}','${w.name.replace(/'/g,"\\'")}')">Delete</button>
               </td>
@@ -4664,6 +5792,33 @@ async function toggleWebhook(webhookId, isActive) {
     toast(`Webhook ${isActive ? "disabled" : "enabled"}`, "success");
     navigate("webhooks");
   } catch (e) { toast(e.message, "error"); }
+}
+
+async function showEditWebhook(webhookId, name, description, isActive) {
+  openModal("Edit Webhook",
+    `<div class="form-group"><label>Name *</label>
+       <input id="wh-edit-name" class="form-control" value="${name.replace(/"/g, "&quot;")}"></div>
+     <div class="form-group"><label>Description</label>
+       <input id="wh-edit-desc" class="form-control" value="${description.replace(/"/g, "&quot;")}"></div>
+     <div class="form-group"><label>Status</label>
+       <select id="wh-edit-active" class="form-control">
+         <option value="true" ${isActive ? "selected" : ""}>Active</option>
+         <option value="false" ${!isActive ? "selected" : ""}>Disabled</option>
+       </select></div>`,
+    async () => {
+      const newName = el("wh-edit-name").value.trim();
+      if (!newName) throw new Error("Name is required");
+      await api.updateWebhook(webhookId, {
+        name: newName,
+        description: el("wh-edit-desc").value.trim() || null,
+        is_active: el("wh-edit-active").value === "true",
+      });
+      closeModal();
+      toast("Webhook updated", "success");
+      navigate("webhooks");
+    },
+    "Save"
+  );
 }
 
 async function deleteWebhook(webhookId, name) {
@@ -5570,6 +6725,135 @@ window._permMatrixToggle = async function(checkbox) {
   }
 };
 
+// ── Feature Toggles ────────────────────────────────────────────────────────
+router.register("admin/toggles", async () => {
+  setBreadcrumb({ label: "Administration", hash: "admin/users" }, { label: "Feature Toggles" });
+  setContent(loading());
+  const toggles = await api.getToggles().catch(() => []);
+
+  // Group by category
+  const byCategory = {};
+  for (const t of toggles) {
+    const cat = t.category || "general";
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(t);
+  }
+
+  const categoryHtml = Object.entries(byCategory).map(([cat, items]) => `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header" style="text-transform:capitalize"><h3>${cat}</h3></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Key</th><th>Label</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${items.map(t => `
+            <tr>
+              <td><code style="font-size:12px">${t.key}</code></td>
+              <td><strong>${t.label}</strong></td>
+              <td style="color:var(--gray-500);font-size:13px">${t.description || "—"}</td>
+              <td>
+                <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+                  <input type="checkbox" ${t.enabled ? "checked" : ""} onchange="toggleFeature('${t.id}',this.checked)"
+                    style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer">
+                  <span class="badge ${t.enabled ? "badge-success" : "badge-silver"}">${t.enabled ? "On" : "Off"}</span>
+                </label>
+              </td>
+              <td style="display:flex;gap:4px">
+                <button class="btn btn-secondary btn-sm" onclick="showEditToggle('${t.id}','${t.key}','${t.label.replace(/'/g,"\\'")}','${(t.description||"").replace(/'/g,"\\'")}','${t.category||"general"}')">✏ Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteToggle('${t.id}','${t.key}')">Delete</button>
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table></div>
+    </div>`).join("") || `<div class="card"><div class="empty-state"><div class="empty-icon">🔀</div><p>No feature toggles yet.</p></div></div>`;
+
+  setContent(`
+    <div class="page-header">
+      <div><h1>Feature Toggles</h1><div class="sub">Runtime feature flags — enable or disable platform features without redeploying</div></div>
+      <button class="btn btn-primary" onclick="showCreateToggle()">+ New Toggle</button>
+    </div>
+    ${categoryHtml}
+  `);
+});
+
+async function toggleFeature(id, enabled) {
+  try {
+    await api.updateToggle(id, { enabled });
+    toast(`Feature ${enabled ? "enabled" : "disabled"}`, "success");
+  } catch (e) {
+    toast(e.message, "error");
+    navigate("admin/toggles");
+  }
+}
+
+function showCreateToggle() {
+  openModal("New Feature Toggle",
+    `<div class="form-group"><label>Key *</label>
+       <input id="ft-key" class="form-control" placeholder="e.g. enable_new_dashboard"></div>
+     <div class="form-group"><label>Label *</label>
+       <input id="ft-label" class="form-control" placeholder="e.g. New Dashboard UI"></div>
+     <div class="form-group"><label>Description</label>
+       <input id="ft-desc" class="form-control" placeholder="What does this toggle control?"></div>
+     <div class="form-group"><label>Category</label>
+       <input id="ft-cat" class="form-control" value="general" placeholder="e.g. general, beta, experimental"></div>
+     <div class="form-group"><label>Enabled by default</label>
+       <select id="ft-enabled" class="form-control">
+         <option value="false">Off</option><option value="true">On</option>
+       </select></div>`,
+    async () => {
+      const key = el("ft-key").value.trim();
+      const label = el("ft-label").value.trim();
+      if (!key || !label) return modalError("Key and Label are required");
+      try {
+        await api.createToggle({
+          key, label,
+          description: el("ft-desc").value.trim() || "",
+          category: el("ft-cat").value.trim() || "general",
+          enabled: el("ft-enabled").value === "true",
+        });
+        closeModal(); toast("Toggle created", "success");
+        navigate("admin/toggles");
+      } catch (e) { modalError(e.message); }
+    },
+    "Create"
+  );
+}
+
+function showEditToggle(id, key, label, description, category) {
+  openModal("Edit Feature Toggle",
+    `<div class="form-group"><label>Key</label>
+       <input class="form-control" value="${key}" readonly style="background:var(--gray-100);color:var(--gray-500)"></div>
+     <div class="form-group"><label>Label *</label>
+       <input id="ft-edit-label" class="form-control" value="${label.replace(/"/g, "&quot;")}"></div>
+     <div class="form-group"><label>Description</label>
+       <input id="ft-edit-desc" class="form-control" value="${description.replace(/"/g, "&quot;")}"></div>
+     <div class="form-group"><label>Category</label>
+       <input id="ft-edit-cat" class="form-control" value="${category.replace(/"/g, "&quot;")}"></div>`,
+    async () => {
+      const newLabel = el("ft-edit-label").value.trim();
+      if (!newLabel) return modalError("Label is required");
+      try {
+        await api.updateToggle(id, {
+          label: newLabel,
+          description: el("ft-edit-desc").value.trim() || "",
+          category: el("ft-edit-cat").value.trim() || "general",
+        });
+        closeModal(); toast("Toggle updated", "success");
+        navigate("admin/toggles");
+      } catch (e) { modalError(e.message); }
+    },
+    "Save"
+  );
+}
+
+async function deleteToggle(id, key) {
+  if (!confirm(`Delete feature toggle "${key}"? This cannot be undone.`)) return;
+  try {
+    await api.deleteToggle(id);
+    toast("Toggle deleted", "success");
+    navigate("admin/toggles");
+  } catch (e) { toast(e.message, "error"); }
+}
+
 // ── Key Management (API Keys + Vault) ─────────────────────────────────────
 router.register("admin/keys", async () => {
   setBreadcrumb({ label: "Administration", hash: "admin/users" }, { label: "Key Management" });
@@ -5644,6 +6928,144 @@ router.register("admin/keys", async () => {
     ${apiKeysHtml}
     ${vaultHtml}`);
 });
+
+// ── Feature Toggles ───────────────────────────────────────────────────────
+router.register("admin/toggles", async () => {
+  setBreadcrumb({ label: "Administration", hash: "admin/users" }, { label: "Feature Toggles" });
+  setContent(loading());
+  const toggles = await api.getToggles().catch(() => []);
+  _renderTogglesPage(toggles);
+});
+
+function _renderTogglesPage(toggles) {
+  const byCategory = {};
+  for (const t of toggles) {
+    (byCategory[t.category] = byCategory[t.category] || []).push(t);
+  }
+  const categories = Object.keys(byCategory).sort();
+  const categorySections = categories.length === 0
+    ? `<div class="empty-state"><div class="empty-icon">🚩</div><p>No feature toggles defined yet. Create one to get started.</p></div>`
+    : categories.map(cat => {
+        const items = byCategory[cat];
+        return `
+          <div style="margin-bottom:24px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--gray-400);margin-bottom:10px">${cat}</div>
+            ${items.map(t => `
+              <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--gray-100)">
+                <div style="flex:1;min-width:0">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;flex-wrap:wrap">
+                    <span style="font-weight:600;font-size:13px">${t.label}</span>
+                    <code style="font-size:10px;color:var(--gray-400);background:var(--gray-100);padding:1px 6px;border-radius:4px">${t.key}</code>
+                    ${t.enabled
+                      ? `<span class="badge badge-success" style="font-size:10px">Enabled</span>`
+                      : `<span class="badge" style="font-size:10px;background:var(--gray-100);color:var(--gray-500)">Disabled</span>`}
+                  </div>
+                  ${t.description ? `<div style="font-size:12px;color:var(--gray-500)">${t.description}</div>` : ""}
+                </div>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <label class="toggle-switch" title="${t.enabled ? "Enabled — click to disable" : "Disabled — click to enable"}">
+                    <input type="checkbox" ${t.enabled ? "checked" : ""} onchange="setToggleEnabled('${t.id}',this.checked)">
+                    <span class="toggle-track"></span>
+                  </label>
+                  <button class="btn btn-secondary btn-sm" onclick="showEditToggle('${t.id}','${t.key}','${t.label.replace(/'/g,"\\'")}','${(t.description||"").replace(/'/g,"\\'")}','${t.category}',${t.enabled})">Edit</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteToggle('${t.id}','${t.key}')">Delete</button>
+                </div>
+              </div>`).join("")}
+          </div>`;
+      }).join("");
+
+  setContent(`
+    <div class="page-header">
+      <div>
+        <h1>Feature Toggles</h1>
+        <div class="sub">Runtime feature flags — enable or disable platform features without redeploying</div>
+      </div>
+      <button class="btn btn-primary" onclick="showCreateToggle()">＋ New Toggle</button>
+    </div>
+    <div class="card">
+      ${categorySections}
+    </div>`);
+}
+
+async function setToggleEnabled(id, enabled) {
+  try {
+    await api.updateToggle(id, { enabled });
+    toast(enabled ? "Feature enabled" : "Feature disabled", "success");
+    const toggles = await api.getToggles().catch(() => []);
+    _renderTogglesPage(toggles);
+  } catch (e) {
+    toast(e.message || "Failed to update toggle", "error");
+    const toggles = await api.getToggles().catch(() => []);
+    _renderTogglesPage(toggles);
+  }
+}
+
+function showCreateToggle() {
+  openModal("New Feature Toggle",
+    `<div class="form-group"><label>Key <span style="font-size:11px;color:var(--gray-400)">(unique identifier, e.g. enable_new_pipeline_ui)</span></label>
+      <input id="ftg-key" class="form-control" placeholder="snake_case_key"></div>
+    <div class="form-group"><label>Label</label>
+      <input id="ftg-label" class="form-control" placeholder="Human-readable name"></div>
+    <div class="form-group"><label>Category</label>
+      <input id="ftg-cat" class="form-control" value="general" placeholder="general, ui, pipeline, compliance…"></div>
+    <div class="form-group"><label>Description</label>
+      <textarea id="ftg-desc" class="form-control" rows="2" placeholder="What does this toggle control?"></textarea></div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px">
+      <label class="toggle-switch"><input type="checkbox" id="ftg-enabled"><span class="toggle-track"></span></label>
+      <label style="margin:0;font-size:13px">Enable immediately</label>
+    </div>`,
+    async () => {
+      const key = (document.getElementById("ftg-key").value || "").trim();
+      const label = (document.getElementById("ftg-label").value || "").trim();
+      if (!key || !label) { modalError("Key and label are required"); return; }
+      try {
+        await api.createToggle({
+          key, label,
+          description: document.getElementById("ftg-desc").value || "",
+          category: (document.getElementById("ftg-cat").value || "general").trim(),
+          enabled: document.getElementById("ftg-enabled").checked,
+        });
+        closeModal(); toast("Toggle created", "success"); navigate("admin/toggles");
+      } catch (e) { modalError(e.message || "Failed"); }
+    }, "Create"
+  );
+}
+
+function showEditToggle(id, key, label, description, category, enabled) {
+  openModal("Edit Toggle",
+    `<div class="form-group"><label>Key</label>
+      <input class="form-control" value="${key}" disabled style="background:var(--gray-50);color:var(--gray-500)"></div>
+    <div class="form-group"><label>Label</label>
+      <input id="etg-label" class="form-control" value="${label}"></div>
+    <div class="form-group"><label>Category</label>
+      <input id="etg-cat" class="form-control" value="${category}"></div>
+    <div class="form-group"><label>Description</label>
+      <textarea id="etg-desc" class="form-control" rows="2">${description}</textarea></div>
+    <div class="form-group" style="display:flex;align-items:center;gap:10px">
+      <label class="toggle-switch"><input type="checkbox" id="etg-enabled" ${enabled ? "checked" : ""}><span class="toggle-track"></span></label>
+      <label style="margin:0;font-size:13px">Enabled</label>
+    </div>`,
+    async () => {
+      try {
+        await api.updateToggle(id, {
+          label: document.getElementById("etg-label").value,
+          description: document.getElementById("etg-desc").value,
+          category: document.getElementById("etg-cat").value,
+          enabled: document.getElementById("etg-enabled").checked,
+        });
+        closeModal(); toast("Toggle updated", "success"); navigate("admin/toggles");
+      } catch (e) { modalError(e.message || "Failed"); }
+    }, "Save"
+  );
+}
+
+async function deleteToggle(id, key) {
+  if (!confirm(`Delete toggle '${key}'?`)) return;
+  try {
+    await api.deleteToggle(id);
+    toast("Toggle deleted", "success"); navigate("admin/toggles");
+  } catch (e) { toast(e.message || "Failed", "error"); }
+}
 
 // ── Global Variables (LDAP + env config display) ──────────────────────────
 router.register("admin/variables", async () => {
@@ -6184,6 +7606,7 @@ router.register("admin/users/:id", async (hash, parts) => {
         <div class="sub">${user.email || user.username}</div>
       </div>
       <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="showEditUser('${user.id}','${user.display_name||""}','${user.email||""}')">✏ Edit Profile</button>
         <button class="btn btn-primary" onclick="showAddBinding('${user.id}')">+ Add Role Binding</button>
       </div>
     </div>
@@ -6292,6 +7715,26 @@ function showCreateUser() {
   );
 }
 
+
+function showEditUser(userId, displayName, email) {
+  openModal("Edit User Profile",
+    `<div class="form-group"><label>Display Name</label>
+       <input id="eu-name" class="form-control" value="${displayName.replace(/"/g, "&quot;")}" placeholder="Jane Doe"></div>
+     <div class="form-group"><label>Email</label>
+       <input id="eu-email" class="form-control" type="email" value="${email.replace(/"/g, "&quot;")}" placeholder="user@example.com"></div>`,
+    async () => {
+      try {
+        await api.updateUser(userId, {
+          display_name: el("eu-name").value.trim() || null,
+          email: el("eu-email").value.trim() || null,
+        });
+        closeModal(); toast("User updated", "success");
+        navigate("admin/users/" + userId);
+      } catch (e) { modalError(e.message); }
+    },
+    "Save"
+  );
+}
 
 async function showAddBinding(userId) {
   const roles = await api.getRoles().catch(() => []);
@@ -6778,12 +8221,18 @@ function _taskKindSections(kind, t) {
   const mode = t ? (t.execution_mode || "sequential") : "sequential";
   return `
     <div class="form-group"><label>Language</label>
-      <select id="tf-lang" class="form-control">
+      <select id="tf-lang" class="form-control"
+        onchange="if(window._spCmEditor){window._spCmEditor.setOption('mode',this.value==='python'?'python':'shell')}">
         <option value="bash"${lang==="bash"?" selected":""}>Bash</option>
         <option value="python"${lang==="python"?" selected":""}>Python</option>
       </select>
     </div>
-    <div class="form-group"><label>Script</label>
+    <div class="form-group">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <label style="margin:0">Script</label>
+        <button type="button" class="pe-btn pe-btn-ghost" style="padding:3px 10px;font-size:11px"
+          onclick="openScriptEditor('tf-code','tf-lang')">&#x26F6; Full Editor</button>
+      </div>
       <textarea id="tf-code" class="form-control code-editor" rows="8" placeholder="#!/bin/bash&#10;echo 'Hello'&#10;exit 0">${code}</textarea>
     </div>
     <div class="form-group"><label>Execution Mode</label>
@@ -6860,7 +8309,7 @@ function showCreateTask(productId, pipelineId, stageId) {
         navigate(`products/${productId}/pipelines/${pipelineId}`);
       } catch (e) { modalError(e.message); }
     },
-    "Save", "lg"
+    "Save", "xl"
   );
 }
 
@@ -6913,7 +8362,7 @@ function showEditTask(productId, pipelineId, stageId, taskId, name, desc, order,
           navigate(`products/${productId}/pipelines/${pipelineId}`);
         } catch (e) { modalError(e.message); }
       },
-      "Save", "lg"
+      "Save", "xl"
     );
   }).catch(() => toast("Failed to load task", "error"));
 }
@@ -7247,6 +8696,49 @@ function _spReadGate(prefix) {
   };
 }
 
+// ── Side-panel: Edit Pipeline (from canvas header click) ───────────────────
+async function spShowEditPipelineCanvas(productId, pipelineId, pipeline) {
+  const sp = _getPeSidePanel();
+  let pl = pipeline;
+  try { pl = await api.getPipeline(productId, pipelineId) || pipeline; } catch {}
+
+  sp.open(`Edit Pipeline — ${pl.name}`, `
+    <div class="form-group"><label>Name *</label>
+      <input id="sp-epl-name" class="form-control" value="${pl.name}">
+    </div>
+    <div class="form-group"><label>Kind</label>
+      <select id="sp-epl-kind" class="form-control">
+        <option value="ci"${(pl.kind||"ci")==="ci"?" selected":""}>CI — Continuous Integration</option>
+        <option value="cd"${pl.kind==="cd"?" selected":""}>CD — Continuous Delivery</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Git Repository</label>
+      <input id="sp-epl-repo" class="form-control" value="${pl.git_repo||""}" placeholder="https://github.com/org/repo">
+    </div>
+    <div class="form-group"><label>Git Branch</label>
+      <input id="sp-epl-branch" class="form-control" value="${pl.git_branch||"main"}">
+    </div>
+    <div class="form-group"><label>Accent Color</label>${_spAccentSwatchHtml("sp-epl-color", pl.accent_color || "")}</div>
+  `, async () => {
+    const n = (el("sp-epl-name")||{}).value.trim();
+    if (!n) return sp.error("Name is required");
+    sp.setSaving(true);
+    try {
+      await api.updatePipeline(productId, pipelineId, {
+        name:        n,
+        kind:        (el("sp-epl-kind")||{}).value,
+        git_repo:    (el("sp-epl-repo")||{}).value.trim() || null,
+        git_branch:  (el("sp-epl-branch")||{}).value.trim() || "main",
+        accent_color: (document.getElementById("sp-epl-color")||{}).value || null,
+      });
+      sp.close();
+      toast("Pipeline updated", "success");
+      await _peReload(productId, pipelineId);
+    } catch (e) { sp.error(e.message); }
+    finally { sp.setSaving(false); }
+  }, "Save Pipeline");
+}
+
 // ── Side-panel: Create Stage ────────────────────────────────────────────────
 function spShowCreateStage(productId, pipelineId) {
   const sp = _getPeSidePanel();
@@ -7487,17 +8979,6 @@ async function spShowEditTask(productId, pipelineId, stageId, taskId) {
       </select>
     </div>
     <hr class="pe-sp-divider">
-    <div class="pe-sp-section-label">Script</div>
-    <div class="form-group"><label>Language</label>
-      <select id="sp-et-lang" class="form-control" style="width:140px">
-        <option value="bash"${(t.run_language||"bash")==="bash"?" selected":""}>Bash</option>
-        <option value="python"${t.run_language==="python"?" selected":""}>Python</option>
-      </select>
-    </div>
-    <div class="form-group"><label>Script</label>
-      <textarea id="sp-et-code" class="pe-yaml-editor" rows="10">${(t.run_code||"").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</textarea>
-    </div>
-    <hr class="pe-sp-divider">
     <div style="display:flex;gap:8px">
       <button class="pe-btn pe-btn-ghost" style="flex:1"
         onclick="spRunTaskInPanel('${productId}','${pipelineId}','${stageId}','${taskId}','${t.name.replace(/'/g,"\\'")}')">
@@ -7522,8 +9003,8 @@ async function spShowEditTask(productId, pipelineId, stageId, taskId) {
         order: parseInt((el("sp-et-order")||{}).value) || 0,
         timeout: parseInt((el("sp-et-timeout")||{}).value) || 300,
         is_required: (el("sp-et-req")||{}).value === "true",
-        run_language: (el("sp-et-lang")||{}).value || "bash",
-        run_code: (el("sp-et-code")||{}).value || "",
+        run_language: (el("tf-lang")||{}).value || "bash",
+        run_code: (el("tf-code")||{}).value || "",
       }));
       sp.close();
       toast("Task updated", "success");
@@ -7541,6 +9022,348 @@ async function _spDeleteTaskFromPanel(productId, pipelineId, stageId, taskId, na
 function spRunTaskInPanel(productId, pipelineId, stageId, taskId, taskName) {
   _getPeSidePanel().close();
   runTaskNow(productId, pipelineId, stageId, taskId, taskName);
+}
+
+// ── Full-screen CodeMirror script editor modal ─────────────────────────────
+window._spCmEditor = null;
+
+function openScriptEditor(textareaId, langSelectId) {
+  const ta   = document.getElementById(textareaId);
+  const lang = (document.getElementById(langSelectId) || {}).value || "bash";
+  if (!ta || typeof CodeMirror === "undefined") return;
+
+  // Sync any existing CM editor back to textarea first
+  if (window._spCmEditor) {
+    const prev = window._spCmEditor;
+    const prevTa = prev._targetTextareaId && document.getElementById(prev._targetTextareaId);
+    if (prevTa) prevTa.value = prev.getValue();
+    prev.toTextArea();
+    window._spCmEditor = null;
+  }
+
+  // Close the properties panel if open
+  document.getElementById("pe-props-panel")?.classList.remove("open");
+
+  // Build modal
+  const modalId  = "script-editor-modal";
+  document.getElementById(modalId)?.remove();
+
+  const modal = document.createElement("div");
+  modal.id = modalId;
+  modal.style.cssText = `
+    position:fixed;inset:0;z-index:10000;background:#1e1e2e;
+    display:flex;flex-direction:column;overflow:hidden;
+  `;
+
+  // ── Header ──────────────────────────────────────────────────────────────────
+  const header = document.createElement("div");
+  header.style.cssText = `
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 16px;background:#12121f;border-bottom:1px solid #334155;
+    flex-shrink:0;gap:12px;
+  `;
+  header.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:13px;font-weight:700;color:#93c5fd">⚙ Script Editor</span>
+      <span id="sced-lang-label" style="font-size:11px;color:#475569">${lang === "python" ? "Python" : "Bash / Shell"}</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="sced-run" class="pe-btn" style="padding:5px 16px;background:#16a34a;color:#fff;border:none;border-radius:5px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">
+        ▶ Run
+      </button>
+      <button id="sced-apply" class="pe-btn pe-btn-primary" style="padding:5px 16px">✓ Apply &amp; Close</button>
+      <button id="sced-cancel" class="pe-btn pe-btn-ghost" style="padding:5px 12px">✕ Cancel</button>
+    </div>
+  `;
+
+  // ── Body: editor left + run panel right ─────────────────────────────────────
+  const body = document.createElement("div");
+  body.style.cssText = "flex:1;display:flex;overflow:hidden;";
+
+  // Editor column
+  const editorWrap = document.createElement("div");
+  editorWrap.style.cssText = "flex:1;overflow:hidden;display:flex;flex-direction:column;min-width:0;";
+  const cmTa = document.createElement("textarea");
+  cmTa.value = ta.value;
+  editorWrap.appendChild(cmTa);
+
+  // Run panel column
+  const runPanel = document.createElement("div");
+  runPanel.id = "sced-run-panel";
+  runPanel.style.cssText = `
+    width:380px;flex-shrink:0;display:flex;flex-direction:column;
+    background:#0f172a;border-left:1px solid #1e293b;overflow:hidden;
+  `;
+  runPanel.innerHTML = `
+    <!-- Panel header -->
+    <div style="padding:10px 14px;border-bottom:1px solid #1e293b;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Test Run</span>
+        <span id="sced-sandbox-badge" style="font-size:10px;padding:1px 7px;border-radius:8px;background:#1e293b;color:#475569">UBI9 sandbox</span>
+      </div>
+      <span id="sced-status-badge" style="font-size:11px;padding:2px 8px;border-radius:8px;background:#1e293b;color:#64748b">idle</span>
+    </div>
+
+    <!-- Env var overrides -->
+    <div style="padding:10px 14px;border-bottom:1px solid #1e293b;flex-shrink:0">
+      <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">
+        Extra env vars <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#475569">(KEY=value, one per line)</span>
+      </div>
+      <textarea id="sced-env-input" rows="3"
+        style="width:100%;background:#1e293b;border:1px solid #334155;border-radius:4px;color:#94a3b8;font-family:monospace;font-size:11px;padding:6px 8px;resize:vertical;box-sizing:border-box"
+        placeholder="MY_VAR=hello&#10;API_URL=http://localhost"></textarea>
+    </div>
+
+    <!-- Timeout -->
+    <div style="padding:6px 14px 10px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:10px;flex-shrink:0">
+      <label style="font-size:11px;color:#64748b;white-space:nowrap">Timeout (s)</label>
+      <input id="sced-timeout" type="number" min="1" max="60" value="30"
+        style="width:64px;background:#1e293b;border:1px solid #334155;border-radius:4px;color:#94a3b8;font-family:monospace;font-size:12px;padding:3px 8px;text-align:center">
+    </div>
+
+    <!-- Output area label -->
+    <div style="padding:8px 14px;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid #1e293b;flex-shrink:0">
+      Output
+    </div>
+
+    <!-- Spinner shown while container is running -->
+    <div id="sced-spinner" style="display:none;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:12px;color:#64748b;font-size:12px">
+      <div style="width:28px;height:28px;border:3px solid #334155;border-top-color:#7dd3fc;border-radius:50%;animation:sced-spin 0.8s linear infinite"></div>
+      <span id="sced-spinner-msg">Starting container…</span>
+    </div>
+
+    <!-- Final output (shown after run completes) -->
+    <div id="sced-output-wrap" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+      <pre id="sced-log-output"
+        style="flex:1;overflow-y:auto;margin:0;padding:10px 14px;font-family:monospace;font-size:12px;color:#94a3b8;white-space:pre-wrap;word-break:break-all;line-height:1.6;background:transparent"><span style="color:#475569;font-style:italic">Press ▶ Run to execute the script inside a UBI9 container…</span></pre>
+
+      <!-- Exit code bar -->
+      <div id="sced-result-bar" style="display:none;padding:8px 14px;border-top:1px solid #1e293b;flex-shrink:0">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <span style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Exit code</span>
+          <span id="sced-exit-code" style="font-family:monospace;font-size:14px;font-weight:700"></span>
+          <span id="sced-exit-label" style="font-size:11px"></span>
+        </div>
+        <div id="sced-output-json-wrap" style="display:none">
+          <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Output JSON</div>
+          <pre id="sced-output-json" style="margin:0;font-size:11px;background:#1e293b;padding:6px 10px;border-radius:4px;overflow-x:auto;color:#7dd3fc;white-space:pre-wrap;word-break:break-all"></pre>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Inject spinner keyframe animation once
+  if (!document.getElementById("sced-spin-style")) {
+    const s = document.createElement("style");
+    s.id = "sced-spin-style";
+    s.textContent = "@keyframes sced-spin { to { transform: rotate(360deg); } }";
+    document.head.appendChild(s);
+  }
+
+  body.appendChild(editorWrap);
+  body.appendChild(runPanel);
+  modal.appendChild(header);
+  modal.appendChild(body);
+  document.body.appendChild(modal);
+
+  // ── Init CodeMirror ─────────────────────────────────────────────────────────
+  const cm = CodeMirror.fromTextArea(cmTa, {
+    mode:        lang === "python" ? "python" : "shell",
+    theme:       "dracula",
+    lineNumbers: true,
+    indentUnit:  4,
+    tabSize:     4,
+    indentWithTabs: lang !== "python",
+    lineWrapping: false,
+    autofocus:   true,
+    extraKeys: {
+      "Tab": (cm) => cm.execCommand("indentMore"),
+      "Shift-Tab": (cm) => cm.execCommand("indentLess"),
+    },
+  });
+  cm._targetTextareaId = textareaId;
+  window._spCmEditor   = cm;
+  cm.getWrapperElement().style.cssText = "height:100%;font-size:14px;line-height:1.6;";
+  cm.setSize("100%", "100%");
+  setTimeout(() => cm.refresh(), 50);
+
+  // ── Apply / Cancel ──────────────────────────────────────────────────────────
+  function applyAndClose() {
+    ta.value = cm.getValue();
+    cm.toTextArea();
+    window._spCmEditor = null;
+    modal.remove();
+  }
+  document.getElementById("sced-apply").onclick = applyAndClose;
+  document.getElementById("sced-cancel").onclick = () => {
+    cm.toTextArea();
+    window._spCmEditor = null;
+    modal.remove();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      document.removeEventListener("keydown", onKey);
+      applyAndClose();
+    }
+  };
+  document.addEventListener("keydown", onKey);
+
+  // ── Run button logic ────────────────────────────────────────────────────────
+  let _runPollTimer = null;
+
+  function _scedSetStatus(status) {
+    const badge = document.getElementById("sced-status-badge");
+    if (!badge) return;
+    const map = {
+      idle:      ["#64748b", "#1e293b"],
+      building:  ["#93c5fd", "#172554"],
+      running:   ["#fbbf24", "#451a03"],
+      Succeeded: ["#4ade80", "#052e16"],
+      Warning:   ["#fb923c", "#431407"],
+      Failed:    ["#f87171", "#450a0a"],
+    };
+    const [color, bg] = map[status] || map.idle;
+    badge.textContent = status;
+    badge.style.color = color;
+    badge.style.background = bg;
+  }
+
+  function _scedShowSpinner(msg) {
+    document.getElementById("sced-spinner").style.display = "flex";
+    document.getElementById("sced-output-wrap").style.display = "none";
+    document.getElementById("sced-spinner-msg").textContent = msg;
+  }
+
+  function _scedShowOutput() {
+    document.getElementById("sced-spinner").style.display = "none";
+    document.getElementById("sced-output-wrap").style.display = "flex";
+  }
+
+  function _scedShowResult(run) {
+    _scedShowOutput();
+
+    const logEl = document.getElementById("sced-log-output");
+    if (logEl) {
+      logEl.textContent = run.logs || "(no output)";
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    const bar = document.getElementById("sced-result-bar");
+    if (bar) bar.style.display = "block";
+
+    const rc = run.return_code ?? "?";
+    const exitEl = document.getElementById("sced-exit-code");
+    if (exitEl) {
+      exitEl.textContent = String(rc);
+      exitEl.style.color = rc === 0 ? "#4ade80" : "#f87171";
+    }
+    const labelEl = document.getElementById("sced-exit-label");
+    if (labelEl) {
+      labelEl.textContent = run.status === "Succeeded" ? "✓ Success"
+                          : run.status === "Warning"   ? "⚠ Warning"
+                          : "✕ Failed";
+      labelEl.style.color = run.status === "Succeeded" ? "#4ade80"
+                           : run.status === "Warning"   ? "#fb923c"
+                           : "#f87171";
+    }
+
+    if (run.output_json) {
+      const ojWrap = document.getElementById("sced-output-json-wrap");
+      const ojEl   = document.getElementById("sced-output-json");
+      if (ojWrap && ojEl) {
+        ojWrap.style.display = "block";
+        try { ojEl.textContent = JSON.stringify(JSON.parse(run.output_json), null, 2); }
+        catch(_) { ojEl.textContent = run.output_json; }
+      }
+    }
+  }
+
+  async function _scedWaitForResult(runId) {
+    const DONE = new Set(["Succeeded", "Failed", "Warning"]);
+    for (let i = 0; i < 120; i++) {   // up to ~60s at 500ms intervals
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        const run = await api.getTaskRun(runId);
+        if (DONE.has(run.status)) return run;
+        // Update spinner message with container phase hint
+        const msg = run.status === "Running" ? "Running in UBI9 container…" : "Starting container…";
+        document.getElementById("sced-spinner-msg").textContent = msg;
+      } catch(_) { /* transient — keep polling */ }
+    }
+    return null; // timed out on client side
+  }
+
+  // Check sandbox image status and show indicator
+  api.getTaskRun && fetch("/api/v1/script-run/sandbox-status", {
+    headers: { "Authorization": `Bearer ${auth.getToken()}` }
+  }).then(r => r.json()).then(s => {
+    const badge = document.getElementById("sced-sandbox-badge");
+    if (!badge) return;
+    if (s.ready) {
+      badge.textContent = "UBI9 ready";
+      badge.style.color = "#4ade80";
+      badge.style.background = "#052e16";
+    } else {
+      badge.textContent = "UBI9 (first run builds image)";
+      badge.style.color = "#fbbf24";
+      badge.style.background = "#451a03";
+    }
+  }).catch(() => {});
+
+  document.getElementById("sced-run").onclick = async () => {
+    if (_runPollTimer) { clearInterval(_runPollTimer); _runPollTimer = null; }
+
+    // Parse env vars
+    const envLines = (document.getElementById("sced-env-input")?.value || "").split("\n");
+    const envMap = {};
+    for (const line of envLines) {
+      const eq = line.indexOf("=");
+      if (eq > 0) envMap[line.slice(0, eq).trim()] = line.slice(eq + 1);
+    }
+    const timeout = parseInt(document.getElementById("sced-timeout")?.value || "30", 10);
+
+    // Reset UI
+    document.getElementById("sced-result-bar").style.display = "none";
+    document.getElementById("sced-output-json-wrap").style.display = "none";
+    _scedShowSpinner("Starting UBI9 container…");
+    _scedSetStatus("running");
+    const btn = document.getElementById("sced-run");
+    btn.disabled = true;
+    btn.textContent = "⏳ Running…";
+
+    try {
+      const run = await api.runScript({
+        language: lang,
+        code: cm.getValue(),
+        timeout,
+        env: envMap,
+      });
+
+      // Wait for the container to finish (blocking poll)
+      const result = await _scedWaitForResult(run.id);
+
+      if (!result) {
+        _scedShowOutput();
+        document.getElementById("sced-log-output").textContent = "[error] Run timed out waiting for result";
+        _scedSetStatus("Failed");
+      } else {
+        _scedSetStatus(result.status);
+        _scedShowResult(result);
+      }
+    } catch(e) {
+      _scedShowOutput();
+      const logEl = document.getElementById("sced-log-output");
+      // If the sandbox image isn't built yet, surface a clear message
+      const msg = e.message?.includes("Sandbox unavailable")
+        ? `${e.message}\n\nMake sure Docker or Podman is running and accessible.`
+        : `[error] ${e.message}`;
+      if (logEl) logEl.textContent = msg;
+      _scedSetStatus("Failed");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "▶ Run";
+    }
+  };
 }
 
 // ── Agents page ────────────────────────────────────────────────────────────
@@ -7588,7 +9411,8 @@ function agentPoolCard(pool, canDelete) {
     </div>
     <div style="display:flex;gap:6px">
       ${canDelete
-        ? `<button class="btn btn-danger btn-sm" onclick="deleteAgentPool('${pool.id}','${pool.name}')">Delete</button>`
+        ? `<button class="btn btn-secondary btn-sm" onclick="showEditAgentPool('${pool.id}','${pool.name.replace(/'/g,"\\'")}','${(pool.description||"").replace(/'/g,"\\'")}','${pool.cpu_limit||"500m"}','${pool.memory_limit||"256Mi"}',${pool.max_agents||5})">✏ Edit</button>
+           <button class="btn btn-danger btn-sm" onclick="deleteAgentPool('${pool.id}','${pool.name.replace(/'/g,"\\'")}')">Delete</button>`
         : `<span style="font-size:12px;color:var(--gray-400)">System pool</span>`}
     </div>
   </div>`;
@@ -7615,6 +9439,37 @@ function showCreateAgentPool() {
         navigate("agents");
       } catch (e) { modalError(e.message); }
     }
+  );
+}
+
+function showEditAgentPool(poolId, name, description, cpuLimit, memLimit, maxAgents) {
+  openModal("Edit Agent Pool",
+    `<div class="form-group"><label>Name *</label>
+       <input id="ap-edit-name" class="form-control" value="${name.replace(/"/g, "&quot;")}"></div>
+     <div class="form-group"><label>Description</label>
+       <input id="ap-edit-desc" class="form-control" value="${description.replace(/"/g, "&quot;")}"></div>
+     <div class="form-group"><label>CPU Limit</label>
+       <input id="ap-edit-cpu" class="form-control" value="${cpuLimit}" placeholder="e.g. 500m, 2"></div>
+     <div class="form-group"><label>Memory Limit</label>
+       <input id="ap-edit-mem" class="form-control" value="${memLimit}" placeholder="e.g. 256Mi, 1Gi"></div>
+     <div class="form-group"><label>Max Concurrent Agents</label>
+       <input id="ap-edit-max" class="form-control" type="number" value="${maxAgents}"></div>`,
+    async () => {
+      const newName = el("ap-edit-name").value.trim();
+      if (!newName) return modalError("Name is required");
+      try {
+        await api.updateAgentPool(poolId, {
+          name: newName,
+          description: el("ap-edit-desc").value.trim() || null,
+          cpu_limit: el("ap-edit-cpu").value.trim() || "500m",
+          memory_limit: el("ap-edit-mem").value.trim() || "256Mi",
+          max_agents: parseInt(el("ap-edit-max").value) || 5,
+        });
+        closeModal(); toast("Agent pool updated", "success");
+        navigate("agents");
+      } catch (e) { modalError(e.message); }
+    },
+    "Save"
   );
 }
 
@@ -8149,31 +10004,18 @@ function _isYamlModeActive() {
 }
 
 function _yamlScrollToPattern(pattern) {
-  const ta = document.getElementById("pipeline-yaml-editor");
-  if (!ta) return;
-  const lines = ta.value.split("\n");
+  if (!_plCmInstance) return;
+  const doc = _plCmInstance.getDoc();
+  const text = _plCmInstance.getValue();
+  const lines = text.split("\n");
   let matchLine = -1;
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].includes(pattern)) { matchLine = i; break; }
   }
   if (matchLine === -1) return;
-
-  // Compute character offset to that line
-  let offset = 0;
-  for (let i = 0; i < matchLine; i++) offset += lines[i].length + 1;
-  const end = offset + lines[matchLine].length;
-
-  // Select and scroll to the line
-  ta.focus();
-  ta.setSelectionRange(offset, end);
-
-  // Scroll the textarea so the matched line is visible
-  const lineH = parseFloat(getComputedStyle(ta).lineHeight) || 18;
-  ta.scrollTop = Math.max(0, (matchLine - 3) * lineH);
-
-  // Flash the textarea border to draw attention
-  ta.style.outline = "2px solid var(--brand)";
-  setTimeout(() => { ta.style.outline = ""; }, 1500);
+  doc.setSelection({ line: matchLine, ch: 0 }, { line: matchLine, ch: lines[matchLine].length });
+  _plCmInstance.scrollIntoView({ line: Math.max(0, matchLine - 3), ch: 0 }, 60);
+  _plCmInstance.focus();
 }
 
 function visualScrollToStage(stageId) {
@@ -8217,29 +10059,85 @@ function visualScrollToTask(taskId, stageId) {
 
 // ── Pipeline YAML editor ───────────────────────────────────────────────────
 async function loadPipelineYaml(productId, pipelineId) {
-  const ta = document.getElementById("pipeline-yaml-editor");
   const st = document.getElementById("pipeline-yaml-status");
-  if (!ta) return;
-  ta.value = "# Loading…";
   try {
-    const token = api.auth ? api.auth.getToken() : auth.getToken();
     const headers = {};
     const t = auth.getToken();
     if (t) headers["Authorization"] = `Bearer ${t}`;
     const res = await fetch(`/api/v1/products/${productId}/pipelines/${pipelineId}/export`, { headers });
     if (!res.ok) throw new Error("Failed to load YAML");
-    ta.value = await res.text();
+    const text = await res.text();
+    if (_plCmInstance) {
+      _plCmInstance.setValue(text);
+      _plCmInstance.clearHistory();
+    } else {
+      _plYamlPending = text;  // stash until CodeMirror is initialized
+    }
     if (st) st.innerHTML = `<span style="color:var(--gray-400)">Loaded at ${new Date().toLocaleTimeString()}</span>`;
   } catch (e) {
-    ta.value = "# Error loading YAML: " + e.message;
+    _plYamlPending = "# Error loading YAML: " + e.message;
   }
 }
 
-async function savePipelineYaml(productId, pipelineId) {
-  const ta = document.getElementById("pipeline-yaml-editor");
+async function validatePipelineYaml(productId, pipelineId) {
   const st = document.getElementById("pipeline-yaml-status");
-  if (!ta) return;
-  const yaml = ta.value.trim();
+  const yaml = _plCmInstance ? _plCmInstance.getValue().trim() : "";
+  if (!yaml) return;
+  if (st) st.innerHTML = `<span style="color:var(--gray-400)">Validating…</span>`;
+  try {
+    const result = await api.validatePipelineYaml(productId, pipelineId, yaml);
+    if (result.valid) {
+      const s = result.summary;
+      if (st) st.innerHTML =
+        `<span style="color:var(--success)">✓ Valid — ${s.stages} stage(s), ${s.tasks} task(s)</span>` +
+        (result.warnings.length
+          ? `<span style="color:var(--warning);margin-left:8px">⚠ ${result.warnings.length} warning(s)</span>`
+          : "");
+      if (result.warnings.length) {
+        toast("Validation passed with warnings:\n" + result.warnings.join("\n"), "warning");
+      } else {
+        toast("YAML is valid", "success");
+      }
+    } else {
+      if (st) st.innerHTML =
+        `<span style="color:var(--danger)">✗ ${result.errors.length} error(s)` +
+        (result.warnings.length ? `, ${result.warnings.length} warning(s)` : "") + `</span>`;
+      // Show errors inline below status bar
+      _showYamlValidationPanel(result.errors, result.warnings);
+    }
+  } catch (e) {
+    if (st) st.innerHTML = `<span style="color:var(--danger)">✗ ${e.message}</span>`;
+  }
+}
+
+function _showYamlValidationPanel(errors, warnings) {
+  const existing = document.getElementById("pl-yaml-validation-panel");
+  if (existing) existing.remove();
+
+  const left = document.getElementById("pl-split-left");
+  if (!left) return;
+
+  const panel = document.createElement("div");
+  panel.id = "pl-yaml-validation-panel";
+  panel.style.cssText = "background:#1e1e2e;border-top:1px solid #dc2626;padding:8px 12px;max-height:140px;overflow-y:auto;font-size:12px;font-family:monospace";
+
+  const closeBtn = `<button onclick="document.getElementById('pl-yaml-validation-panel').remove()" style="float:right;background:none;border:none;color:#64748b;cursor:pointer;font-size:14px;line-height:1">✕</button>`;
+  let html = closeBtn;
+
+  if (errors.length) {
+    html += errors.map(e => `<div style="color:#f87171;padding:2px 0">✗ ${e}</div>`).join("");
+  }
+  if (warnings.length) {
+    html += warnings.map(w => `<div style="color:#fbbf24;padding:2px 0">⚠ ${w}</div>`).join("");
+  }
+
+  panel.innerHTML = html;
+  left.appendChild(panel);
+}
+
+async function savePipelineYaml(productId, pipelineId) {
+  const st = document.getElementById("pipeline-yaml-status");
+  const yaml = _plCmInstance ? _plCmInstance.getValue().trim() : "";
   if (!yaml) return;
   if (st) st.innerHTML = `<span style="color:var(--gray-400)">Saving…</span>`;
   try {
@@ -8628,80 +10526,397 @@ function _renderPipelineRun(run, productId, pipelineId) {
     </div>` : "";
 
   return `
-    <div class="page-header">
-      <div>
-        ${productId ? `<div style="font-size:13px;margin-bottom:4px"><a href="#products/${productId}/pipelines/${pipelineId}" onclick="navigate('products/${productId}/pipelines/${pipelineId}');return false;">← Pipeline</a></div>` : ""}
-        <h1>Pipeline Run</h1>
-        <div class="sub"><code style="font-size:12px">${run.id}</code></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        ${statusBadge(run.status)}
-        <span style="font-size:13px;color:var(--gray-400)">by ${run.triggered_by||"system"} · ${fmtDate(run.started_at)}</span>
-        ${run.finished_at ? `<span style="font-size:13px;color:var(--gray-400)">· ${fmtDuration(run.started_at, run.finished_at)} total</span>` : ""}
-        <button class="btn btn-secondary btn-sm" onclick="openRunContextInspector('${run.id}')">🔍 Inspect Context</button>
-        <button class="btn btn-secondary btn-sm" onclick="rerunPipeline('${run.id}')">↺ Re-run</button>
-      </div>
-    </div>
-
-    ${approvalBanner}
-
-    <!-- Audit / Compliance reports — top of page for quick access -->
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header">
-        <h3 style="font-size:14px;margin:0">📋 Compliance Audit Reports</h3>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="loadAuditReport('${run.id}','isae')">ISAE 3000 / SOC 2</button>
-          <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="loadAuditReport('${run.id}','acf')">ACF</button>
+    <!-- Run page header bar -->
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="flex:1;min-width:0">
+        ${productId ? `<div style="font-size:12px;margin-bottom:2px"><a href="#products/${productId}/pipelines/${pipelineId}" onclick="navigate('products/${productId}/pipelines/${pipelineId}');return false;" style="color:var(--gray-400)">← Pipeline</a></div>` : ""}
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <h1 style="margin:0;font-size:18px">Pipeline Run</h1>
+          ${statusBadge(run.status)}
+          <!-- Progress bar inline -->
+          <div style="display:flex;align-items:center;gap:6px;min-width:140px">
+            <div style="flex:1;height:6px;border-radius:3px;background:var(--gray-200);overflow:hidden;position:relative">
+              <div id="prc-progress-bar-${run.id}" style="position:absolute;top:0;left:0;height:100%;border-radius:3px;background:${runColor};width:${Math.min(run.completion_percentage ?? 0, 100)}%;transition:width .4s"></div>
+            </div>
+            <span id="prc-progress-pct-${run.id}" style="font-size:12px;font-weight:600;color:var(--gray-600);white-space:nowrap">${run.completion_percentage ?? 0}%</span>
+          </div>
+          <span style="font-size:12px;color:var(--gray-400)">by ${run.triggered_by||"system"} · ${fmtDate(run.started_at)}${run.finished_at ? " · " + fmtDuration(run.started_at, run.finished_at) : ""}</span>
         </div>
       </div>
-      <div id="audit-report-${run.id}" style="display:none;padding:14px">
-        <div class="loading-center"><div class="spinner"></div></div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        ${awaitingTaskRuns.length > 0 ? `<button class="btn btn-sm" style="background:#7c3aed;color:#fff;font-weight:700" onclick="prcOpenApprovalPanel()">✋ ${awaitingTaskRuns.length} Pending Approval</button>` : ""}
+        <button class="btn btn-secondary btn-sm" onclick="openRunContextInspector('${run.id}')">🔍 Context</button>
+        <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="_prcToggleAudit('${run.id}')">📋 Audit</button>
+        <button class="btn btn-secondary btn-sm" onclick="rerunPipeline('${run.id}')">↺ Re-run</button>
       </div>
     </div>
 
     ${ctxTabs}
 
-    <!-- Overall progress bar -->
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-      <div style="flex:1;min-width:100px;height:8px;border-radius:4px;background:var(--gray-200);overflow:hidden;position:relative">
-        <div style="position:absolute;top:0;left:0;height:100%;border-radius:4px;background:${runColor};width:${Math.min(run.completion_percentage ?? 0, 100)}%;max-width:100%;transition:width .4s"></div>
+    <!-- Audit panel (hidden by default) -->
+    <div id="prc-audit-${run.id}" style="display:none;margin-bottom:10px">
+      <div class="card">
+        <div class="card-header">
+          <h3 style="font-size:13px;margin:0">📋 Compliance Audit Reports</h3>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="loadAuditReport('${run.id}','isae')">ISAE 3000 / SOC 2</button>
+            <button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="loadAuditReport('${run.id}','acf')">ACF</button>
+          </div>
+        </div>
+        <div id="audit-report-${run.id}" style="display:none;padding:14px">
+          <div class="loading-center"><div class="spinner"></div></div>
+        </div>
       </div>
-      <span style="font-size:13px;font-weight:600;color:var(--gray-600);white-space:nowrap;min-width:40px;text-align:right">${run.completion_percentage ?? 0}%</span>
     </div>
 
-    <!-- Pipeline-level runtime properties (webhook payload, etc.) -->
-    ${Object.keys(pipelineProps).length ? `
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header" style="cursor:pointer" onclick="toggleLog('run-rtprops-${run.id}')">
-        <h3 style="font-size:13px;margin:0;color:var(--gray-600)">⚙ Pipeline Runtime Properties</h3>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+    <!-- Unified canvas + drawer -->
+    <div class="prc-outer" id="prc-outer-${run.id}">
+      <!-- Canvas column -->
+      <div class="prc-canvas-col">
+        <div id="prc-container-${run.id}" style="display:flex;flex-direction:column;flex:1;min-height:0"></div>
       </div>
-      <div id="run-rtprops-${run.id}" class="task-log-block">
-        <pre class="ctx-json-pre">${pipelinePropsJson.replace(/</g,"&lt;")}</pre>
+      <!-- Side drawer (initially closed) -->
+      <div class="prc-drawer" id="prc-drawer-${run.id}">
+        <div class="prc-drawer-hdr">
+          <div>
+            <div class="prc-drawer-hdr-title" id="prc-drawer-title-${run.id}">Stage Details</div>
+            <div class="prc-drawer-hdr-sub" id="prc-drawer-sub-${run.id}"></div>
+          </div>
+          <button class="prc-drawer-close" onclick="prcCloseDrawer('${run.id}')">✕</button>
+        </div>
+        <div class="prc-drawer-body" id="prc-drawer-body-${run.id}"></div>
       </div>
-    </div>` : ""}
-
-    <!-- Visual flow -->
-    <div class="card" style="margin-bottom:16px;overflow-x:auto">
-      <div style="padding:8px 16px 4px">
-        <div style="font-size:11px;font-weight:600;color:var(--gray-500);text-transform:uppercase;letter-spacing:.06em">Pipeline Flow — click a stage or task to jump to details</div>
-      </div>
-      <div style="padding:8px 8px 12px;min-height:80px">${flowSvg}</div>
     </div>
-
-    ${stageDetails || `<div class="card"><div class="empty-state"><div class="empty-icon">📋</div><p>No stages in this pipeline.</p></div></div>`}
-
-    <!-- Resolved properties for this run -->
-    <div class="card" style="margin-top:16px">
-      <div class="card-header" style="cursor:pointer" onclick="loadRunResolvedProps('${run.id}','rp-${run.id}',this)">
-        <h3 style="font-size:14px;margin:0">🔧 Resolved Properties</h3>
-        <span id="rp-chev-${run.id}" style="font-size:12px;color:var(--gray-400)">▾ Load</span>
-      </div>
-      <div id="rp-${run.id}" style="display:none;padding:14px"></div>
-    </div>
-
   `;
 }
+
+// ── Pipeline run drawer ────────────────────────────────────────────────────────
+// Global state for the active drawer
+let _prcDrawerRunData  = null;   // latest run data for the open run page
+let _prcDrawerRunId    = null;   // run.id for element id lookups
+
+function _prcToggleAudit(runId) {
+  const el = document.getElementById(`prc-audit-${runId}`);
+  if (el) el.style.display = el.style.display === "none" ? "" : "none";
+}
+
+function prcCloseDrawer(runId) {
+  const drawer = document.getElementById(`prc-drawer-${runId}`);
+  if (drawer) { drawer.classList.remove("open"); drawer.removeAttribute("data-open-sr"); }
+  _prcDrawerRunId = null;
+}
+
+// Called from canvas click handlers (window.prcOpenDrawer)
+function prcOpenDrawer(stageRunId, focusTaskRunId) {
+  if (!_prcDrawerRunData) return;
+  const run = _prcDrawerRunData;
+  const runId = run.id;
+  _prcDrawerRunId = runId;
+
+  const sr = (run.stage_runs || []).find(s => s.id === stageRunId);
+  if (!sr) return;
+
+  const drawer = document.getElementById(`prc-drawer-${runId}`);
+  const titleEl = document.getElementById(`prc-drawer-title-${runId}`);
+  const subEl   = document.getElementById(`prc-drawer-sub-${runId}`);
+  const bodyEl  = document.getElementById(`prc-drawer-body-${runId}`);
+  if (!drawer || !bodyEl) return;
+
+  // Build title
+  const sc = { Succeeded:"#22c55e", Failed:"#ef4444", Running:"#3b82f6", Warning:"#f59e0b",
+                Cancelled:"#94a3b8", Pending:"#cbd5e1", AwaitingApproval:"#8b5cf6", Skipped:"#475569" };
+  const dot = sc[sr.status] || "#94a3b8";
+  if (titleEl) titleEl.innerHTML = `<span style="color:${dot};margin-right:6px">●</span>${sr.stage_name || "Stage"}`;
+  if (subEl) subEl.textContent = `${sr.status}${sr.started_at ? " · " + fmtDuration(sr.started_at, sr.finished_at||new Date().toISOString()) : ""}`;
+
+  // Build drawer body
+  bodyEl.innerHTML = _prcDrawerBody(run, sr, focusTaskRunId);
+
+  // Open drawer and record which stage is shown
+  drawer.classList.add("open");
+  drawer.setAttribute("data-open-sr", stageRunId);
+
+  // If a task was clicked, scroll to it and auto-expand logs
+  if (focusTaskRunId) {
+    requestAnimationFrame(() => {
+      const taskEl = document.getElementById(`prc-dtask-${focusTaskRunId}`);
+      if (taskEl) {
+        taskEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        // Auto-open logs section
+        const logArea = document.getElementById(`prc-dlog-${focusTaskRunId}`);
+        if (logArea) {
+          logArea.classList.add("open");
+          const hdr = taskEl.querySelector(".prc-task-item-hdr");
+          if (hdr) hdr.classList.add("active");
+        }
+      }
+    });
+  }
+}
+
+function prcOpenApprovalPanel() {
+  if (!_prcDrawerRunData) return;
+  const run = _prcDrawerRunData;
+  const awaitingSr = (run.stage_runs || []).find(sr =>
+    (sr.task_runs || []).some(tr => tr.status === "AwaitingApproval")
+  );
+  if (awaitingSr) {
+    const awaitingTr = (awaitingSr.task_runs || []).find(tr => tr.status === "AwaitingApproval");
+    prcOpenDrawer(awaitingSr.id, awaitingTr?.id);
+  }
+}
+
+function _prcDrawerBody(run, sr, focusTaskRunId) {
+  const srProps = sr.runtime_properties || {};
+  const entryGateResult = srProps.entry_gate;
+  const exitGateResult  = srProps.exit_gate;
+  const canRestart = TERMINAL.has(run.status);
+
+  const gateHtml = (result, label) => {
+    if (!result) return "";
+    const color = result.passed ? "#065f46" : "#991b1b";
+    const bg    = result.passed ? "#d1fae5" : "#fee2e2";
+    const icon  = result.passed ? "✓" : "✗";
+    let html = `<div class="prc-gate-banner" style="background:${bg};color:${color}">
+      ${icon} ${label}: ${result.passed ? "Passed" : "Failed"}
+      ${result.logs ? `<button class="btn btn-secondary btn-sm" style="font-size:11px;padding:1px 7px;margin-left:auto"
+        onclick="this.nextElementSibling.classList.toggle('open')">Logs</button>
+        <div class="prc-task-item-body" style="width:100%">
+          <div class="prc-log-area">${result.logs.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>
+        </div>` : ""}
+    </div>`;
+    return html;
+  };
+
+  // Stage actions bar
+  const actionsHtml = `
+    <div class="prc-drawer-section" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 16px">
+      ${canRestart ? `<button class="btn btn-secondary btn-sm" onclick="rerunFromStage('${run.id}','${sr.id}')">↺ Restart from here</button>` : ""}
+      ${Object.keys(srProps).filter(k => k !== "entry_gate" && k !== "exit_gate").length
+        ? `<button class="btn btn-secondary btn-sm" onclick="prcDrawerToggle('prc-srctx-${sr.id}')">⚙ Stage Context</button>` : ""}
+    </div>`;
+
+  // Stage context
+  const srPropsForDisplay = {...srProps};
+  delete srPropsForDisplay.entry_gate; delete srPropsForDisplay.exit_gate;
+  const srPropsJson = Object.keys(srPropsForDisplay).length ? JSON.stringify(srPropsForDisplay, null, 2) : null;
+  const stageCtxHtml = srPropsJson ? `
+    <div id="prc-srctx-${sr.id}" class="prc-task-item-body" style="padding:0 16px 12px">
+      <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;font-size:11px;overflow-x:auto;margin:0">${srPropsJson.replace(/</g,"&lt;")}</pre>
+    </div>` : "";
+
+  // Gate banners
+  const entryGateHtml = entryGateResult ? `<div class="prc-drawer-section" style="padding:0">${gateHtml(entryGateResult, "Entry Gate")}</div>` : "";
+  const exitGateHtml  = exitGateResult  ? `<div class="prc-drawer-section" style="padding:0">${gateHtml(exitGateResult, "Exit Gate")}</div>` : "";
+
+  // Task list
+  const taskItems = (sr.task_runs || []).map(tr => {
+    const tc   = { Succeeded:"#22c55e", Failed:"#ef4444", Running:"#3b82f6", Warning:"#f59e0b",
+                   Cancelled:"#94a3b8", Pending:"#cbd5e1", AwaitingApproval:"#8b5cf6", Skipped:"#475569" };
+    const dot  = tc[tr.status] || "#94a3b8";
+    const icon = { Succeeded:"✓", Failed:"✗", Running:"⟳", Warning:"⚠",
+                   Cancelled:"⊘", Pending:"○", AwaitingApproval:"✋", Skipped:"↷" }[tr.status] || "○";
+    const dur  = fmtDuration(tr.started_at, tr.finished_at);
+    const kind = tr.task_kind || "script";
+    const isFocused = tr.id === focusTaskRunId;
+    const isAwaiting = tr.status === "AwaitingApproval";
+
+    // Approval panel
+    const approvalHtml = kind === "approval" ? (() => {
+      const decisions = tr.approval_decisions || [];
+      const decRows = decisions.map(d => {
+        const dc = d.decision === "approved" ? "#065f46" : "#991b1b";
+        const dBg = d.decision === "approved" ? "#d1fae5" : "#fee2e2";
+        return `<div style="display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid #f1f5f9">
+          <span style="background:${dBg};color:${dc};padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600">${d.decision}</span>
+          <strong style="font-size:12px">${d.display_name || d.username}</strong>
+          ${d.comment ? `<span style="color:#64748b;font-size:11px">"${d.comment}"</span>` : ""}
+          <span style="color:#94a3b8;font-size:10px;margin-left:auto">${fmtDate(d.decided_at)}</span>
+        </div>`;
+      }).join("") || `<div style="padding:8px 12px;color:#94a3b8;font-size:12px">No decisions yet.</div>`;
+
+      const awaitActions = isAwaiting ? `
+        <div style="padding:10px 12px;display:flex;gap:8px;border-top:1px solid #f1f5f9;flex-wrap:wrap">
+          <input id="prc-apv-${tr.id}" class="form-control" style="font-size:12px;flex:1;min-width:120px" placeholder="Comment (optional)">
+          <button class="btn btn-success btn-sm" onclick="prcSubmitApproval('${tr.id}','approved','${run.id}')">✓ Approve</button>
+          <button class="btn btn-danger btn-sm" onclick="prcSubmitApproval('${tr.id}','rejected','${run.id}')">✗ Reject</button>
+        </div>` : "";
+
+      return `<div style="border-top:2px solid ${isAwaiting?"#7c3aed":"#bfdbfe"};background:${isAwaiting?"linear-gradient(135deg,#f5f3ff,#eff6ff)":"#eff6ff"}">
+        <div style="padding:8px 12px;font-size:12px;font-weight:700;color:${isAwaiting?"#5b21b6":"#1e40af"};border-bottom:1px solid #bfdbfe">
+          ${isAwaiting?"✋ Approval Required":"📋 Approval Decisions"}
+        </div>
+        ${decRows}${awaitActions}
+      </div>`;
+    })() : "";
+
+    // Context tabs
+    const ctxHtml = kind === "script" ? `
+      <div class="prc-ctx-tabs">
+        <button class="prc-ctx-tab active" onclick="prcCtxTab('${tr.id}','env',this)">CDT Variables</button>
+        <button class="prc-ctx-tab" onclick="prcCtxTab('${tr.id}','props',this)">Properties</button>
+        <button class="prc-ctx-tab" onclick="prcCtxTab('${tr.id}','output',this)">Output</button>
+      </div>
+      <div id="prc-ctx-env-${tr.id}" class="prc-ctx-pane active">${_prcCtxEnvTable(tr)}</div>
+      <div id="prc-ctx-props-${tr.id}" class="prc-ctx-pane">${_prcCtxPropsTable(tr)}</div>
+      <div id="prc-ctx-output-${tr.id}" class="prc-ctx-pane">${_prcCtxOutputPanel(tr)}</div>` : "";
+
+    // Logs
+    const logsHtml = `
+      <div class="prc-log-area" id="prc-dlog-${tr.id}">${
+        tr.logs
+          ? tr.logs.replace(/</g,"&lt;").replace(/>/g,"&gt;")
+          : '<span style="color:#475569;font-style:italic">(no logs)</span>'
+      }</div>`;
+
+    return `
+      <div class="prc-task-item" id="prc-dtask-${tr.id}"
+           style="${isAwaiting ? "border-color:#7c3aed;" : ""}">
+        <div class="prc-task-item-hdr${isFocused ? " active" : ""}"
+             onclick="prcDrawerToggle('prc-dbody-${tr.id}',this)">
+          <span style="font-size:14px;color:${dot};flex-shrink:0">${icon}</span>
+          <span style="flex:1;font-size:13px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${tr.task_name || tr.task_id}</span>
+          ${tr.return_code != null ? `<code style="font-size:10px;color:#94a3b8">exit ${tr.return_code}</code>` : ""}
+          ${dur ? `<span style="font-size:11px;color:#94a3b8;flex-shrink:0">${dur}</span>` : ""}
+          <span style="font-size:10px;font-weight:700;color:${dot};background:${dot}18;border:1px solid ${dot}40;padding:2px 7px;border-radius:6px;flex-shrink:0">${tr.status}</span>
+          <span style="color:#94a3b8;font-size:12px;flex-shrink:0">▾</span>
+        </div>
+        <div class="prc-task-item-body${isFocused ? " open" : ""}" id="prc-dbody-${tr.id}">
+          ${approvalHtml}
+          ${kind === "script" ? `
+            <div style="border-bottom:1px solid #e2e8f0">
+              ${ctxHtml}
+            </div>` : ""}
+          <div style="padding:8px 12px 4px;display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;flex:1">Logs</span>
+            ${tr.logs ? `<button class="btn btn-secondary btn-sm" style="font-size:10px;padding:1px 6px" onclick="prcCopyLogs('${tr.id}')">Copy</button>` : ""}
+            ${tr.logs ? `<button class="btn btn-secondary btn-sm" style="font-size:10px;padding:1px 6px" title="Expand to full page" onclick="prcExpandLogs('${tr.id}','${(tr.task_name||'Task').replace(/'/g,"\\'")}')">⛶ Expand</button>` : ""}
+          </div>
+          ${logsHtml}
+        </div>
+      </div>`;
+  }).join("");
+
+  const tasksSectionHtml = (sr.task_runs || []).length
+    ? `<div class="prc-drawer-section">${taskItems}</div>`
+    : `<div class="prc-drawer-section" style="color:#94a3b8;font-size:13px">No tasks in this stage.</div>`;
+
+  return actionsHtml + stageCtxHtml + entryGateHtml + tasksSectionHtml + exitGateHtml;
+}
+
+function prcDrawerToggle(id, hdrEl) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle("open");
+  if (hdrEl) hdrEl.classList.toggle("active", el.classList.contains("open"));
+}
+
+function prcCtxTab(trId, tab, btn) {
+  ["env","props","output"].forEach(t => {
+    const p = document.getElementById(`prc-ctx-${t}-${trId}`);
+    if (p) p.classList.toggle("active", t === tab);
+  });
+  const tabs = btn.closest(".prc-ctx-tabs");
+  if (tabs) tabs.querySelectorAll(".prc-ctx-tab").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+}
+
+function prcCopyLogs(trId) {
+  const el = document.getElementById(`prc-dlog-${trId}`);
+  if (!el) return;
+  navigator.clipboard.writeText(el.innerText).then(() => toast("Logs copied", "success")).catch(() => {});
+}
+
+function prcExpandLogs(trId, taskName) {
+  const src = document.getElementById(`prc-dlog-${trId}`);
+  if (!src) return;
+  const logText = src.innerText;
+
+  // Remove any existing overlay
+  const existing = document.getElementById("prc-log-overlay");
+  if (existing) existing.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "prc-log-overlay";
+  overlay.style.cssText = `
+    position:fixed;inset:0;z-index:99999;background:#0f172a;
+    display:flex;flex-direction:column;font-family:monospace;
+  `;
+
+  overlay.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:#1e293b;border-bottom:1px solid #334155;flex-shrink:0">
+      <span style="font-size:13px;font-weight:700;color:#e2e8f0;flex:1">📋 ${taskName} — Logs</span>
+      <button onclick="navigator.clipboard.writeText(document.getElementById('prc-log-overlay-pre').innerText).then(()=>window.toast&&toast('Copied','success'))"
+              style="background:#334155;color:#94a3b8;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer">Copy</button>
+      <button onclick="document.getElementById('prc-log-overlay').remove()"
+              style="background:#334155;color:#94a3b8;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer">✕ Close</button>
+    </div>
+    <pre id="prc-log-overlay-pre" style="
+      flex:1;overflow:auto;margin:0;padding:20px 24px;
+      color:#e2e8f0;font-size:13px;line-height:1.7;
+      white-space:pre-wrap;word-break:break-all;
+    ">${logText.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</pre>
+  `;
+
+  // Esc closes the overlay
+  const onKey = (e) => { if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onKey); } };
+  document.addEventListener("keydown", onKey);
+
+  document.body.appendChild(overlay);
+  // Scroll to bottom (most recent logs)
+  requestAnimationFrame(() => {
+    const pre = document.getElementById("prc-log-overlay-pre");
+    if (pre) pre.scrollTop = pre.scrollHeight;
+  });
+}
+
+async function prcSubmitApproval(taskRunId, decision, runId) {
+  const comment = (document.getElementById(`prc-apv-${taskRunId}`) || {}).value || "";
+  try {
+    await api.submitApproval(taskRunId, { decision, comment });
+    toast(decision === "approved" ? "Approved — pipeline continuing" : "Rejected", decision === "approved" ? "success" : "error");
+    const hash = window.location.hash.replace("#", "");
+    navigate(hash);
+  } catch (e) {
+    toast(e.message || "Failed to submit decision", "error");
+  }
+}
+
+function _prcCtxEnvTable(tr) {
+  let env = {};
+  if (tr.context_env) { try { env = JSON.parse(tr.context_env); } catch {} }
+  const keys = Object.keys(env).filter(k => k.startsWith("CDT_")).sort();
+  if (!keys.length) return `<div style="padding:12px;font-size:12px;color:#94a3b8">No CDT variables recorded.</div>`;
+  const rows = keys.map(k => {
+    const val = String(env[k] || "").slice(0, 300);
+    return `<tr><td>${k}</td><td>${val.replace(/</g,"&lt;") || "(empty)"}</td></tr>`;
+  }).join("");
+  return `<table class="prc-ctx-table"><tbody>${rows}</tbody></table>`;
+}
+
+function _prcCtxPropsTable(tr) {
+  let props = {};
+  if (tr.context_env) {
+    try { const env = JSON.parse(tr.context_env); if (env.CDT_PROPS) props = JSON.parse(env.CDT_PROPS); } catch {}
+  }
+  const keys = Object.keys(props).sort();
+  if (!keys.length) return `<div style="padding:12px;font-size:12px;color:#94a3b8">No properties.</div>`;
+  const rows = keys.map(k => `<tr><td>${k}</td><td>${String(props[k]).replace(/</g,"&lt;")}</td></tr>`).join("");
+  return `<table class="prc-ctx-table"><tbody>${rows}</tbody></table>`;
+}
+
+function _prcCtxOutputPanel(tr) {
+  if (!tr.output_json) return `<div style="padding:12px;font-size:12px;color:#94a3b8">No output JSON.</div>`;
+  try {
+    const pretty = JSON.stringify(JSON.parse(tr.output_json), null, 2);
+    return `<pre style="font-size:11px;margin:0;padding:10px;background:#f8fafc;overflow-x:auto">${pretty.replace(/</g,"&lt;")}</pre>`;
+  } catch {
+    return `<pre style="font-size:11px;margin:0;padding:10px">${tr.output_json.replace(/</g,"&lt;")}</pre>`;
+  }
+}
+
+// Make prcOpenDrawer available globally for canvas click handlers
+window.prcOpenDrawer = prcOpenDrawer;
 
 // ── Context Inspector helpers ─────────────────────────────────────────────────
 
@@ -9151,16 +11366,63 @@ router.register("pipeline-runs/:id", async (hash, parts) => {
     } else {
       setBreadcrumb({ label: "Products", hash: "products" }, { label: "Pipeline Run" });
     }
+    _prcDrawerRunData = run;
     setContent(_renderPipelineRun(run, productId, pipelineId));
+
+    // Mount run canvas
+    let _runCanvas = null;
+    if (typeof PipelineRunCanvas !== "undefined") {
+      const pipelineStages = (productId && pipelineId)
+        ? await api.getPipeline(productId, pipelineId).then(p => p.stages || []).catch(() => [])
+        : [];
+      _runCanvas = new PipelineRunCanvas(`prc-container-${run.id}`);
+      _runCanvas.load(run, pipelineStages);
+    }
 
     if (!TERMINAL.has(run.status)) {
       _pollTimer = setInterval(async () => {
-        if (!document.getElementById(`sr-${(run.stage_runs||[])[0]?.id}`) && run.stage_runs?.length) {
+        if (!document.getElementById(`prc-container-${run.id}`)) {
           clearInterval(_pollTimer); _pollTimer = null; return;
         }
         const updated = await api.getPipelineRun(runId).catch(() => null);
         if (!updated) return;
-        setContent(_renderPipelineRun(updated, productId, pipelineId));
+
+        // Keep drawer data current
+        _prcDrawerRunData = updated;
+
+        // Update canvas nodes incrementally
+        if (_runCanvas) _runCanvas.update(updated);
+
+        // Update progress bar inline (no re-render)
+        const bar = document.getElementById(`prc-progress-bar-${run.id}`);
+        const pct = document.getElementById(`prc-progress-pct-${run.id}`);
+        if (bar) bar.style.width = Math.min(updated.completion_percentage ?? 0, 100) + "%";
+        if (pct) pct.textContent = (updated.completion_percentage ?? 0) + "%";
+
+        // If drawer is open for a stage that was updated, refresh drawer content
+        if (_prcDrawerRunId === run.id) {
+          const drawer = document.getElementById(`prc-drawer-${run.id}`);
+          if (drawer && drawer.classList.contains("open")) {
+            const bodyEl = document.getElementById(`prc-drawer-body-${run.id}`);
+            const titleEl = document.getElementById(`prc-drawer-title-${run.id}`);
+            if (bodyEl && titleEl) {
+              // Find which stage run is currently shown by reading the title's data
+              const openSrId = drawer.getAttribute("data-open-sr");
+              if (openSrId) {
+                const updatedSr = (updated.stage_runs || []).find(s => s.id === openSrId);
+                if (updatedSr) {
+                  const sc = { Succeeded:"#22c55e", Failed:"#ef4444", Running:"#3b82f6", Warning:"#f59e0b",
+                                Cancelled:"#94a3b8", Pending:"#cbd5e1", AwaitingApproval:"#8b5cf6", Skipped:"#475569" };
+                  const dot = sc[updatedSr.status] || "#94a3b8";
+                  const subEl = document.getElementById(`prc-drawer-sub-${run.id}`);
+                  if (subEl) subEl.textContent = `${updatedSr.status}${updatedSr.started_at ? " · " + fmtDuration(updatedSr.started_at, updatedSr.finished_at||new Date().toISOString()) : ""}`;
+                  bodyEl.innerHTML = _prcDrawerBody(updated, updatedSr, null);
+                }
+              }
+            }
+          }
+        }
+
         if (TERMINAL.has(updated.status)) { clearInterval(_pollTimer); _pollTimer = null; }
       }, 2000);
     }
