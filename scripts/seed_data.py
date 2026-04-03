@@ -44,7 +44,9 @@ from app.models.backlog import BacklogItem  # noqa: E402
 from app.models.compliance import AuditEvent, ComplianceRule  # noqa: E402
 from app.models.environment import Environment  # noqa: E402
 from app.models.feature_toggle import FeatureToggle  # noqa: E402
+from app.models.framework_control import FrameworkControl  # noqa: E402
 from app.models.pipeline import Pipeline, Stage  # noqa: E402
+from app.models.pipeline_template import PipelineTemplate  # noqa: E402
 from app.models.plugin import Plugin, PluginConfig  # noqa: E402
 from app.models.product import Product  # noqa: E402
 from app.models.release import Release, ReleaseApplicationGroup  # noqa: E402
@@ -3497,8 +3499,1543 @@ def seed() -> None:  # noqa: C901 (intentionally long for clarity)
                 print(f"  Feature toggle already exists: {spec['key']}")
         db.session.commit()
 
+        # ── Framework Controls (ISAE 3402 / ACF) ─────────────────────────────
+        print("\nSeeding framework controls...")
+        framework_control_specs = [
+            {
+                "id": "CC1.1",
+                "framework": "isae",
+                "title": "Control Environment — Commitment to Integrity",
+                "description": "Management demonstrates a commitment to integrity and ethical values.",
+                "category": "CC1",
+                "category_label": "Control Environment",
+                "task_types_json": '["compliance-check"]',
+                "weight": 10,
+                "enabled": True,
+                "is_builtin": True,
+            },
+            {
+                "id": "CC2.1",
+                "framework": "isae",
+                "title": "Communication and Information — Internal Communication",
+                "description": "Entity obtains or generates and uses relevant, quality information to support the functioning of internal control.",
+                "category": "CC2",
+                "category_label": "Communication and Information",
+                "task_types_json": '["compliance-check","audit"]',
+                "weight": 8,
+                "enabled": True,
+                "is_builtin": True,
+            },
+            {
+                "id": "ACF-GOV-1",
+                "framework": "acf",
+                "title": "Governance — Release Authorisation",
+                "description": "All production releases must be authorised by an accountable individual before deployment.",
+                "category": "Governance",
+                "category_label": "Governance",
+                "task_types_json": '["approval","compliance-check"]',
+                "weight": 12,
+                "enabled": True,
+                "is_builtin": True,
+            },
+        ]
+        for spec in framework_control_specs:
+            existing = FrameworkControl.query.filter_by(id=spec["id"]).first()
+            if not existing:
+                db.session.add(FrameworkControl(**spec))
+                print(f"  Created framework control: {spec['id']}")
+            else:
+                print(f"  Framework control already exists: {spec['id']}")
+        db.session.commit()
+
+        # ── Pipeline Templates ────────────────────────────────────────────────
+        print("\nSeeding pipeline templates...")
+        pipeline_template_specs = [
+            {
+                "id": resource_id("ptpl"),
+                "name": "Standard CI Pipeline",
+                "description": "A standard CI pipeline with lint, test, SAST scan, and build stages.",
+                "kind": "ci",
+                "category": "Security",
+                "tags": "ci,security,sast",
+                "created_by": "admin",
+                "definition_json": json.dumps(
+                    [
+                        {
+                            "name": "Lint",
+                            "order": 0,
+                            "tasks": [
+                                {
+                                    "name": "Ruff lint",
+                                    "run_language": "bash",
+                                    "run_code": "ruff check .",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "Test",
+                            "order": 1,
+                            "tasks": [
+                                {
+                                    "name": "pytest",
+                                    "run_language": "bash",
+                                    "run_code": "pytest tests/unit/",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "SAST Scan",
+                            "order": 2,
+                            "tasks": [
+                                {
+                                    "name": "Bandit",
+                                    "run_language": "bash",
+                                    "run_code": "bandit -r app/",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "Build",
+                            "order": 3,
+                            "tasks": [
+                                {
+                                    "name": "Docker build",
+                                    "run_language": "bash",
+                                    "run_code": "docker build -t $IMAGE_NAME .",
+                                }
+                            ],
+                        },
+                    ]
+                ),
+            },
+            {
+                "id": resource_id("ptpl"),
+                "name": "Kubernetes CD Pipeline",
+                "description": "CD pipeline: compliance gate, approval, Helm upgrade, and smoke test.",
+                "kind": "cd",
+                "category": "Deploy",
+                "tags": "cd,kubernetes,helm,approval",
+                "created_by": "admin",
+                "definition_json": json.dumps(
+                    [
+                        {
+                            "name": "Compliance Gate",
+                            "order": 0,
+                            "tasks": [
+                                {
+                                    "name": "Compliance check",
+                                    "kind": "gate",
+                                    "gate_language": "bash",
+                                    "gate_script": "echo 'Checking compliance score...'; exit 0",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "Approval",
+                            "order": 1,
+                            "tasks": [
+                                {
+                                    "name": "Release approval",
+                                    "kind": "approval",
+                                    "approval_required_count": 1,
+                                }
+                            ],
+                        },
+                        {
+                            "name": "Deploy",
+                            "order": 2,
+                            "tasks": [
+                                {
+                                    "name": "Helm upgrade",
+                                    "run_language": "bash",
+                                    "run_code": "helm upgrade --install $RELEASE_NAME ./helm/$CHART_NAME",
+                                }
+                            ],
+                        },
+                        {
+                            "name": "Smoke Test",
+                            "order": 3,
+                            "tasks": [
+                                {
+                                    "name": "Health check",
+                                    "run_language": "bash",
+                                    "run_code": "curl -sf http://$SERVICE_HOST/healthz",
+                                }
+                            ],
+                        },
+                    ]
+                ),
+            },
+            {
+                "id": resource_id("ptpl"),
+                "name": "Full Stack Pipeline",
+                "description": "End-to-end pipeline covering build, test, security scan, and deploy.",
+                "kind": "ci",
+                "category": "Full Stack",
+                "tags": "ci,cd,full-stack",
+                "created_by": "admin",
+                "definition_json": json.dumps(
+                    [
+                        {
+                            "name": "Build & Test",
+                            "order": 0,
+                            "tasks": [
+                                {"name": "Build", "run_language": "bash", "run_code": "make build"},
+                                {
+                                    "name": "Unit tests",
+                                    "run_language": "bash",
+                                    "run_code": "make test",
+                                },
+                            ],
+                        },
+                        {
+                            "name": "Security",
+                            "order": 1,
+                            "tasks": [
+                                {
+                                    "name": "SAST",
+                                    "run_language": "bash",
+                                    "run_code": "bandit -r src/",
+                                },
+                                {
+                                    "name": "SCA",
+                                    "run_language": "bash",
+                                    "run_code": "pip-audit -r requirements.txt",
+                                },
+                            ],
+                        },
+                        {
+                            "name": "Publish",
+                            "order": 2,
+                            "tasks": [
+                                {
+                                    "name": "Push image",
+                                    "run_language": "bash",
+                                    "run_code": "docker push $IMAGE_NAME",
+                                }
+                            ],
+                        },
+                    ]
+                ),
+            },
+        ]
+        for spec in pipeline_template_specs:
+            existing = PipelineTemplate.query.filter_by(name=spec["name"]).first()
+            if not existing:
+                db.session.add(PipelineTemplate(**spec))
+                print(f"  Created pipeline template: {spec['name']}")
+            else:
+                print(f"  Pipeline template already exists: {spec['name']}")
+        db.session.commit()
+
+        # ── Second product: FinPay Payment Platform ───────────────────────────
+        _seed_finpay_product()
+
         print("\nSeed complete.")
         _print_summary(product.id)
+
+
+# ── FinPay Payment Platform — second product with full relationship coverage ──
+
+
+def _seed_finpay_product() -> None:  # noqa: C901
+    """Seed FinPay Payment Platform — a second product exercising every relationship.
+
+    Products → Applications → Dependencies
+    Pipelines → Stages → Tasks (real runnable scripts)
+    Releases → ApplicationGroups → pipeline assignments
+    PipelineRuns → StageRuns → TaskRuns → ApprovalDecisions
+    ReleaseRun linked to pipeline runs
+    Webhooks + WebhookDeliveries
+    VaultSecrets, Properties, EnvDeploymentRecords
+    ComplianceRules, AuditEvents
+    Users, Groups, RoleBindings (product-scoped)
+    BacklogItems linked to users / releases / pipelines
+    """
+    print("\n[finpay product]")
+
+    # ── Product ────────────────────────────────────────────────────────────
+    fp = Product.query.filter_by(name="FinPay Payment Platform").first()
+    if not fp:
+        fp = Product(
+            id=resource_id("prod"),
+            name="FinPay Payment Platform",
+            description=(
+                "PCI-DSS compliant payment processing platform handling card-present "
+                "and card-not-present transactions across 30 markets."
+            ),
+        )
+        db.session.add(fp)
+        db.session.flush()
+        print(f"  Created product: {fp.name}")
+    else:
+        print(f"  Product already exists: {fp.name}")
+
+    # ── Environments (reuse global ones) ────────────────────────────────────
+    for env_name in ("Development", "Staging", "Production"):
+        env = Environment.query.filter_by(name=env_name).first()
+        if env and env not in fp.environments:
+            fp.environments.append(env)
+    db.session.flush()
+
+    # ── Users ───────────────────────────────────────────────────────────────
+    fp_users: dict[str, User] = {}
+    for uspec in [
+        {
+            "username": "dave",
+            "email": "dave@finpay.example",
+            "display_name": "Dave Chen",
+            "pw": "Dave1234!",
+        },
+        {
+            "username": "eve",
+            "email": "eve@finpay.example",
+            "display_name": "Eve Okonkwo",
+            "pw": "Eve12345!",
+        },
+        {
+            "username": "frank",
+            "email": "frank@finpay.example",
+            "display_name": "Frank Torres",
+            "pw": "Frank123!",
+        },
+    ]:
+        u = User.query.filter_by(username=uspec["username"]).first()
+        if not u:
+            u = User(
+                id=resource_id("usr"),
+                username=uspec["username"],
+                email=uspec["email"],
+                display_name=uspec["display_name"],
+                password_hash=_hash(uspec["pw"]),
+                is_active=True,
+            )
+            db.session.add(u)
+            print(f"  Created user: {uspec['username']}")
+        fp_users[uspec["username"]] = u
+    db.session.flush()
+
+    # ── Group ───────────────────────────────────────────────────────────────
+    fp_grp = Group.query.filter_by(name="finpay-ops").first()
+    if not fp_grp:
+        fp_grp = Group(
+            id=resource_id("grp"),
+            name="finpay-ops",
+            description="FinPay platform operations and deployment team",
+        )
+        db.session.add(fp_grp)
+        print("  Created group: finpay-ops")
+    db.session.flush()
+    for uname in ("dave", "eve"):
+        if fp_grp not in fp_users[uname].groups:
+            fp_users[uname].groups.append(fp_grp)
+    db.session.flush()
+
+    # ── Role bindings (product-scoped) ──────────────────────────────────────
+    fp_scope = f"product:{fp.id}"
+    prod_admin_role = Role.query.filter_by(name="product-admin").first()
+    prod_dev_role = Role.query.filter_by(name="product-developer").first()
+    auditor_role = Role.query.filter_by(name="product-auditor").first()
+    if prod_admin_role:
+        _ensure_binding(fp_users["dave"], None, prod_admin_role, fp_scope)
+    if prod_dev_role:
+        _ensure_binding(fp_users["eve"], None, prod_dev_role, fp_scope)
+        _ensure_binding(fp_users["frank"], None, prod_dev_role, fp_scope)
+    if auditor_role:
+        _ensure_binding(None, fp_grp, auditor_role, fp_scope)
+    db.session.flush()
+
+    # ── Vault secrets ────────────────────────────────────────────────────────
+    fp_secrets: dict[str, VaultSecret] = {}
+    for vname, vdesc, vval in [
+        ("finpay-db-password", "PostgreSQL password for finpay_prod", "Sup3rS3cr3t#Fin"),
+        ("finpay-stripe-secret-key", "Stripe live secret key", "sk_live_XXXX"),
+        ("finpay-fraud-api-key", "MaxMind fraud scoring API key", "mm_api_YYYY"),
+        ("finpay-jwt-signing-key", "JWT signing key for payment-api tokens", "jwt_256bit_key"),
+    ]:
+        vs = VaultSecret.query.filter_by(name=vname).first()
+        if not vs:
+            vs = VaultSecret(
+                id=resource_id("vs"),
+                name=vname,
+                description=vdesc,
+                ciphertext=encrypt(vval),
+                allowed_users="dave,eve",
+                created_by="dave",
+            )
+            db.session.add(vs)
+            print(f"  Created vault secret: {vname}")
+        fp_secrets[vname] = vs
+    db.session.flush()
+
+    # ── Applications ─────────────────────────────────────────────────────────
+    fp_apps: dict[str, ApplicationArtifact] = {}
+    for key, name, repo, version, rating, desc in [
+        (
+            "payment-api",
+            "Payment API",
+            "https://github.com/finpay/payment-api",
+            "3.1.4",
+            ComplianceRating.PLATINUM,
+            "Core payment processing API — PCI-DSS Level 1",
+        ),
+        (
+            "fraud-engine",
+            "Fraud Detection Engine",
+            "https://github.com/finpay/fraud-engine",
+            "1.7.0",
+            ComplianceRating.GOLD,
+            "Real-time ML fraud scoring (< 50 ms p99)",
+        ),
+        (
+            "notification-svc",
+            "Notification Service",
+            "https://github.com/finpay/notification-service",
+            "2.0.2",
+            ComplianceRating.SILVER,
+            "Email/SMS/push gateway (SendGrid + Twilio)",
+        ),
+    ]:
+        a = ApplicationArtifact.query.filter_by(product_id=fp.id, name=name).first()
+        if not a:
+            a = ApplicationArtifact(
+                id=resource_id("app"),
+                product_id=fp.id,
+                name=name,
+                artifact_type=ArtifactType.CONTAINER,
+                repository_url=repo,
+                build_version=version,
+                compliance_rating=rating,
+                description=desc,
+            )
+            db.session.add(a)
+            print(f"  Created application: {name}")
+        fp_apps[key] = a
+    db.session.flush()
+
+    # ── App dependencies ─────────────────────────────────────────────────────
+    for from_key, to_key, dep_type, desc in [
+        (
+            "fraud-engine",
+            "payment-api",
+            "runtime",
+            "Fraud engine calls payment-api for transaction context",
+        ),
+        (
+            "notification-svc",
+            "payment-api",
+            "runtime",
+            "Notification service listens to payment-api events",
+        ),
+        (
+            "notification-svc",
+            "fraud-engine",
+            "optional",
+            "Notification service enriches alerts with fraud scores",
+        ),
+    ]:
+        if not AppDependency.query.filter_by(
+            from_app_id=fp_apps[from_key].id, to_app_id=fp_apps[to_key].id
+        ).first():
+            db.session.add(
+                AppDependency(
+                    id=resource_id("dep"),
+                    from_app_id=fp_apps[from_key].id,
+                    to_app_id=fp_apps[to_key].id,
+                    dep_type=dep_type,
+                    description=desc,
+                    created_by="dave",
+                )
+            )
+            print(f"  Created dependency: {from_key} -> {to_key}")
+    db.session.flush()
+
+    # ── Pipelines ─────────────────────────────────────────────────────────────
+    fp_pipelines: dict[str, Pipeline] = {}
+
+    _fp_pipeline_defs = [
+        # ── payment-api CI ────────────────────────────────────────────────────
+        dict(
+            key="payment-api-ci",
+            name="payment-api / CI",
+            app_key="payment-api",
+            kind="ci",
+            git_repo="https://github.com/finpay/payment-api",
+            git_branch="main",
+            accent_color="#6366f1",
+            compliance_score=92.0,
+            compliance_rating=ComplianceRating.PLATINUM,
+            stages=[
+                dict(
+                    name="Lint & Format",
+                    order=1,
+                    accent_color="#8b5cf6",
+                    execution_mode="sequential",
+                    run_condition="always",
+                    tasks=[
+                        dict(
+                            name="ruff-check",
+                            order=1,
+                            run_language="bash",
+                            task_type="lint",
+                            on_error="fail",
+                            timeout=120,
+                            run_code="#!/bin/bash\nset -euo pipefail\npip install ruff -q\nruff check . --output-format=github\necho '✓ Lint passed'",
+                        ),
+                        dict(
+                            name="mypy-typecheck",
+                            order=2,
+                            run_language="bash",
+                            task_type="lint",
+                            on_error="warn",
+                            timeout=180,
+                            run_code="#!/bin/bash\nset -euo pipefail\npip install mypy -q\nmypy app/ --ignore-missing-imports\necho '✓ Type check passed'",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Unit Tests",
+                    order=2,
+                    accent_color="#10b981",
+                    execution_mode="sequential",
+                    run_condition="on_success",
+                    tasks=[
+                        dict(
+                            name="pytest-unit",
+                            order=1,
+                            run_language="bash",
+                            task_type="unit_test",
+                            on_error="fail",
+                            timeout=300,
+                            run_code="#!/bin/bash\nset -euo pipefail\npip install pytest pytest-cov -q\npytest tests/unit/ -q --cov=app --cov-report=xml\necho '✓ Unit tests passed'",
+                        ),
+                        dict(
+                            name="coverage-gate",
+                            order=2,
+                            kind="gate",
+                            run_language="bash",
+                            task_type="coverage_check",
+                            gate_language="bash",
+                            on_error="fail",
+                            timeout=30,
+                            gate_script="#!/bin/bash\nCOV=$(python -c \"import xml.etree.ElementTree as ET; print(float(ET.parse('coverage.xml').getroot().attrib['line-rate'])*100)\")\necho \"Coverage: ${COV}%\"\n[ $(echo \"$COV >= 80\" | bc) -eq 1 ] || (echo 'Coverage below 80%' && exit 1)\necho '✓ Coverage gate passed'",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Security Scan",
+                    order=3,
+                    accent_color="#f59e0b",
+                    execution_mode="parallel",
+                    run_condition="on_success",
+                    tasks=[
+                        dict(
+                            name="sast-bandit",
+                            order=1,
+                            run_language="bash",
+                            task_type="sast",
+                            on_error="fail",
+                            timeout=180,
+                            run_code="#!/bin/bash\nset -euo pipefail\npip install bandit -q\nbandit -r app/ -ll -q\necho '✓ SAST: no high severity findings'",
+                        ),
+                        dict(
+                            name="sca-pip-audit",
+                            order=2,
+                            run_language="bash",
+                            task_type="sca",
+                            on_error="warn",
+                            timeout=120,
+                            run_code="#!/bin/bash\nset -euo pipefail\npip install pip-audit -q\npip-audit --desc\necho '✓ SCA: no known CVEs'",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Build & Push",
+                    order=4,
+                    accent_color="#3b82f6",
+                    execution_mode="sequential",
+                    run_condition="on_success",
+                    is_protected=True,
+                    tasks=[
+                        dict(
+                            name="docker-build",
+                            order=1,
+                            run_language="bash",
+                            task_type="build_image",
+                            on_error="fail",
+                            timeout=600,
+                            run_code='#!/bin/bash\nset -euo pipefail\nIMAGE="ghcr.io/finpay/payment-api:${CDT_COMMIT_SHA:-latest}"\ndocker build -t "$IMAGE" .\ndocker push "$IMAGE"\necho "artifact_id=$IMAGE"\necho \'✓ Image pushed\'',
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        # ── payment-api CD ────────────────────────────────────────────────────
+        dict(
+            key="payment-api-cd",
+            name="payment-api / CD",
+            app_key="payment-api",
+            kind="cd",
+            git_repo="https://github.com/finpay/payment-api",
+            git_branch="main",
+            accent_color="#ec4899",
+            compliance_score=88.0,
+            compliance_rating=ComplianceRating.GOLD,
+            stages=[
+                dict(
+                    name="Deploy Staging",
+                    order=1,
+                    accent_color="#06b6d4",
+                    execution_mode="sequential",
+                    run_condition="always",
+                    tasks=[
+                        dict(
+                            name="helm-upgrade-staging",
+                            order=1,
+                            run_language="bash",
+                            task_type="helm_deploy",
+                            on_error="fail",
+                            timeout=300,
+                            run_code="#!/bin/bash\nset -euo pipefail\nhelm upgrade --install payment-api ./helm/payment-api -f helm/values-staging.yaml --set image.tag=${CDT_ARTIFACT_ID:-latest} -n finpay-staging --wait\necho '✓ Staging deploy complete'",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Smoke Tests",
+                    order=2,
+                    accent_color="#10b981",
+                    execution_mode="sequential",
+                    run_condition="on_success",
+                    tasks=[
+                        dict(
+                            name="api-smoke-test",
+                            order=1,
+                            run_language="bash",
+                            task_type="integration_test",
+                            on_error="fail",
+                            timeout=120,
+                            run_code="#!/bin/bash\nset -euo pipefail\nBASE='https://payment-api.staging.finpay.example'\ncurl -sf \"$BASE/healthz\" | grep -q ok\ncurl -sf \"$BASE/readyz\" | grep -q ok\necho '✓ Smoke tests passed'",
+                        ),
+                        dict(
+                            name="pci-tls-check",
+                            order=2,
+                            run_language="bash",
+                            task_type="compliance_check",
+                            on_error="warn",
+                            timeout=60,
+                            run_code="#!/bin/bash\nset -euo pipefail\necho | openssl s_client -connect payment-api.staging.finpay.example:443 2>&1 | grep -E 'TLSv1\\.[23]'\necho '✓ TLS 1.2+ enforced'",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Production Approval",
+                    order=3,
+                    accent_color="#f59e0b",
+                    execution_mode="sequential",
+                    run_condition="on_success",
+                    is_protected=True,
+                    tasks=[
+                        dict(
+                            name="approve-prod-deploy",
+                            order=1,
+                            kind="approval",
+                            run_language="bash",
+                            task_type="approval",
+                            on_error="fail",
+                            timeout=86400,
+                            approval_timeout=86400,
+                            approval_required_count=1,
+                            approval_approvers=json.dumps(
+                                [
+                                    {"type": "user", "ref": "dave"},
+                                    {"type": "group", "ref": "finpay-ops"},
+                                ]
+                            ),
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Deploy Production",
+                    order=4,
+                    accent_color="#ef4444",
+                    execution_mode="sequential",
+                    run_condition="on_success",
+                    is_protected=True,
+                    tasks=[
+                        dict(
+                            name="helm-upgrade-prod",
+                            order=1,
+                            run_language="bash",
+                            task_type="helm_deploy",
+                            on_error="fail",
+                            timeout=600,
+                            run_code="#!/bin/bash\nset -euo pipefail\nhelm upgrade --install payment-api ./helm/payment-api -f helm/values-prod.yaml --set image.tag=${CDT_ARTIFACT_ID:-latest} -n finpay-prod --wait\necho '✓ Production deploy complete'",
+                        ),
+                        dict(
+                            name="post-deploy-verify",
+                            order=2,
+                            run_language="bash",
+                            task_type="integration_test",
+                            on_error="fail",
+                            timeout=120,
+                            run_code="#!/bin/bash\nset -euo pipefail\nfor i in 1 2 3; do curl -sf https://api.finpay.example/healthz && break || sleep 10; done\necho '✓ Production healthy'",
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        # ── fraud-engine CI ───────────────────────────────────────────────────
+        dict(
+            key="fraud-engine-ci",
+            name="fraud-engine / CI",
+            app_key="fraud-engine",
+            kind="ci",
+            git_repo="https://github.com/finpay/fraud-engine",
+            git_branch="main",
+            accent_color="#f97316",
+            compliance_score=78.0,
+            compliance_rating=ComplianceRating.GOLD,
+            stages=[
+                dict(
+                    name="Lint",
+                    order=1,
+                    accent_color="#8b5cf6",
+                    execution_mode="sequential",
+                    run_condition="always",
+                    tasks=[
+                        dict(
+                            name="flake8",
+                            order=1,
+                            run_language="bash",
+                            task_type="lint",
+                            on_error="warn",
+                            timeout=90,
+                            run_code="#!/bin/bash\nset -euo pipefail\npip install flake8 -q\nflake8 . --max-line-length=120 --exclude=venv\necho '✓ flake8 passed'",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Model Tests",
+                    order=2,
+                    accent_color="#10b981",
+                    execution_mode="sequential",
+                    run_condition="always",
+                    tasks=[
+                        dict(
+                            name="pytest-model",
+                            order=1,
+                            run_language="bash",
+                            task_type="unit_test",
+                            on_error="fail",
+                            timeout=300,
+                            run_code="#!/bin/bash\nset -euo pipefail\npip install pytest -q\npytest tests/ -q -k 'not integration'\necho '✓ Model tests passed'",
+                        ),
+                        dict(
+                            name="model-accuracy-gate",
+                            order=2,
+                            kind="gate",
+                            run_language="python",
+                            task_type="coverage_check",
+                            gate_language="python",
+                            on_error="fail",
+                            timeout=60,
+                            gate_script="import json, sys\nmetrics = json.load(open('model_metrics.json'))\nauc = metrics.get('auc_roc', 0)\nassert auc >= 0.92, f'AUC-ROC {auc} below threshold 0.92'\nprint(f'✓ Model gate: AUC={auc}')",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Security",
+                    order=3,
+                    accent_color="#f59e0b",
+                    execution_mode="parallel",
+                    run_condition="on_success",
+                    tasks=[
+                        dict(
+                            name="sast-semgrep",
+                            order=1,
+                            run_language="bash",
+                            task_type="sast",
+                            on_error="fail",
+                            timeout=240,
+                            run_code="#!/bin/bash\nset -euo pipefail\npip install semgrep -q\nsemgrep --config=auto . --severity=ERROR\necho '✓ Semgrep SAST passed'",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Build Model Image",
+                    order=4,
+                    accent_color="#3b82f6",
+                    execution_mode="sequential",
+                    run_condition="on_success",
+                    tasks=[
+                        dict(
+                            name="build-model-container",
+                            order=1,
+                            run_language="bash",
+                            task_type="build_image",
+                            on_error="fail",
+                            timeout=900,
+                            run_code='#!/bin/bash\nset -euo pipefail\nIMAGE="ghcr.io/finpay/fraud-engine:${CDT_COMMIT_SHA:-latest}"\ndocker build -t "$IMAGE" .\ndocker push "$IMAGE"\necho "artifact_id=$IMAGE"\necho \'✓ Fraud engine image pushed\'',
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        # ── notification-svc CI ───────────────────────────────────────────────
+        dict(
+            key="notification-ci",
+            name="notification-svc / CI",
+            app_key="notification-svc",
+            kind="ci",
+            git_repo="https://github.com/finpay/notification-service",
+            git_branch="main",
+            accent_color="#14b8a6",
+            compliance_score=65.0,
+            compliance_rating=ComplianceRating.SILVER,
+            stages=[
+                dict(
+                    name="Lint & Test",
+                    order=1,
+                    accent_color="#8b5cf6",
+                    execution_mode="sequential",
+                    run_condition="always",
+                    tasks=[
+                        dict(
+                            name="eslint",
+                            order=1,
+                            run_language="bash",
+                            task_type="lint",
+                            on_error="warn",
+                            timeout=120,
+                            run_code="#!/bin/bash\nset -euo pipefail\nnpm install --quiet\nnpx eslint src/ --ext .ts,.js\necho '✓ ESLint passed'",
+                        ),
+                        dict(
+                            name="jest-unit",
+                            order=2,
+                            run_language="bash",
+                            task_type="unit_test",
+                            on_error="fail",
+                            timeout=180,
+                            run_code="#!/bin/bash\nset -euo pipefail\nnpm run test:unit -- --ci --coverage\necho '✓ Jest unit tests passed'",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Integration Tests",
+                    order=2,
+                    accent_color="#10b981",
+                    execution_mode="sequential",
+                    run_condition="on_success",
+                    tasks=[
+                        dict(
+                            name="sendgrid-mock-test",
+                            order=1,
+                            run_language="bash",
+                            task_type="integration_test",
+                            on_error="fail",
+                            timeout=300,
+                            run_code="#!/bin/bash\nset -euo pipefail\ndocker run -d --name sg-mock -p 3000:3000 dylanb/sendgrid-mock\nSENDGRID_BASE_URL=http://localhost:3000 npm run test:integration\ndocker stop sg-mock\necho '✓ Integration tests passed'",
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Build",
+                    order=3,
+                    accent_color="#3b82f6",
+                    execution_mode="sequential",
+                    run_condition="on_success",
+                    tasks=[
+                        dict(
+                            name="docker-build",
+                            order=1,
+                            run_language="bash",
+                            task_type="build_image",
+                            on_error="fail",
+                            timeout=480,
+                            run_code='#!/bin/bash\nset -euo pipefail\nIMAGE="ghcr.io/finpay/notification-svc:${CDT_COMMIT_SHA:-latest}"\ndocker build -t "$IMAGE" .\ndocker push "$IMAGE"\necho "artifact_id=$IMAGE"\necho \'✓ Image pushed\'',
+                        ),
+                    ],
+                ),
+                dict(
+                    name="Deploy Staging",
+                    order=4,
+                    accent_color="#06b6d4",
+                    execution_mode="sequential",
+                    run_condition="on_success",
+                    tasks=[
+                        dict(
+                            name="helm-deploy-staging",
+                            order=1,
+                            run_language="bash",
+                            task_type="helm_deploy",
+                            on_error="fail",
+                            timeout=300,
+                            run_code="#!/bin/bash\nset -euo pipefail\nhelm upgrade --install notification-svc ./helm -f helm/values-staging.yaml --set image.tag=${CDT_ARTIFACT_ID:-latest} -n finpay-staging --wait\necho '✓ Staging deploy complete'",
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+    for pdef in _fp_pipeline_defs:
+        key = pdef.pop("key")
+        app_key = pdef.pop("app_key")
+        stage_defs = pdef.pop("stages")
+
+        existing = Pipeline.query.filter_by(product_id=fp.id, name=pdef["name"]).first()
+        if existing:
+            print(f"  Pipeline already exists: {pdef['name']}")
+            fp_pipelines[key] = existing
+            continue
+
+        pipe = Pipeline(
+            id=resource_id("pipe"),
+            product_id=fp.id,
+            application_id=fp_apps[app_key].id,
+            **pdef,
+        )
+        db.session.add(pipe)
+        db.session.flush()
+
+        for sdef in stage_defs:
+            task_defs = sdef.pop("tasks", [])
+            s = Stage(id=resource_id("stg"), pipeline_id=pipe.id, **sdef)
+            db.session.add(s)
+            db.session.flush()
+            for tdef in task_defs:
+                db.session.add(Task(id=resource_id("task"), stage_id=s.id, **tdef))
+        db.session.flush()
+        fp_pipelines[key] = pipe
+        print(f"  Created pipeline: {pdef['name']}")
+
+    db.session.commit()
+
+    # ── Pipeline properties ───────────────────────────────────────────────────
+    from app.models.property import Property as _Property  # noqa: PLC0415
+
+    prop_specs = [
+        (
+            "pipeline",
+            fp_pipelines["payment-api-ci"].id,
+            "DOCKER_REGISTRY",
+            "ghcr.io/finpay",
+            "string",
+            "Container registry for payment-api images",
+        ),
+        (
+            "pipeline",
+            fp_pipelines["payment-api-ci"].id,
+            "MIN_COVERAGE",
+            "80",
+            "number",
+            "Minimum test coverage percentage",
+        ),
+        (
+            "pipeline",
+            fp_pipelines["payment-api-cd"].id,
+            "HELM_RELEASE_NAME",
+            "payment-api",
+            "string",
+            "Helm release name",
+        ),
+        (
+            "pipeline",
+            fp_pipelines["payment-api-cd"].id,
+            "PROD_NAMESPACE",
+            "finpay-prod",
+            "string",
+            "Kubernetes namespace for production",
+        ),
+        (
+            "pipeline",
+            fp_pipelines["fraud-engine-ci"].id,
+            "MODEL_AUC_THRESHOLD",
+            "0.92",
+            "number",
+            "Minimum AUC-ROC for fraud model gate",
+        ),
+        ("product", fp.id, "PCI_SEGMENT", "level-1", "string", "PCI-DSS compliance segment"),
+        (
+            "product",
+            fp.id,
+            "ONCALL_SLACK_CHANNEL",
+            "#finpay-oncall",
+            "string",
+            "Slack channel for on-call alerts",
+        ),
+    ]
+    for owner_type, owner_id, name, value, vtype, desc in prop_specs:
+        if not _Property.query.filter_by(
+            owner_type=owner_type, owner_id=owner_id, name=name
+        ).first():
+            db.session.add(
+                _Property(
+                    id=resource_id("prop"),
+                    owner_type=owner_type,
+                    owner_id=owner_id,
+                    name=name,
+                    value=value,
+                    value_type=vtype,
+                    description=desc,
+                    is_required=True,
+                )
+            )
+    db.session.flush()
+
+    # ── Webhooks ──────────────────────────────────────────────────────────────
+    fp_webhooks: dict[str, Webhook] = {}
+    for wname, pipe_key, wdesc, wby in [
+        ("github-payment-api-push", "payment-api-ci", "GitHub push → payment-api CI", "dave"),
+        ("github-fraud-engine-push", "fraud-engine-ci", "GitHub push → fraud-engine CI", "eve"),
+    ]:
+        wh = Webhook.query.filter_by(name=wname).first()
+        if not wh:
+            wh = Webhook(
+                id=resource_id("wh"),
+                name=wname,
+                pipeline_id=fp_pipelines[pipe_key].id,
+                token=secrets.token_urlsafe(32),
+                description=wdesc,
+                is_active=True,
+                created_by=wby,
+            )
+            db.session.add(wh)
+            print(f"  Created webhook: {wname}")
+        fp_webhooks[wname] = wh
+    db.session.flush()
+
+    # ── Releases ──────────────────────────────────────────────────────────────
+    fp_releases: dict[str, Release] = {}
+    for rname, rver, rdesc, rby in [
+        ("v1.5.0", "1.5.0", "PCI segment upgrade + fraud model v4 rollout", "dave"),
+        ("v1.6.0-rc1", "1.6.0-rc1", "Notification service rewrite + new payment methods", "eve"),
+    ]:
+        rel = Release.query.filter_by(product_id=fp.id, name=rname).first()
+        if not rel:
+            rel = Release(
+                id=resource_id("rel"),
+                product_id=fp.id,
+                name=rname,
+                version=rver,
+                description=rdesc,
+                created_by=rby,
+            )
+            db.session.add(rel)
+            db.session.flush()
+            print(f"  Created release: {rname}")
+        fp_releases[rname] = rel
+
+    # Assign all pipelines to both releases
+    for rel in fp_releases.values():
+        for pipe in fp_pipelines.values():
+            if pipe not in rel.pipelines:
+                rel.pipelines.append(pipe)
+    db.session.flush()
+
+    # ── Release application groups ─────────────────────────────────────────────
+    rel_v150 = fp_releases["v1.5.0"]
+    for order, (app_key, pipe_keys, mode) in enumerate(
+        [
+            ("payment-api", ["payment-api-ci", "payment-api-cd"], "sequential"),
+            ("fraud-engine", ["fraud-engine-ci"], "sequential"),
+            ("notification-svc", ["notification-ci"], "parallel"),
+        ],
+        start=1,
+    ):
+        if not ReleaseApplicationGroup.query.filter_by(
+            release_id=rel_v150.id, application_id=fp_apps[app_key].id
+        ).first():
+            db.session.add(
+                ReleaseApplicationGroup(
+                    id=resource_id("rag"),
+                    release_id=rel_v150.id,
+                    application_id=fp_apps[app_key].id,
+                    execution_mode=mode,
+                    pipeline_ids=json.dumps([fp_pipelines[k].id for k in pipe_keys]),
+                    order=order,
+                )
+            )
+    db.session.flush()
+
+    # ── Pipeline runs ─────────────────────────────────────────────────────────
+    for pipe_key in ("payment-api-ci", "payment-api-cd", "fraud-engine-ci", "notification-ci"):
+        _fp_seed_pipeline_runs(fp_pipelines[pipe_key])
+    db.session.commit()
+
+    # ── Release run (v1.5.0) ──────────────────────────────────────────────────
+    if not ReleaseRun.query.filter_by(release_id=rel_v150.id).first():
+        rrun = ReleaseRun(
+            id=release_run_id(),
+            release_id=rel_v150.id,
+            status="Succeeded",
+            triggered_by="dave",
+            compliance_rating=ComplianceRating.GOLD,
+            compliance_score=88.5,
+            started_at=_ago(days=3),
+            finished_at=_ago(days=3) + timedelta(hours=1, minutes=45),
+        )
+        db.session.add(rrun)
+        db.session.flush()
+
+        # Link most recent pipeline runs to this release run
+        recent_runs = (
+            PipelineRun.query.filter(
+                PipelineRun.pipeline_id.in_([p.id for p in fp_pipelines.values()])
+            )
+            .order_by(PipelineRun.started_at.desc())
+            .limit(4)
+            .all()
+        )
+        for prun in recent_runs:
+            prun.release_run_id = rrun.id
+        db.session.flush()
+
+        # Approval decision on a CD task run
+        from app.models.task import ApprovalDecision  # noqa: PLC0415
+
+        approval_tr = (
+            TaskRun.query.join(StageRun)
+            .join(PipelineRun)
+            .filter(
+                PipelineRun.pipeline_id == fp_pipelines["payment-api-cd"].id,
+                TaskRun.status == "Succeeded",
+            )
+            .first()
+        )
+        if approval_tr:
+            db.session.add(
+                ApprovalDecision(
+                    id=resource_id("apv"),
+                    task_run_id=approval_tr.id,
+                    user_id=fp_users["dave"].id,
+                    decision="approved",
+                    comment="Staging smoke tests green, PCI TLS check passed. Approving for prod.",
+                    decided_at=_ago(days=3, hours=1),
+                )
+            )
+        db.session.flush()
+        print("  Created release run: v1.5.0")
+
+    # ── Webhook deliveries ────────────────────────────────────────────────────
+    from app.models.webhook import WebhookDelivery  # noqa: PLC0415
+
+    wh_ci = fp_webhooks.get("github-payment-api-push")
+    if wh_ci and WebhookDelivery.query.filter_by(webhook_id=wh_ci.id).count() == 0:
+        ci_runs = (
+            PipelineRun.query.filter_by(pipeline_id=fp_pipelines["payment-api-ci"].id)
+            .order_by(PipelineRun.started_at.desc())
+            .limit(3)
+            .all()
+        )
+        for prun in ci_runs:
+            db.session.add(
+                WebhookDelivery(
+                    id=resource_id("whdel"),
+                    webhook_id=wh_ci.id,
+                    pipeline_run_id=prun.id,
+                    payload=json.dumps(
+                        {
+                            "ref": "refs/heads/main",
+                            "after": prun.commit_sha or "abc123",
+                            "repository": {"full_name": "finpay/payment-api"},
+                            "pusher": {"name": "eve"},
+                        }
+                    ),
+                    status="triggered",
+                    triggered_at=prun.started_at,
+                )
+            )
+        db.session.flush()
+        print("  Created webhook deliveries for payment-api-ci")
+
+    # ── Env deployment records ────────────────────────────────────────────────
+    for app_key, env_name, artifact_id, deployed_by, days_ago in [
+        ("payment-api", "Development", "ghcr.io/finpay/payment-api:abc1234", "dave", 0),
+        ("payment-api", "Staging", "ghcr.io/finpay/payment-api:abc1234", "eve", 1),
+        ("payment-api", "Production", "ghcr.io/finpay/payment-api:release-3.1.4", "dave", 5),
+        ("fraud-engine", "Development", "ghcr.io/finpay/fraud-engine:def5678", "eve", 0),
+        ("fraud-engine", "Staging", "ghcr.io/finpay/fraud-engine:def5678", "eve", 2),
+        ("notification-svc", "Development", "ghcr.io/finpay/notification-svc:ghi9012", "frank", 0),
+        ("notification-svc", "Staging", "ghcr.io/finpay/notification-svc:ghi9012", "frank", 1),
+    ]:
+        if not EnvDeploymentRecord.query.filter_by(
+            app_id=fp_apps[app_key].id, env_name=env_name
+        ).first():
+            db.session.add(
+                EnvDeploymentRecord(
+                    id=resource_id("edr"),
+                    product_id=fp.id,
+                    app_id=fp_apps[app_key].id,
+                    env_name=env_name,
+                    artifact_id=artifact_id,
+                    deployed_at=_ago(days=days_ago),
+                    deployed_by=deployed_by,
+                )
+            )
+    db.session.flush()
+
+    # ── Compliance rules ──────────────────────────────────────────────────────
+    for cr_desc, cr_scope, cr_rating in [
+        (
+            "All FinPay prod deployments must achieve Platinum compliance",
+            f"product:{fp.id}",
+            ComplianceRating.PLATINUM,
+        ),
+        (
+            "payment-api releases require minimum Gold before admission",
+            f"product:{fp.id}",
+            ComplianceRating.GOLD,
+        ),
+    ]:
+        if not ComplianceRule.query.filter_by(description=cr_desc).first():
+            db.session.add(
+                ComplianceRule(
+                    id=resource_id("cr"),
+                    description=cr_desc,
+                    scope=cr_scope,
+                    min_rating=cr_rating,
+                    is_active=True,
+                )
+            )
+    db.session.flush()
+
+    # ── Audit events ──────────────────────────────────────────────────────────
+    for evt_type, actor, res_type, res_id, action, decision, detail in [
+        (
+            "product.created",
+            "dave",
+            "product",
+            fp.id,
+            "Created FinPay Payment Platform",
+            "ALLOW",
+            {"name": fp.name},
+        ),
+        (
+            "release.created",
+            "dave",
+            "release",
+            rel_v150.id,
+            "Created release v1.5.0",
+            "ALLOW",
+            {"version": "1.5.0"},
+        ),
+        (
+            "pipeline.executed",
+            "eve",
+            "pipeline",
+            fp_pipelines["payment-api-ci"].id,
+            "Triggered payment-api CI",
+            "ALLOW",
+            {"commit": "payabc111"},
+        ),
+        (
+            "approval.submitted",
+            "dave",
+            "release",
+            rel_v150.id,
+            "Approved production deployment",
+            "ALLOW",
+            {"comment": "Staging green"},
+        ),
+        (
+            "vault.secret.accessed",
+            "eve",
+            "vault",
+            fp_secrets["finpay-stripe-secret-key"].id,
+            "Accessed Stripe key",
+            "ALLOW",
+            {"purpose": "CD deploy"},
+        ),
+        (
+            "compliance.rule.added",
+            "dave",
+            "compliance",
+            None,
+            "Added Platinum rule for finpay-prod",
+            "ALLOW",
+            {},
+        ),
+    ]:
+        if not AuditEvent.query.filter_by(
+            event_type=evt_type, actor=actor, resource_id=res_id
+        ).first():
+            db.session.add(
+                AuditEvent(
+                    id=resource_id("evt"),
+                    event_type=evt_type,
+                    actor=actor,
+                    resource_type=res_type,
+                    resource_id=res_id,
+                    action=action,
+                    decision=decision,
+                    detail=json.dumps(detail),
+                )
+            )
+    db.session.flush()
+
+    # ── Backlog items ─────────────────────────────────────────────────────────
+    backlog_specs = [
+        dict(
+            title="Implement 3D Secure 2.0 (3DS2) authentication",
+            description="Add 3DS2 challenge flow for high-risk transactions. Integrate with Cardinal Commerce SDK. Required for EU Strong Customer Authentication compliance.",
+            item_type="feature",
+            status="in_progress",
+            priority="critical",
+            effort=13,
+            assigned_to=fp_users["dave"].id,
+            pipeline_id=fp_pipelines["payment-api-ci"].id,
+            labels=json.dumps(["pci", "security", "backend", "eu-compliance"]),
+            acceptance_criteria="3DS2 challenge triggers on transactions > €30. Pass rate ≥ 95%. Integration tests with test cards.",
+            notes="Cardinal Commerce sandbox credentials in Vault under finpay-3ds-key",
+            created_by=fp_users["dave"].id,
+        ),
+        dict(
+            title="Migrate fraud model from XGBoost to LightGBM",
+            description="LightGBM achieves 2x faster inference (< 25ms p99) with equivalent accuracy. Shadow mode testing required before cutover.",
+            item_type="feature",
+            status="open",
+            priority="high",
+            effort=8,
+            assigned_to=fp_users["eve"].id,
+            pipeline_id=fp_pipelines["fraud-engine-ci"].id,
+            labels=json.dumps(["ml", "performance", "fraud"]),
+            acceptance_criteria="AUC-ROC ≥ 0.94. P99 inference < 25ms. Shadow mode run for 2 weeks with < 0.1% divergence.",
+            notes="See model-comparison notebook in fraud-engine/research/",
+            created_by=fp_users["eve"].id,
+        ),
+        dict(
+            title="Add PAN tokenisation (PCI DSS req 3.5)",
+            description="Replace raw PAN storage with format-preserving tokenisation (FPE). Use Vault Transit secrets engine. Affects payment-api and fraud-engine.",
+            item_type="feature",
+            status="open",
+            priority="critical",
+            effort=21,
+            assigned_to=fp_users["dave"].id,
+            release_id=rel_v150.id,
+            labels=json.dumps(["pci", "security", "vault", "breaking-change"]),
+            acceptance_criteria="No raw PAN in any DB table or log line. Token round-trips correctly in all payment flows.",
+            notes="Requires DB migration + Vault Transit policy update",
+            created_by=fp_users["dave"].id,
+        ),
+        dict(
+            title="Notification service: add WhatsApp channel via Twilio",
+            description="Payment confirmations and fraud alerts currently go to email/SMS only. WhatsApp has 60% higher open rates in LATAM markets.",
+            item_type="feature",
+            status="open",
+            priority="medium",
+            effort=5,
+            assigned_to=fp_users["frank"].id,
+            pipeline_id=fp_pipelines["notification-ci"].id,
+            labels=json.dumps(["whatsapp", "twilio", "latam", "notifications"]),
+            acceptance_criteria="WhatsApp template approved by Meta. Send rate ≥ 99.5% within 5 seconds. Opt-in/opt-out respected per LGPD.",
+            notes="Twilio WhatsApp Business API — sandbox already provisioned",
+            created_by=fp_users["frank"].id,
+        ),
+        dict(
+            title="Fix: duplicate transaction charges on network retry",
+            description="Under high latency, payment-api retries idempotency key lookups can result in duplicate charges when upstream returns 502. Reproduced in staging with 200ms+ DB latency injection.",
+            item_type="bug",
+            status="in_progress",
+            priority="critical",
+            effort=5,
+            assigned_to=fp_users["dave"].id,
+            pipeline_id=fp_pipelines["payment-api-ci"].id,
+            labels=json.dumps(["bug", "idempotency", "payments", "production"]),
+            acceptance_criteria="Zero duplicate charges in chaos test suite. Idempotency key TTL extended to 24h. Regression test added to CI.",
+            notes="Root cause: Redis TTL expires before DB write commits under load",
+            created_by=fp_users["dave"].id,
+        ),
+        dict(
+            title="Upgrade payment-api to Python 3.13",
+            description="Python 3.11 EOL is Nov 2025. Upgrade to 3.13 for free-threading support and ~10% throughput gain on async IO workloads.",
+            item_type="chore",
+            status="open",
+            priority="medium",
+            effort=3,
+            assigned_to=fp_users["frank"].id,
+            pipeline_id=fp_pipelines["payment-api-ci"].id,
+            labels=json.dumps(["python", "upgrade", "maintenance"]),
+            acceptance_criteria="All unit/integration tests pass on Python 3.13. requirements.txt pinned. Docker base image updated.",
+            notes="Watch for asyncio deprecations in 3.12→3.13",
+            created_by=fp_users["frank"].id,
+        ),
+        dict(
+            title="Add distributed tracing with OpenTelemetry",
+            description="End-to-end traces across payment-api → fraud-engine → notification-svc needed for SLA reporting. Target: Jaeger in staging, Tempo in prod.",
+            item_type="feature",
+            status="open",
+            priority="high",
+            effort=8,
+            assigned_to=fp_users["eve"].id,
+            labels=json.dumps(["observability", "otel", "tracing", "all-services"]),
+            acceptance_criteria="100% of payment flows have complete traces. P99 overhead < 1ms. Dashboards in Grafana.",
+            notes="Use opentelemetry-sdk 1.x — avoid 0.x deprecated APIs",
+            created_by=fp_users["eve"].id,
+        ),
+        dict(
+            title="Spike: evaluate Kafka vs RabbitMQ for payment event bus",
+            description="Current Redis pub/sub drops messages under load. Need a durable event bus for payment.authorised, payment.failed, refund.requested events.",
+            item_type="spike",
+            status="done",
+            priority="high",
+            effort=3,
+            assigned_to=fp_users["eve"].id,
+            labels=json.dumps(["architecture", "kafka", "rabbitmq", "spike"]),
+            acceptance_criteria="Decision doc produced and linked in notes.",
+            notes="Outcome: Kafka (MSK) selected. ADR-007 written and approved. RabbitMQ had 8% message loss at 50k events/s.",
+            created_by=fp_users["eve"].id,
+        ),
+        dict(
+            title="Rate limiting on payment submission endpoint",
+            description="POST /v1/payments has no rate limiting. A buggy merchant integration caused 40k req/s last week. Apply sliding-window rate limit per merchant_id (100 req/min).",
+            item_type="bug",
+            status="open",
+            priority="high",
+            effort=3,
+            assigned_to=None,
+            pipeline_id=fp_pipelines["payment-api-ci"].id,
+            labels=json.dumps(["security", "rate-limiting", "resilience"]),
+            acceptance_criteria="429 returned when merchant exceeds 100 req/min. Retry-After header present. Rate limit state in Redis.",
+            notes="Use redis-py sliding window script. See RFC in #finpay-eng",
+            created_by=fp_users["dave"].id,
+        ),
+        dict(
+            title="Automated nightly PCI-DSS scan report",
+            description="Run nightly automated PCI-DSS control checks across all FinPay environments and publish report to Confluence. Include card data environment network scans.",
+            item_type="feature",
+            status="open",
+            priority="medium",
+            effort=5,
+            assigned_to=fp_users["frank"].id,
+            release_id=fp_releases["v1.6.0-rc1"].id,
+            labels=json.dumps(["pci", "compliance", "automation", "reporting"]),
+            acceptance_criteria="Report posted to Confluence by 06:00 UTC daily. Red/amber/green per control. Slack alert when any control turns red.",
+            notes="Use OpenSCAP for RHEL nodes, Trivy for container scanning",
+            created_by=fp_users["dave"].id,
+        ),
+    ]
+    for bspec in backlog_specs:
+        if not BacklogItem.query.filter_by(product_id=fp.id, title=bspec["title"]).first():
+            db.session.add(
+                BacklogItem(
+                    id=resource_id("backlog"),
+                    product_id=fp.id,
+                    **bspec,
+                )
+            )
+            print(f"  Created backlog item: {bspec['title'][:60]}")
+    db.session.commit()
+    print(f"  FinPay product seeded: {fp.name}")
+
+
+def _fp_seed_pipeline_runs(pipeline: Pipeline) -> None:
+    """Seed 6 pipeline runs for a FinPay pipeline with realistic statuses, logs, and context."""
+    if PipelineRun.query.filter_by(pipeline_id=pipeline.id).count() >= 6:
+        print(f"  Pipeline runs already exist for: {pipeline.name}")
+        return
+
+    prefix = pipeline.name[:3].replace(" ", "").replace("/", "")
+    run_specs = [
+        (f"{prefix}aaa111", "Succeeded", "dave", _ago(days=14), timedelta(minutes=31), None),
+        (f"{prefix}bbb222", "Succeeded", "eve", _ago(days=10), timedelta(minutes=28), None),
+        (f"{prefix}ccc333", "Failed", "frank", _ago(days=7), timedelta(minutes=11), 1),
+        (f"{prefix}ddd444", "Succeeded", "dave", _ago(days=4), timedelta(minutes=34), None),
+        (f"{prefix}eee555", "Warning", "eve", _ago(days=2), timedelta(minutes=29), None),
+        (f"{prefix}fff666", "Succeeded", "dave", _ago(hours=6), timedelta(minutes=33), None),
+    ]
+
+    _logs = {
+        "Succeeded": "==> Pulling image\n==> Installing dependencies\n==> Running task\n==> All checks passed\n==> Task completed successfully (exit 0)\n",
+        "Failed": "==> Pulling image\n==> Installing dependencies\n==> Running task\nERROR: Assertion failed\nFAIL: task exited with code 1\n",
+        "Warning": "==> Running task\nWARNING: 2 medium-severity findings detected\nContinuing (on_error=warn)\n==> Task completed with warnings\n",
+        "Cancelled": "==> Task cancelled (upstream stage failed)\n",
+    }
+
+    stages = sorted(pipeline.stages, key=lambda s: s.order)
+    for commit, run_status, triggered_by, started, duration, fail_at_stage in run_specs:
+        if PipelineRun.query.filter_by(pipeline_id=pipeline.id, commit_sha=commit).first():
+            continue
+
+        prun = PipelineRun(
+            id=pipeline_run_id(),
+            pipeline_id=pipeline.id,
+            commit_sha=commit,
+            status=run_status,
+            triggered_by=triggered_by,
+            started_at=started,
+            finished_at=started + duration,
+            compliance_rating=pipeline.compliance_rating,
+            compliance_score=pipeline.compliance_score,
+            runtime_properties=json.dumps(
+                {
+                    "CDT_ENVIRONMENT": "staging" if "cd" in pipeline.name else "ci",
+                    "CDT_COMMIT_SHA": commit,
+                }
+            ),
+        )
+        db.session.add(prun)
+        db.session.flush()
+
+        for i, stage in enumerate(stages):
+            if fail_at_stage is not None and i > fail_at_stage:
+                sr_status = "Cancelled"
+            elif fail_at_stage is not None and i == fail_at_stage:
+                sr_status = "Failed"
+            elif run_status == "Warning" and i == len(stages) - 1:
+                sr_status = "Warning"
+            else:
+                sr_status = "Succeeded"
+
+            sr = StageRun(
+                id=resource_id("srun"),
+                pipeline_run_id=prun.id,
+                stage_id=stage.id,
+                status=sr_status,
+                started_at=started + timedelta(minutes=i * 7),
+                finished_at=started + timedelta(minutes=i * 7 + 6),
+                runtime_properties=json.dumps({"stage_index": i, "stage_name": stage.name}),
+            )
+            db.session.add(sr)
+            db.session.flush()
+
+            tasks = sorted(stage.tasks, key=lambda t: t.order)
+            for j, task in enumerate(tasks):
+                if sr_status == "Cancelled":
+                    tr_status = "Cancelled"
+                elif sr_status == "Failed":
+                    tr_status = "Failed" if j == 0 else "Cancelled"
+                elif sr_status == "Warning" and j == len(tasks) - 1:
+                    tr_status = "Warning"
+                else:
+                    tr_status = "Succeeded"
+
+                db.session.add(
+                    TaskRun(
+                        id=resource_id("trun"),
+                        task_id=task.id,
+                        stage_run_id=sr.id,
+                        status=tr_status,
+                        return_code=(
+                            0
+                            if tr_status in ("Succeeded", "Warning")
+                            else (1 if tr_status == "Failed" else None)
+                        ),
+                        logs=_logs.get(tr_status, ""),
+                        context_env=json.dumps(
+                            {
+                                "CDT_COMMIT_SHA": commit,
+                                "CDT_PIPELINE": pipeline.name,
+                                "CDT_STAGE": stage.name,
+                                "CDT_TASK": task.name,
+                            }
+                        ),
+                        started_at=sr.started_at + timedelta(seconds=j * 100),
+                        finished_at=sr.started_at + timedelta(seconds=j * 100 + 95),
+                    )
+                )
+        db.session.flush()
+    print(f"  Created pipeline runs for: {pipeline.name}")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -3722,6 +5259,8 @@ def _print_summary(product_id: str) -> None:
     print(f"  Agent Pools    : {AgentPool.query.count()}")
     print(f"  Plugins        : {Plugin.query.count()}")
     print(f"  Feature Toggles: {FeatureToggle.query.count()}")
+    print(f"  Framework Controls: {FrameworkControl.query.count()}")
+    print(f"  Pipeline Templates: {PipelineTemplate.query.count()}")
 
 
 if __name__ == "__main__":
